@@ -1,13 +1,19 @@
 import json
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.channels.base import ChannelPort, InboundMessage
+from app.channels.base import ChannelError, ChannelPort, InboundMessage
 from app.channels.inbound import InMemoryDedupeStore
-from app.channels.router import get_channel, get_dedupe_store, get_inbound_handler
+from app.channels.router import (
+    MAX_BODY_BYTES,
+    get_channel,
+    get_dedupe_store,
+    get_inbound_handler,
+)
 from app.config import Settings, get_settings
 from app.main import app
 from tests.conftest import FIXTURES, sign
@@ -137,3 +143,58 @@ def test_health_boots_without_any_kapso_config() -> None:
     get_channel.cache_clear()
     with TestClient(app) as test_client:
         assert test_client.get("/health").status_code == 200
+
+
+def test_oversized_declared_body_is_rejected_before_the_signature_check(
+    client: TestClient, handler: RecordingHandler
+) -> None:
+    raw = b"x" * (MAX_BODY_BYTES + 1)
+
+    response = post(client, raw, signature=sign(raw, SECRET))
+
+    assert response.status_code == 413
+    assert handler.handled == []
+
+
+def test_oversized_body_without_content_length_is_rejected_while_reading(
+    client: TestClient, handler: RecordingHandler
+) -> None:
+    def chunks() -> Iterator[bytes]:
+        for _ in range(5):
+            yield b"x" * (MAX_BODY_BYTES // 4)
+
+    response = client.post(
+        "/webhooks/whatsapp",
+        content=chunks(),  # an iterator is sent chunked, with no Content-Length
+        headers={"x-webhook-event": EVENT, "x-webhook-signature": "irrelevant"},
+    )
+
+    assert response.status_code == 413
+    assert handler.handled == []
+
+
+def test_a_body_at_the_cap_is_still_read(client: TestClient) -> None:
+    raw = b"x" * MAX_BODY_BYTES
+
+    assert post(client, raw, signature=sign(raw, "wrong")).status_code == 401
+
+
+def test_a_failing_handler_is_logged_with_the_message_id_and_no_payload(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    class FailingHandler:
+        async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
+            raise ChannelError("kapso 500: boom")
+
+    app.dependency_overrides[get_inbound_handler] = FailingHandler
+    raw = raw_fixture("text")
+
+    with caplog.at_level(logging.ERROR, logger="app.channels.router"):
+        response = post(client, raw, signature=sign(raw, SECRET))
+
+    assert response.status_code == 200
+    failure = next(r for r in caplog.records if r.levelno == logging.ERROR)
+    assert failure.getMessage() == (
+        "inbound handling failed: text id=wamid.FAKE0000000000000000000001"
+    )
+    assert "hola bot" not in caplog.text

@@ -9,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 
 from app.config import Settings, get_settings
 
-from .base import ChannelPort
+from .base import ChannelPort, InboundMessage
 from .factory import build_channel
 from .inbound import DedupeStore, EchoHandler, InboundHandler, InMemoryDedupeStore, mask
 from .kapso_webhook import MESSAGE_RECEIVED_EVENT, parse_message, verify_signature
@@ -44,6 +44,33 @@ async def lifespan(_: Any) -> AsyncIterator[None]:
 
 router = APIRouter(lifespan=lifespan)
 
+# Real Kapso message payloads are a few KiB. The cap applies before the signature check, so an
+# unauthenticated caller can't make us buffer an arbitrarily large body.
+MAX_BODY_BYTES = 256 * 1024
+
+
+async def read_capped_body(request: Request) -> bytes:
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="payload too large")
+    # The header can be missing (chunked) or wrong, so the cap is enforced while reading too.
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="payload too large")
+    return bytes(body)
+
+
+async def run_handler(
+    handler: InboundHandler, message: InboundMessage, channel: ChannelPort
+) -> None:
+    # Runs after the 200 went out, so nobody else would see a failure: log it with the ids only.
+    try:
+        await handler.handle(message, channel)
+    except Exception:
+        logger.exception("inbound handling failed: %s id=%s", message.kind, message.message_id)
+
 
 @router.post("/webhooks/whatsapp")
 async def whatsapp_webhook(
@@ -57,7 +84,7 @@ async def whatsapp_webhook(
     x_webhook_signature: Annotated[str | None, Header()] = None,
     x_idempotency_key: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
-    raw_body = await request.body()
+    raw_body = await read_capped_body(request)
     if not verify_signature(raw_body, x_webhook_signature, settings.kapso_webhook_secret or ""):
         raise HTTPException(status_code=401, detail="invalid signature")
 
@@ -79,5 +106,5 @@ async def whatsapp_webhook(
     logger.info(
         "queued inbound %s id=%s from=%s", message.kind, message.message_id, mask(message.sender)
     )
-    background_tasks.add_task(handler.handle, message, channel)
+    background_tasks.add_task(run_handler, handler, message, channel)
     return {"status": "ok"}
