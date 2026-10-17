@@ -35,8 +35,8 @@ Handling rules, whichever provider sits behind the port:
 
 - **Verify the signature** on the raw bytes, before JSON parsing: Kapso signs its webhooks ([security](https://docs.kapso.ai/docs/platform/webhooks/security.md); header and algorithm to confirm in the first-hour test); Meta direct uses `X-Hub-Signature-256` ([Plan B](#plan-b-meta-cloud-api-direct)).
 - **Return 200 fast.** Providers retry on slow or failed responses (Kapso documents its retries and ordering in [advanced](https://docs.kapso.ai/docs/platform/webhooks/advanced.md)), and that produces duplicates. Dedupe on the WhatsApp message id (unique `messages.external_id`).
-- **Normalize** every payload into one `InboundMessage` (text, button reply, image with caption, video, unsupported). Whether Kapso forwards Meta's payload as-is is not verified; if it does, the Meta shape below applies.
-- **Media download:** photos the Owner sends are *Must* (F1.5: they are how the Owner asks for a post), videos *Could*. They become Brand assets with `source = 'whatsapp'`; stream videos to Storage instead of holding them in memory. A photo's `caption` is the Owner's request or hint: keep it with the asset and pass it to the orchestrator (see the photo debounce in [agents.md](agents.md#tools)). How Kapso exposes media (a download URL, Meta's media id, or its own endpoint) is not verified; `ChannelPort.download_media` hides the difference ([open question](../open-questions.md#whatsapp-through-kapso-first-hour-test)).
+- **Normalize** every payload into one `InboundMessage` (text, button reply, image with caption, video, audio, unsupported). An audio message carries its media id, MIME type, size and Kapso's transcript when present (`message.kapso.transcript.text`, [message events](https://docs.kapso.ai/docs/platform/webhooks/message-events.md)); see [Speech-to-text](#speech-to-text). Whether Kapso forwards Meta's payload as-is is not verified; if it does, the Meta shape below applies.
+- **Media download:** photos the Owner sends are *Must* (F1.5: they are how the Owner asks for a post), videos *Could*. They become Brand assets with `source = 'whatsapp'`; stream videos to Storage instead of holding them in memory. A photo's `caption` is the Owner's request or hint: keep it with the asset and pass it to the orchestrator (see the photo debounce in [agents.md](agents.md#tools)). Kapso documents a two-step download: `GET https://api.kapso.ai/meta/whatsapp/v24.0/{media_id}?phone_number_id=...` with `X-API-Key` returns `mime_type`, `file_size` and a `download_url` with the token built in, valid about 4 minutes ([get media URL](https://docs.kapso.ai/api/meta/whatsapp/media/get-media-url.md), read 2026-10-17). Fetch it right away and check the status (Meta's `url` without Meta's token returns a 401 body). To confirm in the first-hour test; `ChannelPort.download_media` hides the difference ([open question](../open-questions.md#whatsapp-through-kapso-first-hour-test)).
 - **24-hour window:** free-form messages can only be sent within 24 h of the Owner's last message; outside it only approved templates go through (post-MVP; WhatsApp's rule, so it holds through Kapso too). Job results arrive within minutes, so they are fine. **Scheduled posts are not**: the `published` / `publish_failed` notification for a post scheduled more than 24 h after the Owner's last message will be rejected. MVP behavior: send it anyway, and if it is rejected, log it and keep the status visible on the dashboard; the Owner sees it next time they write (the orchestrator mentions newly published posts). The demo only schedules within the window.
 
 ### Plan B: Meta Cloud API direct
@@ -100,7 +100,8 @@ Receiving: `GET /webhooks/whatsapp` answers Meta's verification (`hub.mode == "s
     // or "type": "interactive", "interactive": {"type": "button_reply", "button_reply": {"id": "post_approve:7f3c", "title": "Aprobar"}}
     // or "type": "image", "image": {"id": "<media_id>", "mime_type": "image/jpeg", "caption": "..."}
     // or "type": "video", "video": {"id": "<media_id>", "mime_type": "video/mp4", "caption": "..."}  → Brand asset (Could)
-    // or "type": "audio" | "sticker" | "document" | "location" → unsupported_media
+    // or "type": "audio", "audio": {"id": "<media_id>", "mime_type": "audio/ogg; codecs=opus", "voice": true}  → voice note (no transcript: always Gemini)
+    // or "type": "sticker" | "document" | "location" → unsupported_media
   }],
   "statuses": [{"id": "wamid...", "status": "delivered", "recipient_id": "..."}]  // update messages.status
 }
@@ -206,7 +207,7 @@ Could: only needed for the Could video work (video analysis, Reels). Claude read
 - `whatsapp_preview`: see [Reel previews](#sending).
 - Runs inside `analyze_asset` on the downloaded file in a temp dir; delete it afterwards. A 300 MB video takes a few seconds to probe and a few more to cut frames on the backend's CPU; the preview transcode is the slow part (tens of seconds), so it runs after the analysis is saved.
 - Docker: when video work starts, install `ffmpeg` from the distro packages in the final stage of the image (per [`.claude/rules/docker.md`](../../.claude/rules/docker.md)). The Must image doesn't need it.
-- No audio transcription in the MVP (see [Optional](#optional-could)).
+- No transcription of a video's audio in the MVP; voice notes are transcribed (see [Speech-to-text](#speech-to-text)).
 
 ## Image generation
 
@@ -228,6 +229,23 @@ Post images are generated by a third-party AI image service, never composed by t
 - To confirm on the first real call ([ADR 0019](../decisions/0019-image-provider-gemini.md)): 4:5 at 2K on `gemini-nano-banana-2.1`, latency per image, and that the crop keeps the product in frame.
 - Docker: no browser, no fonts; Pillow is already a dependency.
 
-## Optional (Could)
+## Speech-to-text
 
-- **Voice notes**: WhatsApp audio is OGG/Opus (how Kapso hands us the file is not verified, see [Receiving](#receiving)). Transcribe with `faster-whisper` (`small` model, CPU, `language="es"`) inside the backend container, then treat the transcript as text. Adds ~500 MB to the image and a few seconds per note; only if everything else is done. The same model could transcribe what the Owner says in their videos and feed it to the Asset Analyst (post-MVP).
+Voice notes are Must (F1.7, [ADR 0021](../decisions/0021-voice-notes-kapso-transcript-gemini-fallback.md)). Claude takes no audio, so the inbound handler turns each voice note into text before routing; after that it is handled exactly like a text message. Facts and alternatives: [research/voice-notes.md](../research/voice-notes.md) (read 2026-10-17).
+
+Order, in the inbound handler after dedupe:
+
+1. **Kapso's transcript.** If `InboundMessage.provider_transcript` (from `message.kapso.transcript.text`) is non-empty, use it. When Kapso fills it in, and how well it handles Rioplatense Spanish, are to confirm in the first-hour test.
+2. **Gemini fallback** (`TranscriberPort`, `app/transcription/`, selected by `TRANSCRIBE_FALLBACK`): if the audio is over `MAX_AUDIO_MB`, send `audio_too_long` and stop. Otherwise `ChannelPort.download_media(media_id)`, then one `google-genai` call to `TRANSCRIBE_MODEL` with the audio inline (`audio/ogg` and `audio/opus` are accepted, 20 MB per request; [Gemini audio](https://ai.google.dev/gemini-api/docs/audio)) and a fixed prompt: verbatim transcription in Rioplatense Spanish, no summary, no answer to what is said, empty output if there is no speech. Log the call's usage in `agent_runs` (`agent = 'transcribe'`; 32 tokens per second of audio).
+3. **Nothing usable** (both empty, or the call failed): send `audio_unclear` and don't run the orchestrator.
+
+| Adapter | When |
+|---|---|
+| `gemini` | Default fallback, and the only path on plan B (Meta sends no transcript) |
+| `none` | Only Kapso's transcript; a voice note without one gets `audio_unclear` |
+| `mock` | Local dev and tests: returns a fixed transcript |
+
+- Store the message as `type = 'audio'` with the transcript in `messages.text` ([data-model.md](data-model.md)); don't keep the audio bytes.
+- Same paid-tier rule as images: only call Gemini from a project with billing linked ([ADR 0019](../decisions/0019-image-provider-gemini.md)).
+- Inbound only: the bot replies in text. No speech synthesis.
+- Not covered: the audio track of the Owner's videos (post-MVP, [open questions](../open-questions.md#catalog-content-and-reels-could)).

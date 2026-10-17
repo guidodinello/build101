@@ -252,7 +252,7 @@ If several Posts are `pending_approval`, the orchestrator asks which one, showin
 | "¿Dónde veo todo?" / "link" (once `active`) | Bot sends a fresh dashboard link (Flow 11; read-only dashboard is Should) |
 | "Gracias" / small talk | One short, warm line ("¡De nada! Acá estoy cuando me necesites 🙌"); no tool call |
 | Brand change in chat ("ahora tenemos envío gratis a todo el país") | `update_brand_brain(change)` → Brand Brain new version → orchestrator confirms in one short line |
-| Voice note | MVP: `unsupported_media` (Could: transcribe) |
+| Voice note | Transcribed and handled like a text message ([ADR 0021](../decisions/0021-voice-notes-kapso-transcript-gemini-fallback.md)); `audio_unclear` if no speech comes through, `audio_too_long` over the size cap |
 | Sticker, location, document | `unsupported_media` (Could: a price-list PDF or photo becomes Products to confirm, F8.8) |
 | Out-of-scope request ("¿me hacés una factura?") | Explain what it does; no tool call |
 | Repeated webhook delivery | Ignored (idempotency on `wa_message_id`) |

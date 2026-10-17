@@ -2,14 +2,13 @@
 
 ## Phase 0: Hackathon demo (now)
 
-One live loop, scoped by [ADR 0016](decisions/0016-demo-scope-one-post.md): a short onboarding (WhatsApp + the web form), then the owner sends a photo and asks for a post on WhatsApp, approves the branded preview by tapping or writing "subilo", and it is published on Instagram. Script: [product/demo-script.md](product/demo-script.md); scope and priorities: [product/mvp.md](product/mvp.md). The earlier plan is kept in [demo-plan.md](demo-plan.md) (superseded).
+One live loop, scoped by [ADR 0016](decisions/0016-demo-scope-one-post.md): a short onboarding (WhatsApp + the web form), then the owner sends a photo and asks for a post on WhatsApp, approves the branded preview by tapping or writing "subilo", and it is published on Instagram. The owner can also talk in voice notes, which the bot reads as their transcript ([ADR 0021](decisions/0021-voice-notes-kapso-transcript-gemini-fallback.md)). Script: [product/demo-script.md](product/demo-script.md); scope and priorities: [product/mvp.md](product/mvp.md). The earlier plan is kept in [demo-plan.md](demo-plan.md) (superseded).
 
 ## Phase 1: Pilot with one owner (2–4 weeks)
 
 - Run it on the pilot owner's real account every day; log every correction the owner makes
 - Finish the MVP's *Should* items: weekly plan on request and every Monday with Uruguayan commercial dates, ideas on request, revisions, scheduling by writing, matching the owner's style, read-only dashboard ([ADR 0016](decisions/0016-demo-scope-one-post.md))
 - Replies to comments and DMs, sales flow and a WhatsApp alert to the owner on each sale, through our own Meta app with Instagram Login ([ADR 0013](decisions/0013-focus-marketing.md), [ADR 0015](decisions/0015-instagram-login.md))
-- Voice notes transcribed ([ADR 0020](decisions/0020-whatsapp-via-kapso.md); how Kapso hands us the audio is still to verify)
 - Brand voice learns from corrections, not only from past posts
 - Catalog, content uploads and Offers in the dashboard; Reels v1 from the owner's own videos ([ADR 0012](decisions/0012-catalog-content-dashboard-reels.md))
 - From the second design pass ([design/mockups/](design/mockups/README.md)), beyond the MVP:

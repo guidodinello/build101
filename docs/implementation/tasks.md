@@ -26,7 +26,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 ### T03: Deploy + webhook verification · AB · M
 
 - Read: [ADR 0017](../decisions/0017-backend-host-railway.md), [integrations.md § Kapso setup](../architecture/integrations.md#kapso-setup-hour-1)
-- Build: backend deployed on Railway (root directory `backend/`, one replica, Railway domain) with env vars; Kapso webhook pointed at `https://<backend>/webhooks/whatsapp` (a stub that logs the raw payload and headers and returns `200`). Run the Kapso first-hour test ([open questions](../open-questions.md#whatsapp-through-kapso-first-hour-test)) and record the answers there.
+- Build: backend deployed on Railway (root directory `backend/`, one replica, Railway domain) with env vars; Kapso webhook pointed at `https://<backend>/webhooks/whatsapp` (a stub that logs the raw payload and headers and returns `200`). Run the Kapso first-hour test ([open questions](../open-questions.md#whatsapp-through-kapso-first-hour-test)) and record the answers there, including a Spanish voice note: is `message.kapso.transcript.text` in the first webhook, and is it right?
 - Done when: `/health` is reachable over HTTPS on the Railway domain; a message sent to the Kapso number shows up in the backend logs with its payload and signature header. If it doesn't within the hour, switch to plan B (Meta direct, [ADR 0020](../decisions/0020-whatsapp-via-kapso.md)).
 
 ## H1–6
@@ -166,8 +166,15 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 
 ### T28: WhatsApp polish · B · M
 
-- Build: post preview as interactive with image header (fallback to text + short body when > 1,024 chars); variations on a real phone (T26); inbound images → `brand_assets` (`source = 'whatsapp'`, caption kept as the owner hint) + `analyze_asset` + the T49 debounce; unsupported media reply (audio, video, sticker, document while video is Could).
+- Build: post preview as interactive with image header (fallback to text + short body when > 1,024 chars); variations on a real phone (T26); inbound images → `brand_assets` (`source = 'whatsapp'`, caption kept as the owner hint) + `analyze_asset` + the T49 debounce; unsupported media reply (video, sticker, document, location while video is Could; audio is T40).
 - Done when: Flow 5 and Flow 9 look right on a real phone; 2 photos + caption sent from a real phone reach the orchestrator as one request.
+
+### T40: Voice notes · B · M
+
+- Read: [ADR 0021](../decisions/0021-voice-notes-kapso-transcript-gemini-fallback.md), [integrations.md § Speech-to-text](../architecture/integrations.md#speech-to-text), [research/voice-notes.md](../research/voice-notes.md), T03's first-hour test results
+- Build: `InboundMessage` audio kind (media id, MIME, size, Kapso's transcript); `app/transcription/` (`TranscriberPort`, `gemini.py`, `mock.py`, `TRANSCRIBE_FALLBACK`); in `inbound.py`, resolve the transcript (Kapso → size check → download + Gemini → `audio_unclear`), store `type = 'audio'` with the transcript as `text`, then route it like text (onboarding router, orchestrator, T49 photo debounce); `[audio]` prefix and the ambiguous-number rule in the orchestrator prompt; `audio_unclear` and `audio_too_long` copy; simulator `{type: "audio", transcript}`.
+- Done when: a Spanish voice note from a real phone asking for a post ("me llegó esta mesa, armame algo") after a photo gets the same result as the written request; a silent note gets `audio_unclear`.
+- Tests: fixture Kapso payloads with and without a transcript; fallback order with the mock transcriber; empty transcript → `audio_unclear`; over `MAX_AUDIO_MB` → `audio_too_long`; a `live` test that transcribes a sample `.ogg` with Gemini.
 
 ### T31: Quality checks · A · M
 
@@ -251,11 +258,10 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 
 - Brand Brain correction in chat (F2.6, revise mode of T12). · A · C
 - Plan changes from free text (F3.3). · A · C
-- T40: Voice notes with faster-whisper. · C
 - T41: Facebook cross-post (uses the second Zernio slot). · C
 - T42: Brand Brain correction via web. · C
 - T43: OpenAI fallback adapter (`app/imagegen/openai.py`, `gpt-image-2.5-sunburst` through `/v1/images/edits`, size `1088x1360`) behind `ImageGenPort` ([ADR 0019](../decisions/0019-image-provider-gemini.md)). · A · C, or M as soon as Gemini fails the first test or blocks on stage. Needs `OPENAI_API_KEY` and possibly Organization Verification.
 
 ## Tests (minimum bar)
 
-Unit tests for deterministic logic only (fast, no network): state machine transitions (onboarding, post), button router guards, webhook signature + dedupe, free-text approval (`explicit_approval`: one pending post, several, praise without instruction), photo debounce batching, variation picking (`pick_variation`, approval blocked before a pick), quality checks, image brief validation (incl. candidate membership and the fixed prompt rules), resize to 1080×1350, upload validation (kind, type, size, 15-photo cap). Should and Could tasks add their own (plan state machine, time parsing, `reel_suitable` rules, archived material hidden from agents). Live LLM and image-service tests are marked `@pytest.mark.live` and excluded by default. No frontend tests.
+Unit tests for deterministic logic only (fast, no network): state machine transitions (onboarding, post), button router guards, webhook signature + dedupe, free-text approval (`explicit_approval`: one pending post, several, praise without instruction), photo debounce batching, voice-note transcript resolution, variation picking (`pick_variation`, approval blocked before a pick), quality checks, image brief validation (incl. candidate membership and the fixed prompt rules), resize to 1080×1350, upload validation (kind, type, size, 15-photo cap). Should and Could tasks add their own (plan state machine, time parsing, `reel_suitable` rules, archived material hidden from agents). Live LLM and image-service tests are marked `@pytest.mark.live` and excluded by default. No frontend tests.

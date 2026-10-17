@@ -10,3 +10,4 @@ Cite a source next to every claim, with the date read for anything that changes 
 | [social-publishing-apis.md](social-publishing-apis.md) | Unified APIs to publish to Instagram for the Owner (Zernio, Upload-Post, Ayrshare, ...) | 2026-10-17 |
 | [image-generation-providers.md](image-generation-providers.md) | AI image generation APIs for themed post images from the Owner's photos (Gemini Nano Banana, OpenAI GPT Image, FLUX, fal/Replicate); supports ADR 0018 | 2026-10-17 |
 | [media-uploads.md](media-uploads.md) | Storing large photos and videos (Supabase, Vercel limits), what Claude can read (no video/audio), publishing Reels and carousels (Zernio, Instagram) | 2026-10-17 |
+| [voice-notes.md](voice-notes.md) | Understanding the Owner's WhatsApp voice notes: Kapso's transcript and media download, speech-to-text options (Gemini, faster-whisper, OpenAI); supports ADR 0021 | 2026-10-17 |

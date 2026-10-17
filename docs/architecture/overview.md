@@ -100,7 +100,7 @@ flowchart TB
 1. **Deterministic where it matters, LLM where it helps.** Button taps, onboarding steps, approval, and publishing are plain code. The LLM handles free text, planning, writing and design choices.
 2. **Agents are functions, not processes.** Each specialist is an async function: typed input (Pydantic) → one Claude call with structured output → typed output. Only the orchestrator runs a tool-use loop.
 3. **Long work runs in background jobs.** The webhook returns `200` in < 1 s. The orchestrator's tools *enqueue* jobs and return immediately; jobs send their own WhatsApp messages when they finish.
-4. **Ports for everything external.** `ChannelPort` (WhatsApp through Kapso / Simulator), `PublisherPort` (Provider / Mock), `ImageGenPort` (Gemini / OpenAI / Mock). Switching is an env var, which is also our demo fallback.
+4. **Ports for everything external.** `ChannelPort` (WhatsApp through Kapso / Simulator), `PublisherPort` (Provider / Mock), `ImageGenPort` (Gemini / OpenAI / Mock), `TranscriberPort` (Gemini / Mock). Switching is an env var, which is also our demo fallback.
 5. **Per-business serialization.** Inbound messages for the same business are processed one at a time (an in-process `asyncio.Lock` per business ID). Different businesses run concurrently.
 6. **Everything is logged.** Every LLM call writes an `agent_runs` row (agent, input, output, tokens, latency, error). It's our debugger during the hackathon.
 
@@ -121,7 +121,11 @@ sequenceDiagram
     W->>W: verify the webhook signature
     W->>H: schedule handle(payload) as background task
     W-->>M: 200 OK (immediately)
-    H->>H: dedupe by wa_message_id, store message, mark as read
+    H->>H: dedupe by wa_message_id, mark as read
+    opt voice note
+        H->>H: Kapso transcript, else download + Gemini transcribe
+    end
+    H->>H: store message (a voice note as its transcript)
     H->>R: route(business, message)
     alt interactive button reply
         R->>J: deterministic handler (e.g. approve_post, publish_post)
@@ -227,6 +231,7 @@ build101/
 │   │   ├── channels/         # base.py (ChannelPort), whatsapp.py (Kapso; Meta direct on plan B), simulator.py
 │   │   ├── publishing/       # base.py (PublisherPort), zernio.py, mock.py
 │   │   ├── imagegen/         # base.py (ImageGenPort), gemini.py, openai.py, mock.py
+│   │   ├── transcription/    # base.py (TranscriberPort), gemini.py, mock.py (voice notes)
 │   │   ├── media/            # video.py (ffprobe, keyframes, WhatsApp preview), images.py (HEIC, palette, resize to 1080×1350)
 │   │   ├── llm/              # client.py (wrapper + agent_runs logging)
 │   │   ├── storage.py

@@ -21,7 +21,7 @@ Facts behind the Catalog and Brand asset upload work: where large photos and vid
 - The Messages API takes text, images and documents; **no video or audio** content blocks. [Messages API](https://platform.claude.com/docs/en/api/messages/create), [Files API](https://platform.claude.com/docs/en/build-with-claude/files)
 - Images: JPEG, PNG, GIF (first frame), WebP; up to 100 per request on 200k-context models (600 on others); 8000×8000 px and 10 MB each; 32 MB per request. Above 20 images per request keep each side ≤ 2000 px. [Vision](https://platform.claude.com/docs/en/build-with-claude/vision)
 - Video understanding: no official Anthropic guide. The common community pattern is extracting keyframes with ffmpeg and sending them as images, plus a separate transcript ([example](https://github.com/jordanrendric/claude-video-vision)). Frame extraction has to run in our backend: the code execution tool has no ffmpeg and no internet. [Code execution tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/code-execution-tool)
-- Audio: Anthropic has no speech-to-text endpoint (none found). Transcription needs `faster-whisper` in the backend container (already the optional plan in [architecture/integrations.md](../architecture/integrations.md)) or a second provider.
+- Audio: Anthropic has no speech-to-text endpoint (none found). Transcription needs `faster-whisper` in the backend container or a second provider. For voice notes: Kapso's transcript first, Gemini as fallback ([voice-notes.md](voice-notes.md), [ADR 0021](../decisions/0021-voice-notes-kapso-transcript-gemini-fallback.md)).
 
 ## Publishing video and carousels (Zernio, Instagram)
 

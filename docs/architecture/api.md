@@ -158,7 +158,7 @@ Used by `/dev/chat` (the WhatsApp simulator) and for local testing. The simulato
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
 | POST | `/dev/sim/businesses` | `{phone?: str}` | `{business_id, phone}`: creates or resets a simulator business (`sim-<random>`) |
-| POST | `/dev/sim/{phone}/messages` | `{type: "text", text}` or `{type: "button_reply", button_id, title}` or `{type: "image" \| "video", url}` | `202` |
+| POST | `/dev/sim/{phone}/messages` | `{type: "text", text}` or `{type: "button_reply", button_id, title}` or `{type: "image" \| "video", url}` or `{type: "audio", transcript}` (a voice note with a provider transcript; empty to exercise the fallback) | `202` |
 | GET | `/dev/sim/{phone}/messages?after=<iso>` | — | `[SimMessage]` (both directions, ascending) |
 | POST | `/dev/businesses/{id}/reset` | `{to_state?: "new" \| "active"}` | resets conversation state (for rehearsals) |
 | POST | `/dev/seed/demo` | — | loads the demo business seed (pre-generated Brand Brain + photos; the stage fallback if live brand generation is slow) |
@@ -220,6 +220,21 @@ class ChannelPort(Protocol):
     async def download_media(self, media_id: str) -> tuple[bytes, str]: ...         # (bytes, mime)
 
 def channel_for(business: Business) -> ChannelPort: ...   # whatsapp | simulator
+
+class InboundAudio(BaseModel):         # InboundMessage kind "audio" (voice note, ADR 0021)
+    media_id: str
+    mime_type: str                     # audio/ogg (Opus)
+    byte_size: int | None
+    provider_transcript: str | None    # Kapso's message.kapso.transcript.text; None on plan B
+
+# app/transcription/base.py  (ADR 0021; TRANSCRIBE_FALLBACK = gemini | none | mock)
+class Transcript(BaseModel):
+    text: str                          # empty when there is no speech
+    source: Literal["kapso", "gemini", "mock"]
+    usage: dict                        # provider usage, logged to agent_runs (agent = "transcribe")
+
+class TranscriberPort(Protocol):
+    async def transcribe(self, audio: bytes, mime: str) -> Transcript: ...
 
 # app/publishing/base.py
 class PublishResult(BaseModel):

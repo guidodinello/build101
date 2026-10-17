@@ -21,6 +21,11 @@ The chat app through which the Owner talks to the assistant (e.g. WhatsApp, Tele
 _Avoid_: Platform, integration, interface
 _Status_: draft
 
+**Voice note**:
+An audio message the Owner records in the Channel, which the assistant reads as its transcript.
+_Avoid_: Audio, voice message, voice (reserved for the Brand Brain's brand voice)
+_Status_: draft
+
 ## Marketing agency
 
 **Agency**:

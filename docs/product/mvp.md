@@ -31,7 +31,7 @@ Priority uses MoSCoW for the 24h build: **Must** = the demo fails without it; **
 | F1.4 | Orchestrator (LLM with tools) answers free text and routes to agents in Rioplatense Spanish | Must |
 | F1.5 | Receive photos sent in the chat and store them as Brand assets (videos in the chat: Could) | Must |
 | F1.6 | "Typing"/progress messages for long jobs ("Lo estoy armando, dame un minuto ⏳") | Must |
-| F1.7 | Voice notes transcribed (Whisper) | Could |
+| F1.7 | Voice notes transcribed (Kapso's transcript, Gemini as fallback) and handled like text ([ADR 0021](../decisions/0021-voice-notes-kapso-transcript-gemini-fallback.md)) | Must |
 | F1.8 | Proactive messages outside the 24h window (approved templates) | Won't (demo) |
 | F1.9 | Match the owner's writing style: short replies to short messages, fuller ones to long messages | Should |
 | F1.10 | Open chat after onboarding: the bot asks "¿En qué te puedo ayudar hoy?" instead of offering the weekly plan | Must |

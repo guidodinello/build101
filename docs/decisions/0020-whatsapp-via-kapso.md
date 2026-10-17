@@ -24,7 +24,7 @@ Not verified yet (a teammate is testing Kapso now; see [open questions](../open-
 - Connect the Owner's WhatsApp through **Kapso**, calling its **REST API** from the Python backend with `httpx`, behind the existing `ChannelPort`. A Kapso adapter replaces the planned direct Meta adapter; nothing outside the adapter knows about Kapso.
 - The **web simulator** stays the stage fallback and the dev channel.
 - **Meta Cloud API directly** is plan B: if Kapso fails the first-hour test, we build the Meta adapter documented in [integrations.md](../architecture/integrations.md#plan-b-meta-cloud-api-direct) behind the same port.
-- Kept from ADR 0014: the bot is task-specific (it runs the Business's marketing), not an open-ended assistant, and off-topic requests get a polite redirect. Voice notes are transcribed by us if F1.7 (*Could*) is built, since WhatsApp doesn't transcribe them; how Kapso hands us the audio file is not known yet.
+- Kept from ADR 0014: the bot is task-specific (it runs the Business's marketing), not an open-ended assistant, and off-topic requests get a polite redirect. Voice notes are transcribed by us if F1.7 (*Could*) is built, since WhatsApp doesn't transcribe them; how Kapso hands us the audio file is not known yet. Revised by [ADR 0021](0021-voice-notes-kapso-transcript-gemini-fallback.md): voice notes are Must, Kapso's webhook carries a transcript, and Gemini transcribes when it doesn't.
 - The same inbound rules as before: verify the webhook signature, return `200` fast, dedupe by the WhatsApp message id.
 
 ## Consequences

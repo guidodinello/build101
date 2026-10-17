@@ -31,6 +31,8 @@
 | `IMAGE_GEN` | `gemini` \| `openai` \| `mock` | Image service ([ADR 0019](../decisions/0019-image-provider-gemini.md)); `openai` is the fallback, `mock` the dev and stage fallback |
 | `GEMINI_API_KEY` | `...` | From a Google project with billing linked: unpaid use trains on the images |
 | `GEMINI_IMAGE_MODEL` | `gemini-nano-banana-2.1` | |
+| `TRANSCRIBE_FALLBACK` | `gemini` \| `none` \| `mock` | Voice notes without Kapso's transcript ([ADR 0021](../decisions/0021-voice-notes-kapso-transcript-gemini-fallback.md)) |
+| `TRANSCRIBE_MODEL` | `gemini-3.8-flash` | A Gemini Flash model that takes audio; confirm on the first real call |
 | `OPENAI_API_KEY` | `sk-...` | Fallback only; the OpenAI org may need Organization Verification |
 | `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst` | Fallback only |
 | `PUBLISHER` | `zernio` \| `mock` | Demo fallback switch |
@@ -41,6 +43,7 @@
 | `DEV_TOKEN` | random | Header `X-Dev-Token` |
 | `MAX_CONCURRENT_JOBS` | `4` | |
 | `MAX_PHOTO_MB` | `10` | Rejected before the signed upload URL is issued |
+| `MAX_AUDIO_MB` | `3` | Voice notes over it get `audio_too_long` (~25 min of WhatsApp Opus) |
 | `MAX_VIDEO_MB` | `300` | Could (video work). Must not exceed the Supabase Storage global file size limit |
 | `DASHBOARD_LINK_TTL_DAYS` | `7` | Should (read-only dashboard). Dashboard magic links expire after this |
 
@@ -93,7 +96,7 @@ Real WhatsApp against a local backend: `cloudflared tunnel --url http://localhos
 ```bash
 cd backend
 uv run pytest                   # unit tests (no network)
-uv run pytest -m live           # hits Claude and the image service; needs ANTHROPIC_API_KEY, GEMINI_API_KEY
+uv run pytest -m live           # hits Claude, the image service and transcription; needs ANTHROPIC_API_KEY, GEMINI_API_KEY
 uv run ruff check . && uv run ruff format --check .
 
 cd frontend

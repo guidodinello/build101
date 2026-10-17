@@ -287,7 +287,7 @@ create table messages (
   external_id     text,                               -- wa_message_id (dedupe key for inbound)
   type            text not null,                      -- text | image | interactive | button_reply | audio | ...
   text            text,                               -- normalized text used in the LLM history
-  payload         jsonb not null default '{}',        -- raw content (buttons, media ids, image url)
+  payload         jsonb not null default '{}',        -- raw content (buttons, media ids, image url); audio: media_id, mime_type, byte_size, transcript_source
   status          text,                               -- outbound: sent | delivered | read | failed
   created_at      timestamptz not null default now(),
   constraint uq_messages_external_id unique (external_id),
@@ -318,7 +318,7 @@ create table agent_runs (
   id                uuid primary key default gen_random_uuid(),
   business_id       uuid constraint agent_runs_business_id_fkey references businesses(id) on delete cascade,
   job_id            uuid constraint agent_runs_job_id_fkey references jobs(id) on delete set null,
-  agent             text not null,                    -- orchestrator | asset_analyst | brand_strategist | ... | image_gen (provider usage, for cost per variation)
+  agent             text not null,                    -- orchestrator | asset_analyst | brand_strategist | ... | image_gen (provider usage, for cost per variation) | transcribe (Gemini voice notes)
   model             text not null,
   effort            text,
   input             jsonb,
