@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from dataclasses import dataclass, field
 
 import pytest
@@ -21,6 +23,7 @@ class Call:
 @dataclass(slots=True)
 class FakeImageGen:
     failures: list[Exception] = field(default_factory=list)
+    fail_calls: dict[int, Exception] = field(default_factory=dict)
     first_color: int = 0
     calls: list[Call] = field(default_factory=list)
 
@@ -30,6 +33,9 @@ class FakeImageGen:
         self.calls.append(Call(prompt, style_image))
         if self.failures:
             raise self.failures.pop(0)
+        if len(self.calls) in self.fail_calls:
+            raise self.fail_calls[len(self.calls)]
+        await asyncio.sleep(0)
         color = COLORS[(self.first_color + len(self.calls)) % len(COLORS)]
         return GeneratedImage(
             data=make_image((1856, 2304), color=color, format="PNG"),
@@ -117,6 +123,21 @@ async def test_generate_does_not_retry_when_the_provider_is_unavailable(
     with pytest.raises(ImageGenUnavailable):
         await CarouselGenerator(image_gen).generate(copy, brief, REFERENCES)
     assert len(image_gen.calls) == 1
+
+
+async def test_generate_finishes_the_other_slides_and_logs_their_usage_when_one_fails(
+    carousel_spec: tuple[CarouselCopy, CarouselBrief], caplog: pytest.LogCaptureFixture
+) -> None:
+    copy, brief = carousel_spec
+    image_gen = FakeImageGen(fail_calls={3: ImageGenUnavailable("503")})
+
+    with caplog.at_level(logging.INFO), pytest.raises(ImageGenUnavailable):
+        await CarouselGenerator(image_gen).generate(copy, brief, REFERENCES)
+
+    assert len(image_gen.calls) == 4
+    finished = [r.getMessage() for r in caplog.records if "finished before" in r.getMessage()]
+    assert len(finished) == 2
+    assert all("{'output_tokens': 1680}" in message for message in finished)
 
 
 async def test_generate_rejects_a_brief_whose_scenes_do_not_match_the_copy(

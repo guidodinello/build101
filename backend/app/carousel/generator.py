@@ -155,12 +155,21 @@ async def prepare_references(references: list[bytes]) -> list[bytes]:
 async def gather_slides(
     coroutines: Iterable[Coroutine[Any, Any, GeneratedSlide]],
 ) -> list[GeneratedSlide]:
-    try:
-        async with asyncio.TaskGroup() as group:
-            tasks = [group.create_task(coroutine) for coroutine in coroutines]
-    except ExceptionGroup as failures:
-        raise failures.exceptions[0] from failures
-    return [task.result() for task in tasks]
+    results = await asyncio.gather(*coroutines, return_exceptions=True)
+    slides = [result for result in results if isinstance(result, GeneratedSlide)]
+    failures = [result for result in results if isinstance(result, BaseException)]
+    if not failures:
+        return slides
+    for slide in slides:
+        logger.info(
+            "slide %d finished before the carousel failed: %d attempts, usage %s",
+            slide.index,
+            slide.attempts,
+            slide.usage,
+        )
+    for failure in failures[1:]:
+        logger.warning("another slide failed too: %r", failure)
+    raise failures[0]
 
 
 def add_usage(first: dict[str, int], second: dict[str, int]) -> dict[str, int]:
