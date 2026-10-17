@@ -11,6 +11,7 @@ How the build101 team works. This file is the single source of truth for the wor
 | [`docs/decisions/`](docs/decisions/README.md) | ADRs (`NNNN-short-title.md`) + template + index |
 | [`docs/product/`](docs/product/README.md), [`architecture/`](docs/architecture/README.md), [`design/`](docs/design/README.md), [`implementation/`](docs/implementation/README.md) | MVP spec: scope and flows, contracts, design, 24h plan and tasks |
 | [`docs/glossary.md`](docs/glossary.md) | Shared domain language (Owner, Business, Channel, ...) |
+| [`docs/workflow.md`](docs/workflow.md) | The development loop with Claude Code: plan mode (`opusplan`), auto mode, PR, Tenki review, merge |
 | [`docs/open-questions.md`](docs/open-questions.md) | Risks and unknowns still to resolve |
 | [`backend/`](backend/README.md) | Agent, integrations, APIs (Python + FastAPI, uv project root) |
 | [`frontend/`](frontend/README.md) | Owner-facing web: onboarding form, dashboard, WhatsApp simulator (Next.js, [ADR 0004](docs/decisions/0004-frontend-nextjs-vercel.md)) |
@@ -96,6 +97,7 @@ Not every change walks all seven steps: a typo fix goes straight to 5. Anything 
 - **Done when**: every thread is answered and resolved, `CI` is green, step 7 done.
 - **AI review (Tenki)**: requested automatically, once per PR, only when the PR changes code (`.py`, `.ts`, `.tsx`, `.js`, `.jsx`; see [`tenki-review.yml`](.github/workflows/tenki-review.yml)). Docs-only PRs get no AI review, to save credits; comment `@tenki-reviewer` to ask for one anyway, or to re-review after pushes.
 - **With Claude Code**: reviewer runs `code-review`; author runs `address-pr-comments`. **Without it**: review and reply in the GitHub UI.
+- **Day to day**: steps 5–7 follow the [development workflow](docs/workflow.md) (plan mode with `opusplan`, approve in auto mode, PR, address the Tenki review, squash merge).
 
 ### 7. Close the loop
 
