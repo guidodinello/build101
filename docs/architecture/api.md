@@ -26,7 +26,7 @@ CORS: allow every origin in `FRONTEND_ORIGINS` (comma-separated: Vercel URL + `h
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/webhooks/whatsapp` | Plan B (Meta direct) only. Verification: if `hub.mode == "subscribe"` and `hub.verify_token == META_VERIFY_TOKEN`, return `hub.challenge` as plain text, else 403. Whether Kapso needs a verification handshake is part of the first-hour test |
-| POST | `/webhooks/whatsapp` | Verify signature → dedupe → enqueue handling as a background task → return `200` immediately. Only `X-Webhook-Event: whatsapp.message.received` is handled; other events (and payloads that don't parse) get `200` and are ignored, so Kapso doesn't retry. Dedupe key: `message.id` (the `wamid`), or `X-Idempotency-Key` when the id is missing. Payload shapes in [integrations.md](integrations.md#whatsapp) |
+| POST | `/webhooks/whatsapp` | Bodies over 256 KiB get `413` (checked from `Content-Length`, and while reading when it is missing), before the signature check. Then verify signature → dedupe → enqueue handling as a background task → return `200` immediately; a failure inside the background handler is logged with the message id and kind, and is not retried by Kapso (durable retry belongs to the job runner, T16). Only `X-Webhook-Event: whatsapp.message.received` is handled; other events (and payloads that don't parse) get `200` and are ignored, so Kapso doesn't retry. Dedupe key: `message.id` (the `wamid`), or `X-Idempotency-Key` when the id is missing. Payload shapes in [integrations.md](integrations.md#whatsapp) |
 
 ### Zernio webhook
 
