@@ -310,30 +310,41 @@ Must (carousels, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)). The o
 
 ## Orchestrator
 
-A manual tool-use loop in `app/orchestrator/orchestrator.py` (we need async, DB persistence and our own guards, so we don't use the SDK's beta tool runner).
+A manual function-calling loop on Gemini's Interactions API ([ADR 0023](../decisions/0023-gemini-text-llm.md), [research/gemini-api.md](../research/gemini-api.md)): we need async, persistence and our own guards, so the model only proposes calls and our code runs them. It starts as `app/conversation/chat.py` (`ChatHandler`, text replies only) and gains tools with T56; `app/orchestrator/` takes over once the database exists (T19).
 
 ### Per-turn algorithm
 
 ```text
 run_turn(business, inbound_text):
-    context = build_context(business)        # brand summary, pending posts, awaiting state, now
-    history = last 20 messages (role user/assistant, text only)
-    messages = history + [user: inbound_text (+ pending-state note)]
+    context = build_context(business)        # brand summary, pending posts, awaiting state, recent photos, now
+    steps = history + [user_input: inbound_text (+ pending-state note)]
     for step in range(MAX_STEPS = 5):
-        resp = llm.create(system=[static_prompt, brand_block, dynamic_block], tools=TOOLS, messages)
-        handle stop_reason: refusal → send generic fallback text; max_tokens → truncate safely
-        append resp.content (all blocks, including thinking) to messages
-        if no tool_use blocks: break
-        execute all tool_use blocks (concurrently), append ONE user message with all tool_results
-    reply = concatenated text blocks of the last response
-    if reply: channel.send_text(reply); store assistant message
+        interaction = llm.create(system_instruction=[static_prompt, brand_block, dynamic_block],
+                                 tools=REGISTERED_TOOLS, input=steps, store=False)
+        if status != "completed": send the fixed fallback message; stop (history unchanged)
+        append the model's steps (thought steps included) to steps
+        if no function_call steps: break
+        run every function_call (concurrently), append one function_result step per call (same call_id)
+    reply = output_text of the last interaction
+    if reply: channel.send_text(reply); store the turn's steps in the history
 ```
 
 - **Voice notes** arrive as their transcript ([integrations.md](integrations.md#speech-to-text)). In the history and the current turn they are prefixed with `[audio]`, and the prompt says a transcript can mishear names, numbers and prices: before using a price, date or quantity heard in a voice note that looks off or ambiguous, confirm it as part of the one allowed question.
-- History rebuilt from the DB each turn contains **text only** (no tool or thinking blocks from earlier turns). Within a turn, pass `resp.content` back unchanged (thinking blocks included).
-- Tools are defined with `strict: true` and `additionalProperties: false`.
-- `tool_choice` stays `auto`. Forced tool choice is not supported on this model.
+- The model's steps are stored and resent unchanged, `thought` steps included, because they carry the signatures Gemini needs on later turns ([LLM client conventions](#llm-client-conventions)). Only a completed turn enters the history.
+- Tools are function declarations (`{"type": "function", "name", "description", "parameters"}`) with `additionalProperties: false` in every object. The model decides whether to call one; we never force a call.
 - If the model returns text **and** a long-running tool, send the text (the acknowledgement) and let the job send the result.
+
+### When image generation runs
+
+Image generation costs money and takes time (first paid run: a 3-slide carousel at 1K took 38 s and about $0.14, PR #19, recorded in [research/image-generation-providers.md](../research/image-generation-providers.md)), so it runs **only when the Owner asks for a post**, and the orchestrator model is what decides that:
+
+1. The model sees each Owner message with the conversation so far and the registered tools. Most messages (a greeting, a question, small talk) get a text reply and nothing else.
+2. When the Owner asks for a post or a carousel, in any words ("armame algo con esta mesa", "subí un carrusel de la promo"), the model calls `create_post`. If one detail would change the result, it asks its one allowed question first and calls `create_post` on the next turn ([Conversation rules](#conversation-rules)).
+3. `create_post` checks its guards (below), then starts the generation job and returns `{post_id, job_id}` right away. The model's reply ("Dale, lo armo ⏳") goes out at once; the job sends the images when they're ready ([overview.md § Key design rules](overview.md#key-design-rules), rule 3).
+
+Nothing else calls `ImageGenPort` from a conversation: no keyword match and no separate intent classifier. Keywords miss natural requests and fire on questions ("¿cuánto sale un post?"), and a classifier adds a call per message and can't see that "la veta" answers the question the bot just asked. The model already has the conversation, so the decision costs no extra call. The other paths into image generation are `redo_slides` and `revise_post`, which also start from a tool call on a Post the Owner is looking at.
+
+The `create_post` description tells the model when to call it ("only when the Owner asks you to make a post or a carousel; never for greetings, questions or comments on an existing post"). If it fires too often in testing, tighten that description and add an example to `prompts/system.md`; the guards keep a wrong call from spending money twice.
 
 ### Conversation rules
 
@@ -374,7 +385,7 @@ From the second design pass ([../design/mockups/](../design/mockups/README.md), 
 
 Tools that are not built yet are not registered, so the model can't call them; the system prompt only describes registered tools.
 
-Guards are in the tool implementations, not in the prompt: `publish_post` returns `{"error": "post_not_approved"}` if the status is wrong, and the model must relay that. `approve_post` called from free text (not a button) is accepted only when the Owner's last message is an explicit approval of that post ([ADR 0007](../decisions/0007-approve-every-post.md)): the inbound handler marks the turn with `explicit_approval = true` when the message matches an approval phrase ("subilo", "publicalo", "dale, subila", "aprobado") and only one post is `pending_approval`, or the Owner named which one; otherwise the tool returns `{"error": "approval_not_explicit"}` and the bot asks. An image Post with several variations and none picked yet can't be approved: `approve_post` returns `{"error": "variation_not_picked"}` and the bot asks which one. `save_product`, `save_offer` and `save_brand_colors` never persist active data without `confirmed = true`, and the inbound handler rejects `confirmed = true` unless the Owner's last message is an explicit yes (button reply or affirmative text).
+Guards are in the tool implementations, not in the prompt. `create_post` returns `{"error": "generation_in_progress"}` while another post or carousel of the same Business is still generating, `{"error": "daily_limit"}` once the Business has started `MAX_POSTS_PER_DAY` generations today (in its timezone), and `{"error": "unknown_asset"}` for an `asset_ids` entry that isn't one of that Business's photos; in each case nothing is generated and the model tells the Owner. `publish_post` returns `{"error": "post_not_approved"}` if the status is wrong, and the model must relay that. `approve_post` called from free text (not a button) is accepted only when the Owner's last message is an explicit approval of that post ([ADR 0007](../decisions/0007-approve-every-post.md)): the inbound handler marks the turn with `explicit_approval = true` when the message matches an approval phrase ("subilo", "publicalo", "dale, subila", "aprobado") and only one post is `pending_approval`, or the Owner named which one; otherwise the tool returns `{"error": "approval_not_explicit"}` and the bot asks. An image Post with several variations and none picked yet can't be approved: `approve_post` returns `{"error": "variation_not_picked"}` and the bot asks which one. `save_product`, `save_offer` and `save_brand_colors` never persist active data without `confirmed = true`, and the inbound handler rejects `confirmed = true` unless the Owner's last message is an explicit yes (button reply or affirmative text).
 
 **Photos sent with a request.** WhatsApp delivers each photo as its own message, with the caption (if any) on one of them. The inbound handler stores each photo as a Brand asset (`source = 'whatsapp'`), enqueues `analyze_asset`, and waits a short debounce (5 s after the last photo) before deciding: if any photo has a caption, or a text or a voice note (its transcript) arrives within the debounce, one orchestrator turn runs with all those photos in `<recent_photos>`; if not, the bot sends `photo_saved` once for the batch with its `[Sí, armalo]` button (Flow 9). `generate_post` waits up to 30 s for the candidate photos' `analyze_asset` jobs, then proceeds with whatever analyses exist (the Art Director sees the images anyway).
 
