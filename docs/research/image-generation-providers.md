@@ -2,7 +2,7 @@
 
 Question: which third-party image model can take the Owner's ~10 real product photos plus a Brand Brain and trend brief, and return several themed 1080x1350 (4:5) Instagram feed images that still show the real product, callable from our Python backend during a 24h hackathon?
 
-This supports [ADR 0018](../decisions/0018-ai-image-generation-service.md), which defers the provider choice, and [ADR 0019](../decisions/0019-image-provider-gemini.md), which picks Gemini Nano Banana 2.1 with OpenAI GPT Image 2.5 as fallback (both `proposed`). Everything below was read on 2026-10-17 from each vendor's own docs, pricing and terms pages (links inline). Prices, limits and model names change often (several models listed here shipped in 2026), so re-check before relying on them. Nothing here was tested hands-on: no accounts were created and no paid API was called.
+This supports [ADR 0018](../decisions/0018-ai-image-generation-service.md), which defers the provider choice, and [ADR 0019](../decisions/0019-image-provider-gemini.md), which picks Gemini Nano Banana 2.1 with OpenAI GPT Image 2.5 as fallback (both `proposed`). Everything below was read on 2026-10-17 from each vendor's own docs, pricing and terms pages (links inline). Prices, limits and model names change often (several models listed here shipped in 2026), so re-check before relying on them. Except for [First run, 2026-10-17](#first-run-2026-10-17-hands-on) under Gemini, nothing here was tested hands-on.
 
 ## Comparison
 
@@ -49,6 +49,20 @@ A second read of Google's docs and of the `google-genai` SDK source on 2026-10-1
 - **Latency:** no official figure. A third party (Eden AI) reports about 11–13 s median and 19–24 s p95 per image; secondary source, not verified.
 - **Conflicts between Google's pages:** the 4K output token count differs between pricing tables (2520 vs 3780 tokens) ([pricing](https://ai.google.dev/gemini-api/docs/pricing)), and the `gemini-2.5-flash-image` shutdown date is 2026-10-02 on one page and 2027-03-15 on another ([pricing](https://ai.google.dev/gemini-api/docs/pricing), [deprecations](https://ai.google.dev/gemini-api/docs/deprecations)). Neither affects us at 2K on 2.1.
 
+### First run, 2026-10-17 (hands-on)
+
+One paid run of the carousel CLI (`uv run python -m app.carousel.cli`) on `gemini-nano-banana-2.1`: `GEMINI_IMAGE_SIZE=1K`, `GEMINI_THINKING_LEVEL=medium`, **one** reference photo (a carved Gothic-style sideboard), 3 slides (cover, content, call to action) of generic Spanish copy for a restoration business, no Claude text check. A small sample: one product, one run.
+
+- **Text:** all 3 slides rendered the headline and body exactly, with accents and the opening `¿`; nothing invented.
+- **Fidelity:** high. The door panels, pierced center panel, brass drop pulls, turned legs and lower shelf all match the photo; the part of the piece cut off in the photo was filled in plausibly. Fine carved trim gets slightly garbled close up.
+- **Consistency:** slides 2 and 3, anchored on the cover, kept its text band, fonts, palette, room and light.
+- **Latency:** cover 19.5 s; the other 2 slides in parallel 13.5 s and 18.8 s; 38 s for the carousel.
+- **Usage per slide:** 1,411 prompt tokens for the cover (1,120 for the image) and 2,589 for the others, which also send the cover; 1,120 output image tokens at 1K; 358–592 output text tokens; 0–1,281 thought tokens.
+- **Cost:** estimated from that usage at list prices (output image $30/1M, text and thinking $7.50/1M, input $1.50/1M): $0.04–0.05 per slide, about **$0.14** for the carousel. Not checked against the billing page.
+- **1K is enough at phone size:** 928×1152 upscaled to 1080×1350 kept the text and the product sharp on screen. Not compared side by side with 2K.
+- **Billing:** a key from an AI Studio project with no prepaid credit is accepted, but every call fails with `402 RESOURCE_EXHAUSTED` ("Your prepayment credits are depleted") until credit is added.
+- **Mixed photos:** every slide gets all the photos as references of one product. Photos of different pieces would likely be blended into one; a portfolio carousel (one piece per slide) is not supported.
+
 ## OpenAI GPT Image
 
 - **Models** ([guide](https://developers.openai.com/api/docs/guides/image-generation)): `gpt-image-2.5-sunburst` ("workflows where editing precision matters most") and `gpt-image-2.5-flare` (fast everyday generation); older `gpt-image-2`, `gpt-image-1.5`, `gpt-image-1`, `gpt-image-1-mini` remain.
@@ -92,10 +106,10 @@ A second read of Google's docs and of the `google-genai` SDK source on 2026-10-1
 ## Open points (test hands-on before committing)
 
 - [ ] **Product fidelity**: run the same ~10 furniture photos + brief through Nano Banana 2.1 and GPT Image 2.5; check shape, color, material and proportions of the real piece are preserved in each variation (direct observation, record results here).
-- [ ] **Real cost per variation**: log `usage` for 10 input images + prompt (+ thinking on Gemini, try `minimal`) and compute $ per variation; OpenAI 2.5 per-image cost is only knowable this way.
-- [ ] **Latency** per image at 2K / `1088x1360`, and with N variations in parallel, against the WhatsApp flow ([ADR 0005](../decisions/0005-single-instance-in-process-jobs.md): work runs in the job runner, not the webhook).
+- [ ] **Real cost per variation**: about $0.04–0.05 per slide at 1K with one reference ([first run](#first-run-2026-10-17-hands-on)); still to measure with ~10 references and on OpenAI. Log `usage` for 10 input images + prompt (+ thinking on Gemini, try `minimal`) and compute $ per variation; OpenAI 2.5 per-image cost is only knowable this way.
+- [ ] **Latency**: 13–20 s per slide at 1K, 38 s for a 3-slide carousel ([first run](#first-run-2026-10-17-hands-on)); still to measure per image at 2K / `1088x1360`, and with N variations in parallel, against the WhatsApp flow ([ADR 0005](../decisions/0005-single-instance-in-process-jobs.md): work runs in the job runner, not the webhook).
 - [ ] **No invented text**: check whether "No text" prompting reliably keeps prices, logos and slogans out (ADR 0018 consequence; [AGENTS.md](../../AGENTS.md) "agents never invent facts").
-- [ ] **Carousel text and consistency** ([ADR 0022](../decisions/0022-carousels-in-mvp.md)): how often 2.1 renders a slide's exact text, and whether anchoring on the cover keeps 5 slides in one visual style.
+- [ ] **Carousel text and consistency** ([ADR 0022](../decisions/0022-carousels-in-mvp.md)): how often 2.1 renders a slide's exact text, and whether anchoring on the cover keeps 5 slides in one visual style. 3 of 3 slides exact and consistent in the [first run](#first-run-2026-10-17-hands-on); 5 slides not tried yet.
 - [ ] **Rate limits** for a new Tier 1 Gemini project (images per minute for 2.1 is not on the public page) and OpenAI Build tier (20 IPM).
 - [ ] **Resize step**: confirm the downscale/crop to 1080x1350 keeps the product in frame.
 - [ ] **Signup**: Gemini billing account and OpenAI Organization Verification done before the hackathon; whether Google Cloud free-trial credits pay for Nano Banana is not verified.
