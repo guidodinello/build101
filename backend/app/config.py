@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     gemini_thinking_level: Literal["minimal", "medium", "high"] = "medium"
     image_gen_max_concurrency: int = 4
 
+    whatsapp_channel: Literal["kapso", "simulator"] = "kapso"
+    kapso_api_key: str | None = None
+    kapso_webhook_secret: str | None = None
+    kapso_phone_number_id: str | None = None
+    kapso_base_url: str = "https://api.kapso.ai/meta/whatsapp/v24.0"
+
 
 @lru_cache
 def get_settings() -> Settings:

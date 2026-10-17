@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 from io import BytesIO
 from pathlib import Path
@@ -20,3 +22,7 @@ def make_image(size: tuple[int, int], color: str = "sienna", format: str = "JPEG
 def carousel_spec() -> tuple[CarouselCopy, CarouselBrief]:
     spec = json.loads((FIXTURES / "carousel_spec.json").read_text())
     return CarouselCopy.model_validate(spec["copy"]), CarouselBrief.model_validate(spec["brief"])
+
+
+def sign(raw: bytes, secret: str) -> str:
+    return hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()

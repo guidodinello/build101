@@ -44,6 +44,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "google-genai" },
+    { name = "httpx" },
     { name = "pillow" },
     { name = "pillow-heif" },
     { name = "pydantic" },
@@ -62,6 +63,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.143.3" },
     { name = "google-genai", specifier = ">=2.31.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "pillow", specifier = ">=13.0.0" },
     { name = "pillow-heif", specifier = ">=1.8.1" },
     { name = "pydantic", specifier = ">=2.14.1" },

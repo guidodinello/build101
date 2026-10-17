@@ -1,0 +1,56 @@
+{
+  "headers": {
+    "content-type": "application/json",
+    "x-webhook-event": "whatsapp.message.received",
+    "x-webhook-payload-version": "v2",
+    "x-webhook-signature": "<computed in the test>",
+    "x-idempotency-key": "fake-idempotency-key"
+  },
+  "body": {
+    "message": {
+      "id": "wamid.FAKE0000000000000000000001",
+      "from": "59899000001",
+      "text": {
+        "body": "hola bot"
+      },
+      "type": "text",
+      "kapso": {
+        "origin": "cloud_api",
+        "status": "delivered",
+        "content": "hola bot",
+        "direction": "inbound",
+        "has_media": false,
+        "processing_status": "pending"
+      },
+      "context": null,
+      "username": null,
+      "timestamp": "1792270000",
+      "from_user_id": "fake-from_user_id",
+      "from_parent_user_id": null
+    },
+    "conversation": {
+      "id": "fake-id",
+      "kapso": {
+        "messages_count": 1,
+        "last_inbound_at": "2026-10-17T20:00:00Z",
+        "last_message_id": "fake-last_message_id",
+        "last_message_text": "hola bot",
+        "last_message_type": "fake-last_message_type",
+        "last_message_timestamp": "2026-10-17T20:00:00Z"
+      },
+      "status": "active",
+      "metadata": {},
+      "username": null,
+      "created_at": "2026-10-17T20:00:00Z",
+      "updated_at": "2026-10-17T20:00:00Z",
+      "contact_name": "Test Owner",
+      "phone_number": "59899000001",
+      "last_active_at": "2026-10-17T20:00:00Z",
+      "phone_number_id": "fake-phone_number_id",
+      "business_scoped_user_id": "fake-business_scoped_user_id",
+      "parent_business_scoped_user_id": null
+    },
+    "phone_number_id": "fake-phone_number_id",
+    "is_new_conversation": true
+  }
+}

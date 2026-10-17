@@ -17,6 +17,7 @@ Commands run from this folder (`uv run ruff check .`, `uv run pytest tests/ -v`)
 - `app/imagegen/`: `ImageGenPort` with the Gemini and mock adapters, selected by `IMAGE_GEN`.
 - `app/media/images.py`: reference photo normalization and the 1080×1350 resize.
 - `app/carousel/`: carousel schemas, slide prompts and `CarouselGenerator` (cover first, other slides anchored on it).
+- `app/channels/`: `ChannelPort` with the Kapso adapter, `POST /webhooks/whatsapp` (signature check, dedupe, background handling) and an echo handler until the conversation router (T23) exists.
 
 Generate a carousel from a copy + brief spec without the database or the agents:
 
