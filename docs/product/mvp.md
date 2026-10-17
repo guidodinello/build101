@@ -124,7 +124,7 @@ Dashboard access: a `dashboard` magic link, editable, valid 7 days; the owner ge
 
 ## Explicitly out of scope
 
-Paid ads, email, SEO, analytics, comment/DM replies, multiple users per business, team roles, billing, languages other than Spanish, TikTok/LinkedIn publishing, Instagram stories, video editing, audio transcription of videos.
+Paid ads, email, SEO, analytics and comment/DM replies (both in the [roadmap](../roadmap.md), Phase 1), multiple users per business, team roles, billing, languages other than Spanish, TikTok/LinkedIn publishing, Instagram stories, video editing, audio transcription of videos.
 
 ## Demo fallbacks
 

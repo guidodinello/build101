@@ -2,6 +2,7 @@
 
 - Date: 2026-10-17
 - Status: proposed
+- Extended by: [0014](0014-whatsapp-cloud-api.md) (policy stance, voice notes)
 
 ## Context
 

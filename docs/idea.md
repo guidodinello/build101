@@ -50,7 +50,7 @@ Full scope, cut lines and success criteria: [product/mvp.md](product/mvp.md).
 
 ## Not this (for now)
 
-- A customer-facing sales/support bot that answers the business's own customers.
+- Answering the business's own customers (comment and DM replies, sales). It's the next step after the MVP ([ADR 0013](decisions/0013-focus-marketing.md), [roadmap](roadmap.md) Phase 1), not part of the hackathon build.
 - Paid ads management (Meta Ads / Google Ads).
 - Email marketing, SEO, websites.
-- Analytics and reporting beyond "published / scheduled" status.
+- Analytics and reporting beyond "published / scheduled" status (a weekly Instagram Insights summary is in the [roadmap](roadmap.md), Phase 1).
