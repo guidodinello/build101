@@ -1,0 +1,50 @@
+# Requests a Tenki code review only when a PR changes code, to save review
+# credits on docs-only PRs. Tenki has no path filter of its own
+# (https://tenki.cloud/docs/reviewer/settings.md), so Automatic Review is off
+# for this repo in the Tenki dashboard and this workflow comments
+# `@tenki-reviewer` instead, once per PR.
+#
+# If Tenki ignores comments from github-actions[bot], add a TENKI_TRIGGER_TOKEN
+# Actions secret (a fine-grained PAT of a Tenki workspace member with
+# pull-requests: write on this repo); it is used instead of GITHUB_TOKEN.
+name: Tenki review
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+    paths:
+      - '**/*.py'
+      - '**/*.ts'
+      - '**/*.tsx'
+      - '**/*.js'
+      - '**/*.jsx'
+      - '!.claude/**'
+
+permissions:
+  contents: read
+
+jobs:
+  request-review:
+    name: Request Tenki review
+    # Drafts wait for ready_for_review. Fork and Dependabot PRs get a read-only
+    # GITHUB_TOKEN and cannot comment.
+    if: >-
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Comment @tenki-reviewer once per PR
+        env:
+          GH_TOKEN: ${{ secrets.TENKI_TRIGGER_TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if gh pr view "$PR" --json comments --jq '.comments[].body' | grep -q '@tenki-reviewer'; then
+            echo "A review was already requested on #$PR; push-time re-reviews are not requested."
+            exit 0
+          fi
+          gh pr comment "$PR" --body '@tenki-reviewer review (auto-requested: this PR changes code files)'

@@ -11,7 +11,7 @@ An AI marketing agency that lives in the small business owner's WhatsApp. The ow
 | [`docs/`](docs/) | Product, architecture, design and implementation docs ([reading order](docs/README.md)) |
 | [`backend/`](backend/) | FastAPI: WhatsApp webhook, orchestrator, agents, jobs, renderer, publishing |
 | [`frontend/`](frontend/) | Next.js: onboarding wizard, dashboard, WhatsApp simulator |
-| [`.github/`](.github/) | Issue and PR templates, CI workflow, Dependabot |
+| [`.github/`](.github/) | Issue and PR templates, CI and Tenki review workflows, Dependabot |
 | [`scripts/`](scripts/) | Repo tooling, e.g. the docs index check CI runs |
 | [`.claude/skills/`](.claude/skills/) | Shared agent skills: grilling, domain modeling, issues, PR review, dependencies, docs conventions |
 | [`.claude/rules/`](.claude/rules/) | Path-scoped agent rules (Python, database, Docker, CI) that load when matching files are touched |

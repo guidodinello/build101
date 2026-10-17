@@ -94,6 +94,7 @@ Not every change walks all seven steps: a typo fix goes straight to 5. Anything 
   2. Reviewer reviews against this file, accepted ADRs and the rules; author answers every thread (fix, decline with reason, or clarify).
   3. Enforced on `main` by a GitHub ruleset: the **`CI` check must pass**, so every change lands through a PR (direct pushes to `main` are rejected). Approvals are not required: authors may merge their own PRs once `CI` is green. Team convention: **squash merge**.
 - **Done when**: every thread is answered and resolved, `CI` is green, step 7 done.
+- **AI review (Tenki)**: requested automatically, once per PR, only when the PR changes code (`.py`, `.ts`, `.tsx`, `.js`, `.jsx`; see [`tenki-review.yml`](.github/workflows/tenki-review.yml)). Docs-only PRs get no AI review, to save credits; comment `@tenki-reviewer` to ask for one anyway, or to re-review after pushes.
 - **With Claude Code**: reviewer runs `code-review`; author runs `address-pr-comments`. **Without it**: review and reply in the GitHub UI.
 
 ### 7. Close the loop
