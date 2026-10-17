@@ -17,6 +17,7 @@ export function PhotosStep() {
   const { pending, previews, inFlight, add, retry, remove } = photoUploads;
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const deletedIds = useRef(new Set<string>());
 
   const ready = readyPhotos(state);
   const total = ready.length + inFlight;
@@ -30,7 +31,10 @@ export function PhotosStep() {
       setState((current) => {
         const freshIds = new Set(fresh.assets.map((asset) => asset.id));
         const localOnly = current.assets.filter((asset) => !freshIds.has(asset.id));
-        return { ...current, assets: [...fresh.assets, ...localOnly] };
+        const assets = [...fresh.assets, ...localOnly].filter(
+          (asset) => !deletedIds.current.has(asset.id),
+        );
+        return { ...current, assets };
       });
     }, ANALYSIS_POLL_MS);
     return () => window.clearInterval(timer);
@@ -44,6 +48,7 @@ export function PhotosStep() {
   }
 
   async function removeAsset(asset: Asset) {
+    deletedIds.current.add(asset.id);
     setState((current) => ({
       ...current,
       assets: current.assets.filter((item) => item.id !== asset.id),
@@ -51,6 +56,7 @@ export function PhotosStep() {
     try {
       await onboardingApi.deleteAsset(token, asset.id);
     } catch (removeError) {
+      deletedIds.current.delete(asset.id);
       setState((current) => ({ ...current, assets: [...current.assets, asset] }));
       toast.error(messageOf(removeError));
     }

@@ -44,6 +44,7 @@ export function uploadAsset(
     if (aborted) throw new DOMException("Upload aborted", "AbortError");
 
     await putToSignedUrl(xhr, ticket.upload_url, file, onProgress);
+    if (aborted) throw new DOMException("Upload aborted", "AbortError");
     return onboardingApi.completeUpload(token, ticket.asset_id);
   })();
 
