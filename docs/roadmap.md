@@ -12,6 +12,10 @@ One live loop, scoped by [ADR 0016](decisions/0016-demo-scope-one-post.md): a sh
 - Voice notes transcribed ([ADR 0014](decisions/0014-whatsapp-cloud-api.md))
 - Brand voice learns from corrections, not only from past posts
 - Catalog, content uploads and Offers in the dashboard; Reels v1 from the owner's own videos ([ADR 0012](decisions/0012-catalog-content-dashboard-reels.md))
+- From the second design pass ([design/mockups/](design/mockups/README.md)), beyond the MVP:
+  - Import the photos and videos of the owner's Instagram feed after connecting, so the Agency starts with real material (Wizard 6b; F2.8, read access to verify)
+  - Build colors, and optionally a simple logo, in the chat when the owner has none (WA-Sin-marca; F2.9)
+  - Instagram stories from a request ("el sábado abrimos el taller de 10 a 14, hacé una historia"): a vertical 1080×1920 template; publishing support through Zernio to verify (Chat 6; F4.7, Won't in the MVP)
 - Designer agent: before/after layouts and carousel templates from real photos (no invented images of the product)
 - Reels v2: before/after video built from the photos (with royalty-free audio; Instagram's music library isn't available through the API)
 - Basic metrics: weekly WhatsApp summary from Instagram Insights
