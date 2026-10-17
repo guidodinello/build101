@@ -38,6 +38,7 @@ From [ADR 0018](decisions/0018-ai-image-generation-service.md). Hands-on checks 
 - [ ] **Per-post photos vs. the photo library:** do the photos the Owner sends with a request replace the Business's library as references for that Post, or complement it? Interim default in the docs: only the Owner's photos when they sent some (Art Director post-validation, T14).
 - [ ] **The Owner's logo on the image:** prompts forbid drawing or changing a logo; should the real logo appear at all, and how, now that the backend draws nothing? Same for the simple text logo of F2.9 (Could).
 - [ ] **Photos in the live request:** [ADR 0016](decisions/0016-demo-scope-one-post.md) words the demo as "a photo" → one preview, while ADR 0018 assumes a set of photos (around 10) → several variations → a pick. The stage now follows ADR 0018 ([mvp.md](product/mvp.md#demo-goal)); how many photos the live request uses is open.
+- [ ] **Daily generation cap:** `MAX_POSTS_PER_DAY` defaults to 5 per Business ([agents.md](architecture/agents.md#when-image-generation-runs)). Is that right for the demo and for a real Owner, and does a slide redo count against it?
 - [ ] **Time per post:** the old < 45 s target was for rendered templates; set a new one after measuring generation latency.
 
 ## Carousels (ADR 0022)
