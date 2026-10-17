@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Onboarding: productos</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&amp;family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1F6F5C}a:hover{color:#164F42}
+.lbl{font-size:13px;font-weight:600;color:#1F1B16}
+.opt{font-weight:400;color:#6B6257}
+.inp{box-sizing:border-box;width:100%;height:44px;padding:0 12px;border:1.5px solid transparent;border-radius:12px;background:#EFE9E0;font:15px Figtree,sans-serif;color:#1F1B16;outline:none}
+.inp:focus{border-color:#1F6F5C;background:#FFFFFF}
+.field{display:flex;flex-direction:column;gap:5px}
+.card{display:flex;flex-direction:column;gap:10px;padding:14px;background:#FFFFFF;border:1px solid #EAE3D8;border-radius:14px}
+.x{width:44px;height:44px;margin:-12px -12px -12px 0;border:none;background:none;color:#6B6257;display:flex;align-items:center;justify-content:center}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; display: flex; flex-direction: column; background: #FAF7F2; font-family: Figtree, sans-serif; color: #1F1B16; overflow: hidden">
+  <div style="display: flex; flex-direction: column; gap: 10px; padding: 8px 16px 0">
+    <div style="display: flex; align-items: center; justify-content: space-between">
+      <button aria-label="Paso anterior" style="width: 44px; height: 44px; margin-left: -10px; border: none; background: none; color: #1F1B16; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg></button>
+      <div style="font-size: 13px; font-weight: 600; color: #6B6257">Paso 2 de 6</div>
+      <a href="#" style="display: flex; align-items: center; gap: 5px; height: 44px; font-size: 13px; font-weight: 600; text-decoration: none"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 01-12.4 7.4L3 21l2.1-5.4A8.4 8.4 0 1121 11.5z"></path></svg>WhatsApp</a>
+    </div>
+    <div role="progressbar" aria-label="Progreso" aria-valuenow="2" aria-valuemin="0" aria-valuemax="6" style="height: 6px; border-radius: 3px; background: #E7DFD3; overflow: hidden"><div style="width: 33.3%; height: 100%; background: #1F6F5C; border-radius: 3px"></div></div>
+  </div>
+  <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 14px; padding: 22px 16px 16px; overflow: hidden">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <h1 style="margin: 0; font: 700 28px/1.1 'Bricolage Grotesque', sans-serif; letter-spacing: -0.01em">¿Qué es lo que más vendés?</h1>
+      <div style="font-size: 15px; color: #6B6257">Hasta 5. Los que más te importa vender.</div>
+    </div>
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center"><div style="font-size: 13px; font-weight: 700; color: #1F6F5C; letter-spacing: 0.04em">PRODUCTO 1</div><button class="x" aria-label="Quitar producto 1"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
+      <div class="field"><label class="lbl" for="p1n">Nombre</label><input id="p1n" class="inp" value="Mesa Nórdica"></div>
+      <div class="field"><label class="lbl" for="p1d">En pocas palabras</label><input id="p1d" class="inp" value="Mesa de comedor en roble macizo, a medida"></div>
+      <div class="field"><label class="lbl" for="p1p">Precio <span class="opt">(opcional)</span></label><input id="p1p" class="inp" placeholder="Ej: $ 18.500"></div>
+    </div>
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center"><div style="font-size: 13px; font-weight: 700; color: #1F6F5C; letter-spacing: 0.04em">PRODUCTO 2</div><button class="x" aria-label="Quitar producto 2"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
+      <div class="field"><label class="lbl" for="p2n">Nombre</label><input id="p2n" class="inp" value="Sillas de madera maciza"></div>
+      <div class="field"><label class="lbl" for="p2d">En pocas palabras</label><input id="p2d" class="inp" placeholder="Ej: hechas a mano, varios colores"></div>
+    </div>
+    <button style="height: 52px; flex-shrink: 0; border: 1.5px dashed #BFB3A3; border-radius: 14px; background: none; color: #1F6F5C; font: 600 15px Figtree, sans-serif; display: flex; align-items: center; justify-content: center; gap: 6px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>Agregar otro</button>
+  </div>
+  <div style="padding: 12px 16px 20px; border-top: 1px solid #EAE3D8; background: #FAF7F2">
+    <button style="width: 100%; height: 56px; border: none; border-radius: 14px; background: #1F6F5C; color: #FFFFFF; font: 600 17px Figtree, sans-serif; display: flex; align-items: center; justify-content: center; gap: 8px">Siguiente<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

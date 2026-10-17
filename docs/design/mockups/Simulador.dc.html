@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Simulador de WhatsApp</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;family=Fraunces:opsz,wght@9..144,600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1F6F5C}a:hover{color:#164F42}
+.in,.out{max-width:min(80%,460px);padding:7px 10px 6px;border-radius:10px;font-size:15px;line-height:1.38;color:#111B21;box-shadow:0 1px 0.5px rgba(11,20,26,.13)}
+.in{align-self:flex-start;background:#FFFFFF;border-top-left-radius:3px}
+.out{align-self:flex-end;background:#D9FDD3;border-top-right-radius:3px}
+.meta{display:flex;justify-content:flex-end;font-size:11px;color:#5F6B66;margin-top:2px}
+.qr{height:40px;border:none;border-radius:10px;background:#FFFFFF;color:#1F6F5C;font:600 15px Figtree,sans-serif;box-shadow:0 1px 0.5px rgba(11,20,26,.13)}
+.mono{font-family:'JetBrains Mono',monospace}
+.dk{font-size:11px;font-weight:600;letter-spacing:.08em;color:#6B6257;text-transform:uppercase}
+.kv{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;padding:3px 0}
+.run{display:grid;grid-template-columns:minmax(0,1fr) 56px 48px;gap:8px;align-items:center;width:100%;min-height:36px;padding:0 10px;border:none;border-radius:8px;background:none;text-align:left;font:12.5px 'JetBrains Mono',monospace;color:#1F1B16}
+.run.on{background:#E3EFEA}
+.ok{color:#1F6F5C}
+</style>
+</helmet>
+<div style="height: 800px; display: flex; flex-wrap: wrap; background: #FAF7F2; font-family: Figtree, sans-serif; color: #1F1B16">
+  <div style="flex: 999 1 560px; min-width: 0; height: 800px; display: flex; flex-direction: column; background: #EFEAE2">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 16px; background: #1F6F5C; color: #FFFFFF">
+      <div style="width: 40px; height: 40px; border-radius: 50%; background: #F3EBDD; color: #4F5D2F; display: flex; align-items: center; justify-content: center; font: 600 14px Fraunces, serif">MR</div>
+      <div style="flex-grow: 1; display: flex; flex-direction: column">
+        <div style="font-size: 16px; font-weight: 600">Muebles Ramírez</div>
+        <div class="mono" style="font-size: 12px; opacity: 0.85">sim-5f2a · +598 000 0000</div>
+      </div>
+      <span class="mono" style="font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 6px; background: #F2B84B; color: #1F1B16">SIMULADOR</span>
+      <button style="height: 40px; padding: 0 14px; border: 1.5px solid rgba(255,255,255,.6); border-radius: 10px; background: none; color: #FFFFFF; font: 600 14px Figtree, sans-serif; display: flex; align-items: center; gap: 6px"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0114-5.3L20 9"></path><path d="M20 4v5h-5"></path></svg>Reset</button>
+      <button aria-pressed="true" style="height: 40px; padding: 0 14px; border: none; border-radius: 10px; background: #FFFFFF; color: #1F6F5C; font: 600 14px Figtree, sans-serif">Debug</button>
+    </div>
+    <div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; padding: 16px 24px; overflow: hidden">
+      <div class="out">hacé un post para la promo del finde, 15% en sillas<div class="meta">18:40</div></div>
+      <div class="in">¡Dale! Lo armo ⏳<div class="meta">18:40</div></div>
+      <div class="in" style="padding: 3px 3px 6px; width: 250px">
+        <div style="position: relative; width: 244px; height: 305px; border-radius: 8px; overflow: hidden; background: #E2D3BC">
+          <svg role="img" aria-label="Foto de una silla de madera" width="244" height="190" viewBox="0 0 400 310" preserveAspectRatio="xMidYMid slice" style="position: absolute; left: 0; top: 0">
+            <rect x="0" y="0" width="400" height="230" fill="#E2D3BC"></rect>
+            <rect x="0" y="230" width="400" height="80" fill="#A98263"></rect>
+            <rect x="160" y="40" width="12" height="230" rx="3" fill="#6B4428"></rect>
+            <rect x="160" y="40" width="90" height="12" rx="3" fill="#6B4428"></rect>
+            <rect x="160" y="160" width="110" height="14" rx="3" fill="#6B4428"></rect>
+            <rect x="256" y="174" width="12" height="96" rx="3" fill="#5A3920"></rect>
+            <rect x="238" y="40" width="12" height="122" rx="3" fill="#6B4428"></rect>
+          </svg>
+          <div style="position: absolute; left: 12px; top: 12px; background: #F3EBDD; color: #4F5D2F; font: 700 13px Figtree, sans-serif; padding: 6px 10px; border-radius: 6px">15% OFF</div>
+          <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 116px; background: #4F5D2F; padding: 12px 14px; box-sizing: border-box; display: flex; flex-direction: column; gap: 3px; color: #F3EBDD">
+            <div style="font: 600 22px/1.05 Fraunces, serif">15% en sillas</div>
+            <div style="font-size: 11px">Solo este sábado y domingo</div>
+          </div>
+        </div>
+        <div style="padding: 8px 7px 0">📝 Post para este finde — <b>"15% en sillas"</b><br>Este finde renová tu comedor 🪑 …</div>
+        <div class="meta" style="padding: 0 7px">18:41</div>
+      </div>
+      <div style="align-self: flex-start; width: 250px; display: flex; flex-direction: column; gap: 3px">
+        <button class="qr">Aprobar</button>
+        <button class="qr">Cambiar</button>
+        <button class="qr">Descartar</button>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px; padding: 10px 16px 14px">
+      <button aria-label="Adjuntar imagen" style="width: 46px; height: 46px; border: none; border-radius: 50%; background: none; color: #3D4A45; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5l-8.6 8.6a5 5 0 01-7-7l8.6-8.6a3.3 3.3 0 014.7 4.7l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l8-8"></path></svg></button>
+      <label for="sm" style="position: absolute; width: 1px; height: 1px; overflow: hidden">Mensaje</label>
+      <input id="sm" placeholder="Escribí un mensaje…" style="flex-grow: 1; min-width: 0; height: 46px; padding: 0 16px; border: none; border-radius: 23px; background: #FFFFFF; font: 15px Figtree, sans-serif; color: #111B21; outline: none">
+      <button aria-label="Enviar" style="width: 46px; height: 46px; border-radius: 50%; border: none; background: #1F6F5C; color: #FFFFFF; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+    </div>
+  </div>
+  <div style="flex: 1 1 340px; min-width: 0; height: 800px; box-sizing: border-box; display: flex; flex-direction: column; gap: 22px; padding: 18px 16px; background: #FFFFFF; border-left: 1px solid #EAE3D8; overflow: hidden">
+    <div style="display: flex; justify-content: space-between; align-items: center"><div style="font: 700 16px Figtree, sans-serif">Debug</div><span class="mono" style="font-size: 11px; color: #6B6257">poll 1s</span></div>
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <div class="dk">Negocio</div>
+      <div class="mono">
+        <div class="kv"><span style="color: #6B6257">state</span><span>active</span></div>
+        <div class="kv"><span style="color: #6B6257">awaiting</span><span>post_feedback</span></div>
+        <div class="kv"><span style="color: #6B6257">publisher</span><span>mock</span></div>
+        <div class="kv"><span style="color: #6B6257">brand_brain</span><span>v2</span></div>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <div class="dk">Jobs</div>
+      <div class="mono">
+        <div class="kv"><span>generate_post</span><span class="ok">✓ 38s</span></div>
+        <div class="kv"><span>render_image</span><span class="ok">✓ 4.2s</span></div>
+        <div class="kv"><span>analyze_assets</span><span class="ok">✓ 21s</span></div>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 6px; min-height: 0">
+      <div class="dk">Agent runs (últimos 10)</div>
+      <div class="run" style="color: #6B6257; min-height: 24px"><span>agent</span><span>latency</span><span>tokens</span></div>
+      <button class="run on" aria-expanded="true"><span>art_director</span><span>9.8s</span><span>4.1k</span></button>
+      <pre class="mono" style="margin: 0 0 4px; padding: 10px; border-radius: 8px; background: #1F1B16; color: #EFE9E0; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow: hidden">{ "template": "promo_band",
+  "photo_asset_id": "a_03",
+  "slots": { "badge": "15% OFF",
+    "headline": "15% en sillas" },
+  "crop_focus": "center" }</pre>
+      <button class="run" aria-expanded="false"><span>copywriter</span><span>6.1s</span><span>2.3k</span></button>
+      <button class="run" aria-expanded="false"><span>orchestrator</span><span>1.8s</span><span>1.2k</span></button>
+      <button class="run" aria-expanded="false"><span>content_strategist</span><span>12.4s</span><span>5.6k</span></button>
+      <button class="run" aria-expanded="false"><span>brand_strategist</span><span>14.9s</span><span>6.8k</span></button>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

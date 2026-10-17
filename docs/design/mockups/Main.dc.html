@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>WhatsApp: bienvenida</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&amp;family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1F6F5C}a:hover{color:#164F42}
+.in,.out{max-width:80%;padding:7px 10px 6px;border-radius:10px;font-size:15px;line-height:1.38;color:#111B21;box-shadow:0 1px 0.5px rgba(11,20,26,.13)}
+.in{align-self:flex-start;background:#FFFFFF;border-top-left-radius:3px}
+.out{align-self:flex-end;background:#D9FDD3;border-top-right-radius:3px}
+.meta{display:flex;justify-content:flex-end;align-items:center;gap:3px;font-size:11px;color:#5F6B66;margin-top:2px}
+.btns{align-self:flex-start;width:80%;display:flex;flex-direction:column;gap:3px;margin-top:-2px}
+.qr{height:40px;border:none;border-radius:10px;background:#FFFFFF;color:#1F6F5C;font:600 15px Figtree,sans-serif;box-shadow:0 1px 0.5px rgba(11,20,26,.13)}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; display: flex; flex-direction: column; background: #EFEAE2; font-family: Figtree, sans-serif; overflow: hidden">
+  <div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: #1F6F5C; color: #FFFFFF">
+    <button aria-label="Volver" style="width: 32px; height: 44px; border: none; background: none; color: #FFFFFF; padding: 0; display: flex; align-items: center"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg></button>
+    <div style="width: 40px; height: 40px; border-radius: 50%; background: #F2B84B; color: #1F1B16; display: flex; align-items: center; justify-content: center; font: 700 18px 'Bricolage Grotesque', sans-serif">N</div>
+    <div style="display: flex; flex-direction: column; flex-grow: 1">
+      <div style="font-size: 16px; font-weight: 600">[Nombre] · tu agencia</div>
+      <div style="font-size: 13px; opacity: 0.85">en línea</div>
+    </div>
+  </div>
+  <div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; padding: 12px 10px; overflow: hidden">
+    <div style="align-self: center; background: #FFFFFF; color: #54656F; font-size: 12px; padding: 4px 10px; border-radius: 8px; margin-bottom: 6px">HOY</div>
+    <div class="out">Hola! me pasaron este número para el tema de las redes<div class="meta">10:02 <svg aria-hidden="true" width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="#3B9BD8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6l3 3 6-7"></path><path d="M6 9l1 0.6 6-7"></path></svg></div></div>
+    <div class="in">¡Hola! 👋 Soy [Nombre], tu agencia de marketing en WhatsApp. Te ayudo a planear, crear y publicar contenido para tus redes, y <b>nada se publica sin que vos lo apruebes</b>.<br><br>¿Cómo se llama tu negocio?<div class="meta">10:02</div></div>
+    <div class="out">Muebles Ramírez<div class="meta">10:03 <svg aria-hidden="true" width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="#3B9BD8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6l3 3 6-7"></path><path d="M6 9l1 0.6 6-7"></path></svg></div></div>
+    <div class="in" style="padding: 4px 4px 6px">
+      <div style="display: flex; gap: 10px; align-items: center; background: #F3EFE8; border-radius: 8px; padding: 10px; margin-bottom: 6px">
+        <div style="width: 48px; height: 48px; border-radius: 8px; background: #1F6F5C; color: #F2B84B; display: flex; align-items: center; justify-content: center; flex-shrink: 0"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h10M4 17h7"></path><circle cx="18" cy="16" r="3"></circle></svg></div>
+        <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
+          <div style="font-size: 14px; font-weight: 600; color: #111B21">Contanos de tu marca</div>
+          <div style="font-size: 12.5px; color: #5F6B66">5 minutos desde el celu</div>
+          <div style="font-size: 12px; color: #5F6B66">[dominio]/o/x7Kq2</div>
+        </div>
+      </div>
+      <div style="padding: 0 6px">¡Buenísimo, Muebles Ramírez! Para conocer tu marca necesito unos datos y algunas fotos. Son 5 minutos desde el celu 👇<br><a href="#" style="text-decoration: underline">[dominio]/o/x7Kq2</a></div>
+      <div class="meta" style="padding: 0 6px">10:03</div>
+    </div>
+  </div>
+  <div style="display: flex; align-items: center; gap: 8px; padding: 8px 8px 14px">
+    <div style="flex-grow: 1; display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 14px; background: #FFFFFF; border-radius: 23px; color: #5F6B66">
+      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5l-8.6 8.6a5 5 0 01-7-7l8.6-8.6a3.3 3.3 0 014.7 4.7l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l8-8"></path></svg>
+      <label for="msg" style="position: absolute; width: 1px; height: 1px; overflow: hidden">Mensaje</label>
+      <input id="msg" placeholder="Escribí un mensaje" style="flex-grow: 1; border: none; outline: none; font: 15px Figtree, sans-serif; background: none; color: #111B21">
+    </div>
+    <button aria-label="Enviar" style="width: 46px; height: 46px; border-radius: 50%; border: none; background: #1F6F5C; color: #FFFFFF; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

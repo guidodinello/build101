@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Design system</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&amp;family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1F6F5C}a:hover{color:#164F42}
+.h{margin:0;font:700 13px Figtree,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#6B6257}
+.sw{display:flex;flex-direction:column;gap:8px}
+.chip{height:72px;border-radius:14px;box-shadow:inset 0 0 0 1px rgba(31,27,22,.1)}
+.nm{font-size:14px;font-weight:600}
+.hx{font:12px 'JetBrains Mono',monospace;color:#6B6257}
+.badge{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;font-size:13px;font-weight:600}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.btn{height:56px;padding:0 24px;border-radius:14px;font:600 17px Figtree,sans-serif;border:none}
+</style>
+</helmet>
+<div style="width: 960px; height: 1080px; box-sizing: border-box; padding: 56px; display: flex; flex-direction: column; gap: 44px; background: #FAF7F2; font-family: Figtree, sans-serif; color: #1F1B16">
+  <div style="display: flex; flex-direction: column; gap: 8px">
+    <h1 style="margin: 0; font: 700 44px/1 'Bricolage Grotesque', sans-serif; letter-spacing: -0.02em">Web app tokens</h1>
+    <div style="font-size: 17px; color: #6B6257">Warm, quiet, one accent. Feels like a continuation of the chat.</div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 16px">
+    <h2 class="h">Color</h2>
+    <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px">
+      <div class="sw"><div class="chip" style="background: #FAF7F2"></div><div class="nm">background</div><div class="hx">#FAF7F2</div></div>
+      <div class="sw"><div class="chip" style="background: #1F1B16"></div><div class="nm">foreground</div><div class="hx">#1F1B16</div></div>
+      <div class="sw"><div class="chip" style="background: #1F6F5C"></div><div class="nm">primary</div><div class="hx">#1F6F5C</div></div>
+      <div class="sw"><div class="chip" style="background: #F2B84B"></div><div class="nm">accent</div><div class="hx">#F2B84B</div></div>
+      <div class="sw"><div class="chip" style="background: #EFE9E0"></div><div class="nm">muted</div><div class="hx">#EFE9E0 · fg #6B6257</div></div>
+      <div class="sw"><div class="chip" style="background: #C2410C"></div><div class="nm">destructive</div><div class="hx">#C2410C</div></div>
+    </div>
+  </div>
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px">
+    <div style="display: flex; flex-direction: column; gap: 16px">
+      <h2 class="h">Type</h2>
+      <div style="display: flex; flex-direction: column; gap: 12px">
+        <div style="font: 700 34px/1.05 'Bricolage Grotesque', sans-serif">¡Listo! · Bricolage 700</div>
+        <div style="font: 700 22px/1.2 'Bricolage Grotesque', sans-serif">Contanos de tu negocio</div>
+        <div style="font-size: 17px; line-height: 1.45">Body · Figtree 400, 15–17 px. Ya tenemos todo, en un minuto te escribimos.</div>
+        <div style="font-size: 13px; color: #6B6257">Helper · Figtree 13 px, muted-foreground</div>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 16px">
+      <h2 class="h">Controls · radius 14, min 48 px tall</h2>
+      <div style="display: flex; flex-wrap: wrap; gap: 12px">
+        <button class="btn" style="background: #1F6F5C; color: #FFFFFF">Siguiente</button>
+        <button class="btn" style="background: #EFE9E0; color: #1F1B16">Cambiar</button>
+        <button class="btn" style="background: #E7DFD3; color: #6B6257" disabled>Siguiente</button>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px">
+        <button style="height: 40px; padding: 0 14px; border-radius: 20px; border: 1.5px solid #1F6F5C; background: #1F6F5C; color: #FFFFFF; font: 500 14px Figtree, sans-serif">Seleccionado</button>
+        <button style="height: 40px; padding: 0 14px; border-radius: 20px; border: 1.5px solid #DDD3C5; background: #FFFFFF; color: #1F1B16; font: 500 14px Figtree, sans-serif">Opción</button>
+      </div>
+      <label for="sx" style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Campo
+        <input id="sx" value="Muebles Ramírez" style="box-sizing: border-box; height: 48px; padding: 0 14px; border: 1.5px solid transparent; border-radius: 14px; background: #EFE9E0; font: 400 16px Figtree, sans-serif; color: #1F1B16">
+      </label>
+    </div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 16px">
+    <h2 class="h">Post status · always text + color</h2>
+    <div style="display: flex; flex-wrap: wrap; gap: 10px">
+      <span class="badge" style="background: #EAE6E0; color: #57504A"><span class="dot"></span>Generando</span>
+      <span class="badge" style="background: #FBE9C4; color: #7A4F00"><span class="dot"></span>Esperando aprobación</span>
+      <span class="badge" style="background: #DCE8F7; color: #1E4D8C"><span class="dot"></span>Aprobado</span>
+      <span class="badge" style="box-shadow: inset 0 0 0 1.5px #1F6F5C; color: #1F6F5C"><span class="dot"></span>Programado</span>
+      <span class="badge" style="background: #1F6F5C; color: #FFFFFF"><span class="dot"></span>Publicado</span>
+      <span class="badge" style="background: #EFE9E0; color: #6B6257; text-decoration: line-through"><span class="dot"></span>Descartado</span>
+      <span class="badge" style="background: #FBE3D6; color: #9A3412"><span class="dot"></span>Error</span>
+    </div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 16px">
+    <h2 class="h">WhatsApp surface (simulator)</h2>
+    <div style="display: flex; gap: 16px; align-items: flex-start; padding: 20px; background: #EFEAE2; border-radius: 14px">
+      <div style="padding: 8px 12px; border-radius: 10px; border-top-left-radius: 3px; background: #FFFFFF; font-size: 15px">Bot · #FFFFFF</div>
+      <div style="padding: 8px 12px; border-radius: 10px; border-top-right-radius: 3px; background: #D9FDD3; font-size: 15px">Owner · #D9FDD3</div>
+      <div style="height: 40px; padding: 0 18px; border-radius: 10px; background: #FFFFFF; color: #1F6F5C; font-weight: 600; display: flex; align-items: center">Reply button</div>
+      <div class="hx" style="margin-left: auto; align-self: center">chat bg #EFEAE2</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":960,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

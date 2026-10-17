@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>WhatsApp: plan de la semana</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&amp;family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1F6F5C}a:hover{color:#164F42}
+.in,.out{max-width:80%;padding:7px 10px 6px;border-radius:10px;font-size:15px;line-height:1.38;color:#111B21;box-shadow:0 1px 0.5px rgba(11,20,26,.13)}
+.in{align-self:flex-start;background:#FFFFFF;border-top-left-radius:3px}
+.out{align-self:flex-end;background:#D9FDD3;border-top-right-radius:3px}
+.meta{display:flex;justify-content:flex-end;align-items:center;gap:3px;font-size:11px;color:#5F6B66;margin-top:2px}
+.btns{align-self:flex-start;width:80%;display:flex;flex-direction:column;gap:3px;margin-top:-2px}
+.qr{height:40px;border:none;border-radius:10px;background:#FFFFFF;color:#1F6F5C;font:600 15px Figtree,sans-serif;box-shadow:0 1px 0.5px rgba(11,20,26,.13);display:flex;align-items:center;justify-content:center;gap:6px}
+.item{display:flex;gap:8px;padding:8px 0;border-top:1px solid #ECE7DF}
+.num{flex-shrink:0;width:22px;height:22px;border-radius:50%;background:#E3EFEA;color:#1F6F5C;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; display: flex; flex-direction: column; background: #EFEAE2; font-family: Figtree, sans-serif; overflow: hidden">
+  <div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: #1F6F5C; color: #FFFFFF">
+    <button aria-label="Volver" style="width: 32px; height: 44px; border: none; background: none; color: #FFFFFF; padding: 0; display: flex; align-items: center"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg></button>
+    <div style="width: 40px; height: 40px; border-radius: 50%; background: #F2B84B; color: #1F1B16; display: flex; align-items: center; justify-content: center; font: 700 18px 'Bricolage Grotesque', sans-serif">N</div>
+    <div style="display: flex; flex-direction: column; flex-grow: 1">
+      <div style="font-size: 16px; font-weight: 600">[Nombre] · tu agencia</div>
+      <div style="font-size: 13px; opacity: 0.85">escribiendo…</div>
+    </div>
+  </div>
+  <div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; padding: 12px 10px; overflow: hidden">
+    <div class="out">Dale<div class="meta">10:14 <svg aria-hidden="true" width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="#3B9BD8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6l3 3 6-7"></path><path d="M6 9l1 0.6 6-7"></path></svg></div></div>
+    <div class="in">Dale, armo el plan de la semana ⏳<div class="meta">10:14</div></div>
+    <div class="in" style="max-width: 86%">
+      <div style="padding-bottom: 6px">📅 <b>Plan semana del 20/10</b></div>
+      <div class="item"><div class="num">1</div><div><b>Mar 21</b> · Producto estrella: la mesa de roble Nórdica, foco en la madera maciza</div></div>
+      <div class="item"><div class="num">2</div><div><b>Jue 23</b> · Detrás de escena: así se hace una silla en el taller</div></div>
+      <div class="item"><div class="num">3</div><div><b>Sáb 25</b> · Promo: 10% off en racks de TV este fin de semana</div></div>
+      <div class="meta">10:15</div>
+    </div>
+    <div class="btns" style="width: 86%">
+      <button class="qr"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14l-4-4 4-4"></path><path d="M5 10h9a5 5 0 010 10h-2"></path></svg>Aprobar plan</button>
+      <button class="qr"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14l-4-4 4-4"></path><path d="M5 10h9a5 5 0 010 10h-2"></path></svg>Cambiar algo</button>
+    </div>
+    <div class="out">Aprobar plan<div class="meta">10:16 <svg aria-hidden="true" width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="#3B9BD8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6l3 3 6-7"></path><path d="M6 9l1 0.6 6-7"></path></svg></div></div>
+    <div class="in">¡Genial! Te voy mandando las publicaciones a medida que estén listas.<div class="meta">10:16</div></div>
+  </div>
+  <div style="display: flex; align-items: center; gap: 8px; padding: 8px 8px 14px">
+    <div style="flex-grow: 1; display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 14px; background: #FFFFFF; border-radius: 23px; color: #5F6B66">
+      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5l-8.6 8.6a5 5 0 01-7-7l8.6-8.6a3.3 3.3 0 014.7 4.7l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l8-8"></path></svg>
+      <label for="msg" style="position: absolute; width: 1px; height: 1px; overflow: hidden">Mensaje</label>
+      <input id="msg" placeholder="Escribí un mensaje" style="flex-grow: 1; border: none; outline: none; font: 15px Figtree, sans-serif; background: none; color: #111B21">
+    </div>
+    <button aria-label="Enviar" style="width: 46px; height: 46px; border-radius: 50%; border: none; background: #1F6F5C; color: #FFFFFF; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

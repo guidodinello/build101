@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>WhatsApp: pedido puntual y cambio</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&amp;family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=Fraunces:opsz,wght@9..144,600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1F6F5C}a:hover{color:#164F42}
+.in,.out{max-width:80%;padding:7px 10px 6px;border-radius:10px;font-size:15px;line-height:1.38;color:#111B21;box-shadow:0 1px 0.5px rgba(11,20,26,.13)}
+.in{align-self:flex-start;background:#FFFFFF;border-top-left-radius:3px}
+.out{align-self:flex-end;background:#D9FDD3;border-top-right-radius:3px}
+.meta{display:flex;justify-content:flex-end;align-items:center;gap:3px;font-size:11px;color:#5F6B66;margin-top:2px}
+.btns{align-self:flex-start;width:80%;display:flex;flex-direction:column;gap:3px;margin-top:-2px}
+.qr{height:40px;border:none;border-radius:10px;background:#FFFFFF;color:#1F6F5C;font:600 15px Figtree,sans-serif;box-shadow:0 1px 0.5px rgba(11,20,26,.13);display:flex;align-items:center;justify-content:center;gap:6px}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; display: flex; flex-direction: column; background: #EFEAE2; font-family: Figtree, sans-serif; overflow: hidden">
+  <div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: #1F6F5C; color: #FFFFFF; position: relative; z-index: 1">
+    <button aria-label="Volver" style="width: 32px; height: 44px; border: none; background: none; color: #FFFFFF; padding: 0; display: flex; align-items: center"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg></button>
+    <div style="width: 40px; height: 40px; border-radius: 50%; background: #F2B84B; color: #1F1B16; display: flex; align-items: center; justify-content: center; font: 700 18px 'Bricolage Grotesque', sans-serif">N</div>
+    <div style="display: flex; flex-direction: column; flex-grow: 1">
+      <div style="font-size: 16px; font-weight: 600">[Nombre] · tu agencia</div>
+      <div style="font-size: 13px; opacity: 0.85">escribiendo…</div>
+    </div>
+  </div>
+  <div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; padding: 12px 10px; overflow: hidden">
+    <div class="out">hacé un post para la promo del finde, 15% en sillas<div class="meta">18:40 <svg aria-hidden="true" width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="#3B9BD8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6l3 3 6-7"></path><path d="M6 9l1 0.6 6-7"></path></svg></div></div>
+    <div class="in">¡Dale! Lo armo ⏳<div class="meta">18:40</div></div>
+    <div class="in" style="padding: 3px 3px 6px; width: 250px; max-width: 250px">
+      <div style="position: relative; width: 244px; height: 305px; border-radius: 8px; overflow: hidden; background: #E2D3BC">
+        <svg role="img" aria-label="Foto de una silla de madera" width="244" height="190" viewBox="0 0 400 310" preserveAspectRatio="xMidYMid slice" style="position: absolute; left: 0; top: 0">
+          <rect x="0" y="0" width="400" height="230" fill="#E2D3BC"></rect>
+          <rect x="0" y="230" width="400" height="80" fill="#A98263"></rect>
+          <rect x="160" y="40" width="12" height="230" rx="3" fill="#6B4428"></rect>
+          <rect x="160" y="40" width="90" height="12" rx="3" fill="#6B4428"></rect>
+          <rect x="160" y="80" width="90" height="8" rx="3" fill="#7A5232"></rect>
+          <rect x="160" y="160" width="110" height="14" rx="3" fill="#6B4428"></rect>
+          <rect x="256" y="174" width="12" height="96" rx="3" fill="#5A3920"></rect>
+          <rect x="238" y="40" width="12" height="122" rx="3" fill="#6B4428"></rect>
+        </svg>
+        <div style="position: absolute; left: 12px; top: 12px; background: #F3EBDD; color: #4F5D2F; font: 700 13px Figtree, sans-serif; padding: 6px 10px; border-radius: 6px">15% OFF</div>
+        <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 116px; background: #4F5D2F; padding: 12px 14px; box-sizing: border-box; display: flex; flex-direction: column; gap: 3px; color: #F3EBDD">
+          <div style="font: 600 22px/1.05 Fraunces, serif">15% en sillas</div>
+          <div style="font-size: 11px">Solo este sábado y domingo</div>
+          <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: auto">
+            <div style="background: #C89B6D; color: #1F1B16; font-size: 10px; font-weight: 600; padding: 4px 9px; border-radius: 99px">Escribinos por WhatsApp</div>
+            <div style="font: 600 8px/1.1 Fraunces, serif; letter-spacing: 0.06em; text-align: right">MUEBLES<br>RAMÍREZ</div>
+          </div>
+        </div>
+      </div>
+      <div style="padding: 8px 7px 0">📝 Post para este finde — <b>"15% en sillas"</b><br><br>Este finde renová tu comedor 🪑 Todas nuestras sillas de madera maciza con 15% off, hechas a mano en nuestro taller de Montevideo. Escribinos por DM o WhatsApp y te asesoramos. Válido sábado y domingo.</div>
+      <div class="meta" style="padding: 0 7px">18:41</div>
+    </div>
+    <div class="btns" style="width: 250px">
+      <button class="qr">Aprobar</button>
+      <button class="qr">Cambiar</button>
+      <button class="qr">Descartar</button>
+    </div>
+    <div class="out">Cambiar<div class="meta">18:42 <svg aria-hidden="true" width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="#3B9BD8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6l3 3 6-7"></path><path d="M6 9l1 0.6 6-7"></path></svg></div></div>
+    <div class="in">¿Qué le cambio? Por ejemplo: "más corto", "otra foto", "mencioná el envío gratis".<div class="meta">18:42</div></div>
+    <div class="out">más corto y que diga que hay envío gratis en mvd<div class="meta">18:43 <svg aria-hidden="true" width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="#3B9BD8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6l3 3 6-7"></path><path d="M6 9l1 0.6 6-7"></path></svg></div></div>
+    <div class="in">Va, lo ajusto ⏳<div class="meta">18:43</div></div>
+  </div>
+  <div style="display: flex; align-items: center; gap: 8px; padding: 8px 8px 14px">
+    <div style="flex-grow: 1; display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 14px; background: #FFFFFF; border-radius: 23px; color: #5F6B66">
+      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5l-8.6 8.6a5 5 0 01-7-7l8.6-8.6a3.3 3.3 0 014.7 4.7l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l8-8"></path></svg>
+      <label for="msg" style="position: absolute; width: 1px; height: 1px; overflow: hidden">Mensaje</label>
+      <input id="msg" placeholder="Escribí un mensaje" style="flex-grow: 1; border: none; outline: none; font: 15px Figtree, sans-serif; background: none; color: #111B21">
+    </div>
+    <button aria-label="Enviar" style="width: 46px; height: 46px; border-radius: 50%; border: none; background: #1F6F5C; color: #FFFFFF; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

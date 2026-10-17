@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Template split_story</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&amp;family=Fraunces:opsz,wght@9..144,600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 1080px; height: 1350px; display: flex; flex-direction: column; overflow: hidden; background: {{background}}; color: {{text}}; font-family: Figtree, sans-serif">
+  <div style="height: 250px; box-sizing: border-box; padding: 64px 64px 0; display: flex; align-items: center">
+    <div style="font: 600 84px/1.02 Fraunces, serif; letter-spacing: -0.01em">Así se hace una silla</div>
+  </div>
+  <div style="flex-grow: 1; display: flex">
+    <svg role="img" aria-label="Foto: silla en proceso en el taller" width="720" height="920" viewBox="0 0 300 380" preserveAspectRatio="xMidYMid slice" style="flex-shrink: 0; display: block">
+      <rect x="0" y="0" width="300" height="380" fill="#A98263"></rect>
+      <rect x="0" y="0" width="300" height="250" fill="#C9A47A"></rect>
+      <rect x="0" y="250" width="300" height="12" fill="#5A3920"></rect>
+      <rect x="110" y="70" width="10" height="180" rx="2" fill="#6B4428"></rect>
+      <rect x="110" y="70" width="80" height="10" rx="2" fill="#6B4428"></rect>
+      <rect x="110" y="170" width="95" height="12" rx="2" fill="#6B4428"></rect>
+      <rect x="180" y="70" width="10" height="102" rx="2" fill="#6B4428"></rect>
+      <rect x="196" y="182" width="9" height="68" rx="2" fill="#5A3920"></rect>
+      <rect x="40" y="226" width="44" height="24" rx="3" fill="#3E2C1E"></rect>
+      <rect x="230" y="200" width="6" height="50" fill="#3E2C1E"></rect>
+    </svg>
+    <div style="flex-grow: 1; box-sizing: border-box; padding: 56px 40px 40px 44px; display: flex; flex-direction: column; gap: 30px">
+      <div style="font-size: 26px; font-weight: 700; letter-spacing: 0.12em; color: {{accent}}">EN EL TALLER</div>
+      <div style="display: flex; flex-direction: column; gap: 26px; font-size: 32px; line-height: 1.25">
+        <div style="padding-top: 18px; border-top: 3px solid {{accent}}">Madera elegida a mano</div>
+        <div style="padding-top: 18px; border-top: 3px solid {{accent}}">Ensambles sin tornillos</div>
+        <div style="padding-top: 18px; border-top: 3px solid {{accent}}">Lijado y aceite natural</div>
+      </div>
+    </div>
+  </div>
+  <div style="height: 180px; box-sizing: border-box; padding: 0 64px 48px; display: flex; justify-content: flex-end; align-items: flex-end">
+    <div style="width: 160px; display: flex; flex-direction: column; align-items: center; gap: 8px">
+      <div style="width: 80px; height: 80px; border-radius: 50%; border: 3px solid {{text}}; display: flex; align-items: center; justify-content: center; font: 600 30px Fraunces, serif">MR</div>
+      <div style="font: 600 15px Fraunces, serif; letter-spacing: 0.14em">MUEBLES RAMÍREZ</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"background":{"editor":"color","default":"#F3EBDD","options":["#F3EBDD","#4F5D2F","#FFFFFF"]},"text":{"editor":"color","default":"#2E3519","options":["#2E3519","#1F1B16","#F3EBDD"]},"accent":{"editor":"color","default":"#4F5D2F","options":["#4F5D2F","#8A5A2E","#C89B6D"]},"$preview":{"width":1080,"height":1350}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      background: this.props.background ?? '#F3EBDD',
+      text: this.props.text ?? '#2E3519',
+      accent: this.props.accent ?? '#4F5D2F'
+    };
+  }
+}
+</script>
+</body>
+</html>
