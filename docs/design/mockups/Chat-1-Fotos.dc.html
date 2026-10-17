@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Chat natural: manda fotos y pide contenido</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&amp;family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1F6F5C}a:hover{color:#164F42}
+.in,.out{max-width:80%;padding:7px 10px 6px;border-radius:10px;font-size:15px;line-height:1.38;color:#111B21;box-shadow:0 1px 0.5px rgba(11,20,26,.13)}
+.in{align-self:flex-start;background:#FFFFFF;border-top-left-radius:3px}
+.out{align-self:flex-end;background:#D9FDD3;border-top-right-radius:3px}
+.meta{display:flex;justify-content:flex-end;align-items:center;gap:3px;font-size:11px;color:#5F6B66;margin-top:2px}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; display: flex; flex-direction: column; background: #EFEAE2; font-family: Figtree, sans-serif; overflow: hidden">
+  <div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: #1F6F5C; color: #FFFFFF; position: relative; z-index: 1">
+    <button aria-label="Volver" style="width: 32px; height: 44px; border: none; background: none; color: #FFFFFF; padding: 0; display: flex; align-items: center"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg></button>
+    <div style="width: 40px; height: 40px; border-radius: 50%; background: #F2B84B; color: #1F1B16; display: flex; align-items: center; justify-content: center; font: 700 18px 'Bricolage Grotesque', sans-serif">N</div>
+    <div style="display: flex; flex-direction: column; flex-grow: 1">
+      <div style="font-size: 16px; font-weight: 600">[Nombre] · tu agencia</div>
+      <div style="font-size: 13px; opacity: 0.85">escribiendo…</div>
+    </div>
+  </div>
+  <div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 6px; padding: 12px 10px; overflow: hidden">
+    <div style="align-self: center; background: #FFFFFF; color: #54656F; font-size: 12px; padding: 4px 10px; border-radius: 8px; margin-bottom: 6px">MIÉRCOLES</div>
+    <div class="out" style="padding: 3px 3px 6px; width: 262px; max-width: 262px">
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px">
+        <svg role="img" aria-label="Foto enviada: mesa ratona de roble, vista de frente" width="128" height="160" viewBox="0 0 160 200" preserveAspectRatio="xMidYMid slice" style="display: block; border-radius: 8px 3px 3px 8px">
+          <rect x="0" y="0" width="160" height="200" fill="#DCCBB1"></rect>
+          <rect x="0" y="120" width="160" height="80" fill="#A98263"></rect>
+          <ellipse cx="80" cy="150" rx="70" ry="16" fill="#C9B79C"></ellipse>
+          <rect x="22" y="110" width="116" height="12" rx="3" fill="#7A5232"></rect>
+          <rect x="30" y="122" width="7" height="26" fill="#5A3920"></rect>
+          <rect x="123" y="122" width="7" height="26" fill="#5A3920"></rect>
+          <rect x="70" y="96" width="18" height="14" rx="3" fill="#4F5D2F"></rect>
+        </svg>
+        <svg role="img" aria-label="Foto enviada: detalle de la veta de la madera" width="128" height="160" viewBox="0 0 160 200" preserveAspectRatio="xMidYMid slice" style="display: block; border-radius: 3px 8px 8px 3px">
+          <rect x="0" y="0" width="160" height="200" fill="#9C6B42"></rect>
+          <path d="M-10 40 C40 20 80 70 170 45" stroke="#7A5232" stroke-width="6" fill="none"></path>
+          <path d="M-10 90 C50 70 90 120 170 95" stroke="#B58457" stroke-width="5" fill="none"></path>
+          <path d="M-10 140 C40 120 100 165 170 140" stroke="#7A5232" stroke-width="6" fill="none"></path>
+          <path d="M-10 185 C60 165 90 205 170 182" stroke="#B58457" stroke-width="4" fill="none"></path>
+        </svg>
+      </div>
+      <div style="padding: 6px 7px 0">me llegó esta mesa ratona nueva 😍 armame algo para subir</div>
+      <div class="meta" style="padding: 0 7px">16:20 <svg aria-hidden="true" width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="#3B9BD8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6l3 3 6-7"></path><path d="M6 9l1 0.6 6-7"></path></svg></div>
+    </div>
+    <div class="in">¡Qué linda! 😍 Ya guardé las fotos. ¿La mostramos como novedad o tiene algún precio de lanzamiento?<div class="meta">16:20</div></div>
+    <div class="out">novedad, y que se luzca la madera<div class="meta">16:21 <svg aria-hidden="true" width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="#3B9BD8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6l3 3 6-7"></path><path d="M6 9l1 0.6 6-7"></path></svg></div></div>
+    <div class="in">Dale, lo armo con la foto del detalle de la veta ⏳<div class="meta">16:21</div></div>
+  </div>
+  <div style="display: flex; align-items: center; gap: 8px; padding: 8px 8px 14px">
+    <div style="flex-grow: 1; display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 14px; background: #FFFFFF; border-radius: 23px; color: #5F6B66">
+      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5l-8.6 8.6a5 5 0 01-7-7l8.6-8.6a3.3 3.3 0 014.7 4.7l-8.6 8.6a1.7 1.7 0 01-2.4-2.4l8-8"></path></svg>
+      <label for="msg" style="position: absolute; width: 1px; height: 1px; overflow: hidden">Mensaje</label>
+      <input id="msg" placeholder="Escribí un mensaje" style="flex-grow: 1; border: none; outline: none; font: 15px Figtree, sans-serif; background: none; color: #111B21">
+      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
+    </div>
+    <button aria-label="Enviar" style="width: 46px; height: 46px; border-radius: 50%; border: none; background: #1F6F5C; color: #FFFFFF; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

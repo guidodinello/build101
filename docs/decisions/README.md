@@ -34,3 +34,4 @@ When an ADR is superseded, set its Status to `superseded`, add `- Superseded by:
 | [0013](0013-focus-marketing.md) | Focus the MVP on marketing and social media | proposed | 2026-10-17 |
 | [0014](0014-whatsapp-cloud-api.md) | WhatsApp via the official Cloud API | proposed | 2026-10-17 |
 | [0015](0015-instagram-login.md) | Connect Instagram through Instagram Login | proposed | 2026-10-17 |
+| [0016](0016-demo-scope-one-post.md) | Demo scope is one post, from request to published | proposed | 2026-10-17 |

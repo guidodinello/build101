@@ -2,6 +2,7 @@
 
 - Date: 2026-10-17
 - Status: proposed
+- Priorities revised by: [0016](0016-demo-scope-one-post.md)
 
 ## Context
 

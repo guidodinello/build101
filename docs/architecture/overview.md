@@ -25,12 +25,12 @@ flowchart LR
 | **Web app** | Next.js (App Router, TypeScript), Tailwind, shadcn/ui, on Vercel | Onboarding wizard, IG connect hand-off, **dashboard** where the Owner manages their Catalog, Brand assets (photos and videos) and Offers, **chat simulator** (`/dev/chat`) |
 | **Backend API** | Python 3.13, FastAPI, uvicorn, one container (Tenki, or Railway/Render as fallback) | Webhooks, REST for the web app, orchestrator, agents, jobs, rendering, publishing |
 | **Database** | Supabase Postgres | All state. Schema in [data-model.md](data-model.md) |
-| **File storage** | Supabase Storage (Pro plan, 300 MB per file), two buckets: `assets` (private uploads), `renders` (public JPEGs) | Logos, photos, videos (uploaded straight from the browser), frames and WhatsApp previews cut from videos, rendered posts |
+| **File storage** | Supabase Storage (Free plan for the Must scope; Pro with a 300 MB file limit only once the Could video work starts, [ADR 0016](../decisions/0016-demo-scope-one-post.md)), two buckets: `assets` (private uploads), `renders` (public JPEGs) | Logos and photos (uploaded straight from the browser or received in the chat), rendered posts; videos, frames and Reel previews only with the Could video work |
 | **LLM** | Claude API (`claude-opus-5-5`) via the official `anthropic` Python SDK | Orchestrator + specialist agents. See [agents.md](agents.md) |
 | **WhatsApp** | Meta WhatsApp Cloud API (direct) | Inbound/outbound messages, buttons, media |
 | **Publishing** | Zernio, unified social publishing API (see [integrations.md](integrations.md#publishing-provider-zernio)) | Instagram connect + publish + schedule |
 | **Renderer** | Jinja2 HTML templates → Playwright (headless Chromium) → JPEG | Deterministic branded images |
-| **Video tools** | ffmpeg / ffprobe in the backend container | Video metadata, keyframes for the Asset Analyst, WhatsApp previews of Reels. Claude reads no video ([integrations.md](integrations.md#video-processing-ffmpeg)) |
+| **Video tools** (Could) | ffmpeg / ffprobe in the backend container, only once the video work starts | Video metadata, keyframes for the Asset Analyst, WhatsApp previews of Reels. Claude reads no video ([integrations.md](integrations.md#video-processing-ffmpeg)) |
 
 ## Backend internal architecture
 
@@ -141,7 +141,7 @@ For a Reel, the Art Director picks the video and the cover frame instead of a te
 
 ## Request lifecycle: upload from the web
 
-The bytes never pass through the backend or Vercel: the browser writes to Storage with a one-path signed URL ([api.md](api.md#uploads), [ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)).
+The bytes never pass through the backend or Vercel: the browser writes to Storage with a one-path signed URL ([api.md](api.md#uploads), [ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)). In the Must scope this is the wizard's logo and photos; dashboard uploads and videos are Could ([ADR 0016](../decisions/0016-demo-scope-one-post.md)).
 
 ```mermaid
 sequenceDiagram
@@ -191,8 +191,8 @@ The single-process assumption (in-memory locks, in-process jobs) is deliberate f
 | Piece | Where | Notes |
 |---|---|---|
 | Web | Vercel | `NEXT_PUBLIC_API_URL` → backend URL |
-| Backend | Tenki (or Railway/Render): one container, 1 instance, ≥ 1 GB RAM (Chromium), a few GB of temp disk for video processing | Dockerfile per [`.claude/rules/docker.md`](../../.claude/rules/docker.md), with Chromium installed by Playwright and `ffmpeg` |
-| DB + storage | Supabase (Pro plan, global file limit 300 MB) | Schema applied with `uv run alembic upgrade head` (runs on deploy) |
+| Backend | Tenki (or Railway/Render): one container, 1 instance, ≥ 1 GB RAM (Chromium); a few GB of temp disk only for the Could video work | Dockerfile per [`.claude/rules/docker.md`](../../.claude/rules/docker.md), with Chromium installed by Playwright (`ffmpeg` only for the Could video work) |
+| DB + storage | Supabase (Free plan for the Must scope; Pro with a 300 MB global file limit for the Could video work) | Schema applied with `uv run alembic upgrade head` (runs on deploy) |
 | WhatsApp webhook | `https://<backend>/webhooks/whatsapp` | Configured in the Meta app dashboard |
 | Secrets | Platform env vars | Full list in [../implementation/setup.md](../implementation/setup.md) |
 

@@ -112,7 +112,7 @@ create table brand_assets (
   archived_at            timestamptz,
   created_at             timestamptz not null default now(),
   constraint ck_brand_assets_kind check (kind in ('logo','photo','video')),
-  constraint ck_brand_assets_source check (source in ('web','whatsapp')),
+  constraint ck_brand_assets_source check (source in ('web','whatsapp','instagram')),  -- 'instagram': feed import (F2.8, Could)
   constraint ck_brand_assets_status check (status in ('uploading','ready','failed')),
   constraint ck_brand_assets_duration_only_video check (duration_ms is null or kind = 'video'),
   constraint ck_brand_assets_frame_has_source check (
@@ -213,6 +213,7 @@ create table posts (
   title             text,
   copy              jsonb,                            -- PostCopy
   render_spec       jsonb,                            -- RenderSpec
+  candidate_asset_ids uuid[] not null default '{}',  -- photos the Owner sent with the request; the Art Director picks from these
   photo_asset_id    uuid constraint posts_photo_asset_id_fkey references brand_assets(id) on delete set null,
   video_asset_id    uuid constraint posts_video_asset_id_fkey references brand_assets(id) on delete set null,  -- Reels
   cover_offset_ms   int,                              -- Reel cover frame
@@ -328,4 +329,5 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 - **Products and Offers**: the Catalog lives in `products`, not in `onboarding_data` or the Brand Brain. The Brand Brain keeps only a featured summary that references product ids; agents read the full Catalog and the `active` Offers (not past `ends_on`) from these tables. `current_offers` no longer exists.
 - **Archiving, not deleting**: Owners archive Products, Brand assets and Offers (`archived_at`, or `status = 'archived'` for Offers). Archived rows are hidden from agents and the dashboard. Published and scheduled Posts keep their rendered image or video; draft Posts (`pending_approval`, `revising`) that use archived material are flagged for review.
 - **Video frames**: the Asset Analyst saves the best frames of a video as `photo` assets with `derived_from_asset_id` and `frame_offset_ms` set, so the Art Director can use them like any photo.
+- **Build priority** ([ADR 0016](../decisions/0016-demo-scope-one-post.md)): the first migration creates the whole schema, including the Catalog, Offer, video and Reel columns from [ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md), because a column costs nothing and a later migration mid-hackathon does. The Must scope only writes businesses, magic links, photos and logos (wizard and chat), Brand Brains, ad-hoc posts and the conversation tables; `products` holds the 1–5 wizard Products. The rest stays empty until its Could feature is built.
 - **Seed**: `backend/app/db/seed.py` creates the demo business with a pre-generated Brand Brain and plan (see the demo fallbacks in [../product/mvp.md](../product/mvp.md#demo-fallbacks)).

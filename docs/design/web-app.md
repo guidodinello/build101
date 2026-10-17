@@ -1,6 +1,8 @@
 # Web app design
 
-The web app is a **side door**. Owners spend 95% of their time in WhatsApp. The web exists for what WhatsApp can't do well: forms, bulk uploads, OAuth, and keeping the Catalog and Brand assets tidy. It must feel like a continuation of the chat: mobile, friendly, Spanish, one thing per screen. The more catalog and content the Owner uploads, the better the Posts and Reels get ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)), so uploading must be effortless.
+The web app is a **side door**. Owners spend 95% of their time in WhatsApp. The web exists for what WhatsApp can't do well: forms, uploads, OAuth. It must feel like a continuation of the chat: mobile, friendly, Spanish, one thing per screen.
+
+Priorities follow [ADR 0016](../decisions/0016-demo-scope-one-post.md): the onboarding wizard and the `/dev/chat` simulator are **Must**; the read-only dashboard (Inicio) is **Should**; the editable Catálogo, Contenido and Promos tabs, video uploads and Reels from [ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md) stay documented here as the product direction but are **Could**. Wireframes for every screen: [mockups/](mockups/README.md).
 
 ## Principles
 
@@ -14,10 +16,10 @@ The web app is a **side door**. Owners spend 95% of their time in WhatsApp. The 
 ## Stack and UI kit
 
 - Next.js (App Router) + TypeScript, deployed on Vercel.
-- Tailwind CSS + **shadcn/ui** components (Button, Input, Textarea, Select, Slider, RadioGroup, Checkbox, Card, Progress, Badge, Toast/Sonner, Skeleton, Tabs, Sheet, Dialog, AlertDialog, Command (product picker), Calendar + Popover (Offer dates), ToggleGroup).
+- Tailwind CSS + **shadcn/ui** components (Button, Input, Textarea, Select, Slider, RadioGroup, Checkbox, Card, Progress, Badge, Toast/Sonner, Skeleton). The editable dashboard tabs (Could) add Tabs, Sheet, Dialog, AlertDialog, Command (product picker), Calendar + Popover (Offer dates) and ToggleGroup.
 - `lucide-react` icons. No other UI libraries.
-- Data: `fetch` wrappers in `lib/api.ts` + React Server Components for initial load, client components for the wizard steps and dashboard edits. No global state library; the wizard keeps state in the URL (`?step=`) + server, and the dashboard keeps the active tab and filters in the URL (`?tab=contenido&product=…`).
-- Uploads: `tus-js-client` for resumable uploads straight to Supabase Storage (see [Uploads](#uploads)); no file ever goes through Next.js.
+- Data: `fetch` wrappers in `lib/api.ts` + React Server Components for initial load, client components for the wizard steps (and dashboard edits, Could). No global state library; the wizard keeps state in the URL (`?step=`) + server, and the editable dashboard keeps the active tab and filters in the URL (`?tab=contenido&product=…`).
+- Uploads go straight from the browser to Supabase Storage through signed URLs (see [Uploads](#uploads)); no file ever goes through Next.js. `tus-js-client` for resumable uploads is only needed for the Could video work.
 
 ## Visual language
 
@@ -32,7 +34,11 @@ The web app is a **side door**. Owners spend 95% of their time in WhatsApp. The 
 | `--muted-foreground` | `#6B6257` | Helper text |
 | `--destructive` | `#C2410C` | Errors |
 | `--radius` | `14px` | Cards, buttons, inputs |
-| Font | Inter (UI), with `font-feature-settings: "ss01"` | |
+| Heading font | Bricolage Grotesque 600/700 | Screen titles, section headings, the "¡Listo!" moment |
+| Body font | Figtree 400–700 | Body copy, inputs, buttons, helper text |
+| Mono font | JetBrains Mono | Only the simulator's debug panel |
+
+Fonts load from Google Fonts. Post templates don't use these: they use the Business's own brand fonts (see [post-templates.md](post-templates.md)).
 
 Dark mode: not needed for the demo (owners open it from WhatsApp in daylight). Define tokens as CSS variables anyway so it can be added.
 
@@ -40,9 +46,9 @@ Tone of illustrations: none. Use the owner's own photos and logo as soon as they
 
 ## Screens
 
-### `/o/[token]`: onboarding wizard
+### `/o/[token]`: onboarding wizard (Must)
 
-Header (all steps): small logo of the product · "Paso 2 de 6" · progress bar · "Volver a WhatsApp" link (wa.me).
+Six steps plus a closing screen, kept short on purpose: the demo shows it live. Header (steps 1–6): back arrow · "Paso 2 de 6" · progress bar · "WhatsApp" link back to the chat (wa.me).
 
 ```text
 ┌──────────────────────────────┐
@@ -75,73 +81,94 @@ Header (all steps): small logo of the product · "Paso 2 de 6" · progress bar �
 | Step | Title | Content | Validation |
 |---|---|---|---|
 | 1 | Contanos de tu negocio 🏪 | name, category (Select), one-liner (Textarea, 120 chars), location, IG handle | name, category, one-liner required |
-| 2 | ¿Qué es lo que más vendés? | Product cards, no upper limit: name, short description, price (optional). "+ Agregar otro". Hint: "Podés sumar todo tu catálogo después desde tu panel." | ≥ 1 product |
-| 3 | Tu marca 🎨 | Logo dropzone → after upload shows the logo + **detected color swatches** (tap to edit with a color input, "+" to add); "3 palabras que usarían tus clientes para describirte" (3 inputs) | colors ≥ 1 (defaults if no logo) |
-| 4 | Tus fotos y videos 📸🎬 | Grid uploader (camera roll multi-select, photos and videos together). Thumbnails with ✕; videos show a ▶ badge and their duration ("0:24"). Hint: "Productos, el taller, el equipo, videos cortos. Mientras más, mejor." Counter "12 fotos · 3 videos" (no cap) | ≥ 3 photos |
-| 5 | ¿Cómo querés que suene? | Questionnaire, one card per question (see [../product/user-flows.md](../product/user-flows.md#flow-2--web-onboarding-form)): chips for options, sliders with labels at both ends | goal, posts/week, emoji required |
-| 6 | Conectá tu Instagram | Explanation (2 lines: "Lo usamos solo para publicar lo que vos apruebes"), big button "Conectar Instagram" → redirects to Zernio; on return shows ✅ @handle. Secondary: "Lo hago después" | none |
-| 7 | ¡Listo! 🎉 | "Ya tenemos todo. En un minuto te escribimos por WhatsApp con lo que entendimos de tu marca." + big "Volver a WhatsApp" button | calls `/complete` on mount (idempotent) |
+| 2 | ¿Qué es lo que más vendés? | Up to 5 product cards: name, short description ("En pocas palabras"), price (optional). Hint: "Hasta 5. Los que más te importa vender." "+ Agregar otro" hides at 5 | ≥ 1 product |
+| 3 | Tu marca | Logo dropzone → after upload shows the logo + **detected color swatches** ("Los sacamos de tu logo. Tocá uno para cambiarlo."; tap to edit with a color input, "+ Agregar" to add); "3 palabras que usarían tus clientes para describirte" (3 inputs). Could (F2.9): a "Todavía no tengo logo ni colores · Te ayudamos a elegirlos por WhatsApp" option that skips logo and colors and hands them to the chat (the `WA-Sin-marca` mockup); until then, no logo means default colors | colors ≥ 1 (defaults if no logo) |
+| 4 | Tus fotos | Grid uploader (camera roll multi-select, photos only). Thumbnails with ✕ and "Reintentar" on failure. Hint: "Productos, el taller, el equipo." Counter "7 de 15" + "Mínimo 3". Footer: "Usamos tus fotos reales en los posts. Nada se publica sin que lo apruebes." With feed import (F2.8, Could) the hint adds "Las de tu Instagram las traemos solas en el paso 6." | 3 to 15 photos |
+| 5 | ¿Cómo querés que suene? | Questionnaire, one card per question (see [../product/user-flows.md](../product/user-flows.md#flow-2--web-onboarding-form-must)): chips for options, sliders with labels at both ends | goal, posts/week, emoji required |
+| 6 | Conectá tu Instagram | Subtitle "Publicamos solo lo que vos apruebes." Two reassurance lines: "Cada post te llega primero por WhatsApp para que lo apruebes." · "Iniciás sesión en la página de Instagram, nunca nos das tu contraseña." Big button "Conectar Instagram" → redirects to Zernio; on return shows ✅ @handle. Secondary: "Lo hago después". With feed import (F2.8, Could) the subtitle becomes "Traemos tu feed para conocer tu estilo y publicamos solo lo que vos apruebes." and a third line says "Importamos las fotos y videos de tu feed para usarlos en tus posts. Vos elegís cuáles." | none |
+| 6b | Trajimos tu feed (Could, F2.8) | Shown after a successful connect. "Fotos y videos de @handle. Destildá lo que no quieras que usemos." Progress "Importando… 32 de 58" while it runs. Filter chips **Todo · 58 / Fotos · 46 / Videos · 12**; a grid where every item starts ticked (videos show their duration); tap to untick. Footnote: "Lo usamos para entender tu estilo y armar posts con tu material." Button "Listo, seguir" | none |
+| 7 | ¡Listo! 🎉 | "Ya tenemos todo. En un minuto te escribimos por WhatsApp con lo que entendimos de tu marca." A summary card with the logo and name plus counts: Productos, Fotos (with F2.8: "7 + 46 de Instagram" and a Videos row), Posts por semana, Instagram @handle. Big "Volver a WhatsApp" button | calls `/complete` on mount (idempotent) |
 
-Upload UX: see [Uploads](#uploads); the wizard and the dashboard share the same uploader component.
+Back in WhatsApp the bot sends the brand summary; once the Owner confirms it, the chat opens with "¿En qué te puedo ayudar hoy?" instead of offering a weekly plan (see [../product/conversation-design.md](../product/conversation-design.md)).
+
+Upload UX: see [Uploads](#uploads).
 
 Error states: expired/invalid token → friendly screen "Este link venció. Escribinos 'link' por WhatsApp y te mandamos uno nuevo." (the onboarding router handles "link").
 
 ### Uploads
 
-Shared by wizard step 4 and the dashboard's Contenido tab.
+Wizard step 4 (Must) uploads photos only; the dashboard's Contenido tab (Could) reuses the same uploader and adds videos.
 
-- Accepted: photos `image/jpeg`, `image/png`, `image/webp`, `image/heic` up to **10 MB**; videos `video/mp4`, `video/quicktime` (MOV) up to **300 MB**. Anything else gets a friendly inline error on its thumbnail, never a blocking dialog: "Este video pesa más de 300 MB. Probá mandar uno más corto 🙏" / "Este archivo no lo podemos usar. Subí fotos o videos."
-- Flow per file: `POST …/uploads` → signed Supabase URL → upload from the browser (resumable TUS for files over 6 MB, plain PUT below) → `POST …/assets/{id}/complete`. The backend never receives the file bytes. Endpoints in [../architecture/api.md](../architecture/api.md).
-- Show each thumbnail immediately (object URL; for videos, the first frame via a hidden `<video>`), with a **per-file progress ring** overlay. Up to 3 files upload in parallel; the rest queue.
-- Failure: the thumbnail turns red with "Reintentar". Resumable uploads continue where they stopped after a network drop or the phone locking.
+- Accepted in the wizard: photos `image/jpeg`, `image/png`, `image/webp`, `image/heic` up to **10 MB**. Anything else gets a friendly inline error on its thumbnail, never a blocking dialog: "Este archivo no lo podemos usar. Subí fotos."
+- Flow per file: `POST …/uploads` → signed Supabase URL → upload from the browser → `POST …/assets/{id}/complete`. The backend never receives the file bytes. Endpoints in [../architecture/api.md](../architecture/api.md).
+- Show each thumbnail immediately (object URL), with a **per-file progress ring** overlay. Up to 3 files upload in parallel; the rest queue.
+- Failure: the thumbnail turns red with "Reintentar".
 - Leaving the page while uploads are running shows "Todavía estamos subiendo 3 archivos. ¿Salir igual?".
-- After `complete`, the thumbnail shows a small "Mirando…" chip until the Asset Analyst finishes; then videos that can become a Reel get the **"Ideal para Reel"** badge.
+- After `complete`, the thumbnail shows a small "Mirando…" chip until the Asset Analyst finishes.
 - HEIC is converted server-side after upload.
 
-### `/b/[token]`: dashboard (Must)
+Video uploads (Could, F8.2 and F4.8):
 
-The Owner's panel to see what the Agency is doing and to feed it: Catalog, photos and videos, and Promos. Opened from the "Abrí tu panel" button the bot sends (a `dashboard` magic link valid 7 days). Editable, mobile, four tabs in a **bottom tab bar** (thumb-reachable), each tab one screen:
+- Videos `video/mp4`, `video/quicktime` (MOV) up to **300 MB**, with the error "Este video pesa más de 300 MB. Probá mandar uno más corto 🙏".
+- Resumable TUS uploads (`tus-js-client`) for files over 6 MB, so an upload continues where it stopped after a network drop or the phone locking.
+- Video thumbnails come from the first frame via a hidden `<video>` and show ▶ + duration; after analysis, videos that can become a Reel get the **"Ideal para Reel"** badge.
 
-| Tab | Shows | Edits |
-|---|---|---|
-| **Inicio** | This week's Posts with status badges (Reels carry a ▶ badge), brand summary | Nothing (approval stays in WhatsApp) |
-| **Catálogo** | Products, searchable, with a thumbnail from a linked photo | Add, edit, archive Products |
-| **Contenido** | Grid of photos and videos, filter by Product, "Ideal para Reel" filter | Upload, link Products, add a hint, archive |
-| **Promos** | Active, draft and past Offers | Create, edit, activate, archive Offers |
+### `/b/[token]`: dashboard (Inicio Should; Catálogo, Contenido, Promos Could)
 
-Header (all tabs): logo + business name · "Volver a WhatsApp" link.
+The Owner's panel to see what the Agency is doing. Opened from the "Abrí tu panel" button the bot sends (a `dashboard` magic link valid 7 days).
 
-#### Inicio
+- **Should (F6.3):** a single read-only page, **Inicio**, with no tab bar: this week's Posts with their status, and the brand summary. Approval and every change stay in WhatsApp.
+- **Could (F8, [ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)):** the panel becomes editable, with four tabs in a **bottom tab bar** (thumb-reachable), each tab one screen. The Catálogo, Contenido and Promos sections below describe them.
+
+| Tab | Priority | Shows | Edits |
+|---|---|---|---|
+| **Inicio** | Should | This week's Posts with status badges, brand summary | Nothing (approval stays in WhatsApp) |
+| **Catálogo** | Could | Products, searchable, with a thumbnail from a linked photo | Add, edit, archive Products |
+| **Contenido** | Could | Grid of photos and videos, filter by Product, "Ideal para Reel" filter | Upload, link Products, add a hint, archive |
+| **Promos** | Could | Active, draft and past Offers | Create, edit, activate, archive Offers |
+
+Header: "Volver a WhatsApp" link, then the logo + business name + Instagram status.
+
+#### Inicio (Should)
 
 ```text
 ┌──────────────────────────────┐
-│ [logo] Muebles Ramírez   💬  │  ← 💬 = Volver a WhatsApp
-│ Instagram ✅ @mueblesramirez  │
+│        💬 Volver a WhatsApp  │
+│ [logo] Muebles Ramírez       │
+│ ✓ Instagram · @mueblesramirez│
 ├──────────────────────────────┤
-│ Esta semana                  │
-│ ┌────┐ Mar 21 · Mesa Nórdica │
-│ │img │ ● Programado 19:00    │
-│ └────┘                       │
-│ ┌────┐ Jue 23 · El taller    │
-│ │ ▶  │ Reel ● Esperando apr. │
-│ └────┘                       │
+│ Esta semana   Sem. del 20/10 │
+│ ┌────┐ Pedido puntual · hoy  │
+│ │img │ 15% en sillas         │
+│ └────┘ ● Publicado        ↗  │  ← ↗ opens the post on IG
+│ ┌────┐ Mar 21                │
+│ │img │ Mesa Nórdica          │
+│ └────┘ ● Programado · 19:00  │
+│ ┌────┐ Jue 23                │
+│ │img │ Así se hace una silla │
+│ └────┘ ● Esperando aprobación│
 ├──────────────────────────────┤
 │ Tu marca                     │
-│ Cercanos · cálidos · artesan.│
-│ Pilares: A medida · Taller · │
-│ Ideas para tu living         │
-│ ■ ■ ■  (colores)             │
-├──────────────────────────────┤
-│ 23 productos · 64 fotos ·    │
-│ 7 videos  [Sumar más →]      │  ← goes to Contenido
-├──────────────────────────────┤
-│ Inicio Catálogo Cont. Promos │
+│ CÓMO HABLAMOS                │
+│ (Cercanos)(Cálidos)(Artesan.)│
+│ PARA QUIÉN                   │
+│ Parejas y familias que arman │
+│ su casa                      │
+│ DE QUÉ HABLAMOS              │
+│ 1 Piezas a medida            │
+│ 2 El taller por dentro       │
+│ 3 Ideas para tu living       │
+│ COLORES  ■ ■ ■               │
+│ 💬 ¿Algo no es así?          │
+│    Decinoslo por WhatsApp.   │
 └──────────────────────────────┘
 ```
 
-Status badges: Generando (gray), Esperando aprobación (amber), Aprobado (blue), Programado (green outline), Publicado (green, links to IG), Descartado (muted), Error (red). A Reel adds a "Reel" text badge next to the status (never color alone).
+Status badges: Generando (gray), Esperando aprobación (amber), Aprobado (blue), Programado (green outline), Publicado (green, links to IG), Descartado (muted), Error (red); always text + color.
 
-#### Catálogo
+With the Could tabs, Inicio also gets a counts row ("23 productos · 64 fotos · 7 videos [Sumar más →]", going to Contenido) above the bottom tab bar, and Reels (F4.8) add a ▶ thumbnail and a "Reel" text badge next to the status (never color alone).
+
+#### Catálogo (Could)
 
 ```text
 ┌──────────────────────────────┐
@@ -169,7 +196,7 @@ Status badges: Generando (gray), Esperando aprobación (amber), Aprobado (blue),
 - "Archivar producto" at the bottom of the Sheet, behind an **AlertDialog**: "¿Archivar Silla Oslo? No la vamos a usar en posts nuevos. Lo que ya está publicado no cambia." Nothing is deleted.
 - Archived Products are hidden behind a "Ver archivados" link at the end of the list, with "Restaurar".
 
-#### Contenido
+#### Contenido (Could)
 
 ```text
 ┌──────────────────────────────┐
@@ -200,7 +227,7 @@ Status badges: Generando (gray), Esperando aprobación (amber), Aprobado (blue),
 - Links the Agency suggested and links the Owner set look the same; removing one is final (the Agency won't add it back).
 - "Archivar" behind an AlertDialog: "No la vamos a usar en posts nuevos. Lo que ya está publicado o programado no cambia." Posts still in draft that use it get flagged for review.
 
-#### Promos
+#### Promos (Could)
 
 ```text
 ┌──────────────────────────────┐
@@ -235,8 +262,8 @@ Status badges: Generando (gray), Esperando aprobación (amber), Aprobado (blue),
 #### Link and error states
 
 - Expired or invalid dashboard link → friendly screen: "Este link venció 🔒. Escribinos 'link' por WhatsApp y te mandamos uno nuevo." + big "Volver a WhatsApp" button.
-- Empty states: Catálogo "Todavía no cargaste productos. Empezá por los que más vendés." · Contenido "Subí fotos y videos de tus productos, el taller, el equipo. Mientras más, mejor." · Promos "¿Tenés alguna promo o combo? Cargala y la usamos en tus posts."
-- Every edit autosaves with a Sonner toast ("Guardado ✓"); failed saves keep the form open with "No se pudo guardar. Probá de nuevo."
+- Empty states (Could tabs): Catálogo "Todavía no cargaste productos. Empezá por los que más vendés." · Contenido "Subí fotos y videos de tus productos, el taller, el equipo. Mientras más, mejor." · Promos "¿Tenés alguna promo o combo? Cargala y la usamos en tus posts."
+- Every edit in the Could tabs autosaves with a Sonner toast ("Guardado ✓"); failed saves keep the form open with "No se pudo guardar. Probá de nuevo."
 
 ### `/dev/chat`: WhatsApp simulator (Must)
 
@@ -265,7 +292,7 @@ Desktop layout used for development, rehearsal and as the stage fallback. It mus
 - Interactive messages render buttons under the bubble; clicking sends a `button_reply`.
 - 📎 lets you send an image (upload → URL → `{type: "image", url}`).
 - Polls `GET /dev/sim/{phone}/messages?after=` every 1 s.
-- Right panel (toggleable, hidden during demo): business state, recent jobs, recent agent runs with latency/tokens; click a run to see input/output JSON.
+- Right panel (toggleable, hidden during demo): business state, recent jobs, recent agent runs with latency/tokens; click a run to see input/output JSON. It is the only place that uses JetBrains Mono.
 - Query param `?phone=` reuses an existing simulator business; "Reset" creates a fresh one.
 
 ## Accessibility and quality bar

@@ -7,6 +7,8 @@ Conventions:
 - **Owner** = the business owner on WhatsApp. **Bot** = the orchestrator. **System** = backend jobs and agents.
 - `[Botón]` = WhatsApp interactive reply button. Button IDs are listed in [../architecture/api.md](../architecture/api.md#button-ids).
 - Anything in *italics* is a background job: the bot acknowledges right away and messages again when the job ends.
+- Each flow carries its MVP priority from [mvp.md](mvp.md). The demo path ([ADR 0016](../decisions/0016-demo-scope-one-post.md)) is Flows 1 → 2 → 3, then Flow 7 → Flow 5 (image Post) → Flow 8 (publish now).
+- After onboarding the conversation is open: the owner asks for things in their own words, sends photos, approves by tapping or writing. Nothing is pushed on them (no plan offered unless they ask).
 
 ## State machines
 
@@ -50,11 +52,11 @@ stateDiagram-v2
     discarded --> [*]
 ```
 
-A Post has a format, `image` (branded image + caption) or `reel` (the owner's video + caption + cover frame); both follow this state machine.
+A Post has a format, `image` (branded image + caption) or `reel` (the owner's video + caption + cover frame, F4.8 Could); both follow this state machine.
 
-Rule: **the only way into `approved` is the owner's button tap** (or an explicit "sí, aprobalo" that the orchestrator converts into the same `approve_post` handler, see Flow 6). The publish service refuses any post that is not `approved` or `scheduled`.
+Rule: **the only way into `approved` is the owner's explicit yes**: the `[Aprobar]` tap, or a message that clearly approves that Post ("subilo", "dale, publicalo") which the orchestrator converts into the same `approve_post` handler (Flow 8). The publish service refuses any post that is not `approved` or `scheduled`.
 
-### Content plan status (`content_plans.status`)
+### Content plan status (`content_plans.status`) — Should
 
 `generating → pending_approval → approved | revising → pending_approval`. Approving a plan creates one `posts` row per item (status `generating`) and starts generation.
 
@@ -70,13 +72,14 @@ A small JSON object that says what the next free-text message means. It is set b
 | `plan_feedback` | owner taps [Cambiar] on a plan | feedback for the plan (`plan_id`) |
 | `post_feedback` | owner taps [Cambiar] on a post | feedback for the post (`post_id`) |
 | `schedule_time` | owner taps [Programar] | a date/time in natural language (`post_id`) |
-| `offer_details` | the orchestrator asked for a missing Offer condition (Flow 12) | the price, discount or validity for the draft Offer (`offer_id`) |
+| `post_brief` | the orchestrator asked its one question before creating a Post (Flow 7) | the answer, added to the brief of that request (photos and request kept in the context) |
+| `offer_details` | the orchestrator asked for a missing Offer condition (Flow 12, Could) | the price, discount or validity for the draft Offer (`offer_id`) |
 
 If the owner writes something unrelated while `awaiting` is set (e.g. a new request), the orchestrator gets the message **plus** the pending context and decides; it can call `cancel_pending` and handle the new request.
 
 ---
 
-## Flow 1 — First contact
+## Flow 1 — First contact (Must)
 
 Trigger: a phone number with no `businesses` row sends any message (in the demo: "Hola").
 
@@ -86,19 +89,20 @@ Trigger: a phone number with no `businesses` row sends any message (in the demo:
 4. Bot confirms, creates a magic link (`/o/{token}`, valid 7 days, reusable until the form is submitted) and sends it with a short explanation: "5 minutos, desde el celu". State → `awaiting_web_form`.
 5. If the owner writes again before finishing the form, the bot answers briefly and re-sends the link. It doesn't try to run the orchestrator yet.
 
-## Flow 2 — Web onboarding form
+## Flow 2 — Web onboarding form (Must)
 
-Opened from the magic link on the owner's phone. Mobile-first wizard, progress saved after each step (owner can close and come back). Details and wireframes in [../design/web-app.md](../design/web-app.md).
+Opened from the magic link on the owner's phone. Short, mobile-first wizard of 6 steps plus a closing screen; progress saved after each step (owner can close and come back). Details and wireframes in [../design/web-app.md](../design/web-app.md) and the [mockups](../design/mockups/README.md).
 
 | Step | Fields | Notes |
 |---|---|---|
 | 1. Tu negocio | Name (prefilled), category (select), one-line description, longer description (optional), city/zone, website or IG handle (optional) | Category list: Muebles y deco, Gastronomía, Indumentaria, Belleza, Servicios, Otro |
-| 2. Productos | Products/services, as many as the owner wants (≥ 1): name, short description, price (optional) | "¿Qué es lo que más vendés?"; each one becomes a Product in the Catalog. More can be added later from the dashboard (Flow 11) or the chat (Flow 12) |
-| 3. Tu marca | Logo upload; brand colors (auto-detected from logo, editable as swatches); "¿Cómo hablarían de tu marca tus clientes?" (3 words) | Colors are extracted server-side from the logo right after upload |
-| 4. Fotos y videos | Upload photos and videos (products, workshop, team), no upper count | The more, the better; show thumbnails and upload progress; at least 3 photos required, videos optional. Files go straight to storage (limits in [mvp.md](mvp.md#f8--catalog--content)) |
+| 2. Productos | Up to 5 products/services (≥ 1): name, short description, price (optional) | "¿Qué es lo que más vendés? Hasta 5. Los que más te importa vender." More can be added later from the chat or the dashboard (Flows 11–12, Could) |
+| 3. Tu marca | Logo upload (optional); brand colors (auto-detected from logo, editable as swatches); "¿Cómo hablarían de tu marca tus clientes?" (3 words) | Colors are extracted server-side from the logo right after upload. "Todavía no tengo logo ni colores" skips the upload: the Brand Brain starts with neutral default colors, and Flow 13 (Could) builds them in the chat |
+| 4. Tus fotos | 3 to 15 photos (products, workshop, team); no videos | Show thumbnails and upload progress, counter "7 de 15", "Mínimo 3". "Usamos tus fotos reales en los posts" |
 | 5. Preferencias | Questionnaire (see below) | All single taps, no long text |
-| 6. Conectá Instagram | Button → provider's hosted connect flow → returns to the wizard with ✅ | Skippable ("Lo hago después"); publishing is then mocked until connected |
-| 7. ¡Listo! | Summary + "Volver a WhatsApp" (wa.me deep link) | Submitting triggers Flow 3 |
+| 6. Conectá Instagram | Button → provider's hosted connect flow → returns to the wizard with ✅ | Skippable ("Lo hago después"); publishing is then mocked until connected. Copy: they log in on Instagram's page, never give us their password, and every Post comes to WhatsApp first for approval |
+| 6b. Trajimos tu feed | Grid of the photos and videos imported from the connected Instagram feed; the owner unticks what not to use | **Could** (F2.8): needs read access to the owner's media, not verified. Without it, step 6 goes straight to the closing screen |
+| ¡Listo! | Summary (Products, photos, posts per week, Instagram handle) + "Volver a WhatsApp" (wa.me deep link) | Submitting triggers Flow 3 |
 
 Questionnaire (step 5):
 
@@ -110,42 +114,42 @@ Questionnaire (step 5):
 | ¿Cuántas publicaciones por semana? | single | 2 · 3 · 5 |
 | ¿Usamos emojis? | single | Sí, bastantes · Pocos · Ninguno |
 | ¿Hay algo que NO quieras que digamos o mostremos? | short text (optional) | e.g. "no hablar de precios" |
-| ¿Tenés alguna promo o novedad ahora? | short text (optional) | Creates a draft Offer, confirmed together with the brand summary (Flow 3) |
+| ¿Tenés alguna promo o novedad ahora? | short text (optional) | Passed to the agents with the onboarding answers and shown in the brand summary; becomes a draft Offer once F8.6 (Could) is built |
 
 On submit: `POST /api/o/{token}/complete` → state `generating_brand` → Flow 3 starts in the background.
 
-## Flow 3 — Brand Brain generation and confirmation
+## Flow 3 — Brand Brain generation and confirmation (Must)
 
-1. *System runs the Asset Analyst on each uploaded photo and video that doesn't have an analysis yet (parallel, max 5 concurrent). Videos are read from keyframes extracted with ffmpeg; the analysis says whether the video is reel-suitable and suggests which Products it shows.*
+1. *System runs the Asset Analyst on each uploaded photo that doesn't have an analysis yet (parallel, max 5 concurrent).*
 2. *System runs the Brand Strategist with all onboarding data + asset descriptions → Brand Brain v1 (saved, versioned).*
-3. Bot sends `brand_summary`: the Brand Strategist's short summary (tone in 3 words, audience, 3 content pillars, colors as text) + the draft Offer if the owner gave one ("Promo: 10% en racks de TV este finde") + buttons `[Sí, es mi marca]` `[Corregir algo]`. State → `awaiting_brand_confirmation`.
-4. `[Sí, es mi marca]` → state `active`, the draft Offer becomes active → bot sends `ready_first_plan`.
-5. `[Corregir algo]` → `awaiting = brand_correction` → owner writes the correction → *Brand Strategist runs in "revise" mode (Brand Brain v2)* → back to step 3.
+3. Bot sends `brand_generating` right after submit, then `brand_summary`: the Brand Strategist's short summary (tone in 3 words, audience, 3 content pillars, colors as text, the current promo if the owner gave one) + buttons `[Sí, es mi marca]` `[Corregir algo]`. State → `awaiting_brand_confirmation`.
+4. `[Sí, es mi marca]` → state `active` → bot sends `ready_open_chat` ("¡Listo, ya conozco tu marca! ¿En qué te puedo ayudar hoy?"), no buttons. The chat is open: the next message is a normal orchestrator turn (F1.10).
+5. `[Corregir algo]` → `awaiting = brand_correction` → owner writes the correction → *Brand Strategist runs in "revise" mode (Brand Brain v2)* → back to step 3 (F2.6, Could; without it the bot notes the correction and keeps the summary).
 
 Target time from form submit to summary: **< 60 s**.
 
-## Flow 4 — Weekly plan
+## Flow 4 — Weekly plan (Should)
 
-Trigger: `[Dale]` after onboarding, or free text like "armame el plan de la semana" (orchestrator → `plan_week`).
+Trigger: only on request, free text like "armame el plan de la semana" (orchestrator → `plan_week`). The bot never offers the plan unprompted.
 
 1. Bot sends `plan_generating`.
-2. *Content Strategist generates N items (N = posts per week from onboarding; demo default 3) from the Brand Brain, the Catalog, the active Offers and the Brand assets. Each item: date, pillar, format (`image` or `reel`), idea, angle, Product and Offer IDs (optional), suggested asset IDs, suggested template (image only). At most one Reel per plan, and only when a reel-suitable video exists, unless the owner asks for more.*
+2. *Content Strategist generates N items (N = posts per week from onboarding; demo default 3) from the Brand Brain, the Catalog, the active Offers and the Brand assets. Each item: date, pillar, format, idea, angle, Product and Offer IDs (optional), suggested asset IDs, suggested template. Reels (`format = reel`) only once F4.8 is built: at most one per plan, and only when a reel-suitable video exists.*
 3. Bot sends the plan as one message:
 
    ```text
    📅 Plan semana del 20/10
    1. Mar 21 — Producto estrella: la mesa de roble Nórdica, foco en la madera maciza
-   2. Jue 23 — 🎬 Reel: así se hace una silla en el taller
+   2. Jue 23 — Detrás de escena: así se hace una silla en el taller
    3. Sáb 25 — Promo: 10% off en racks de TV este fin de semana
    ```
 
    with buttons `[Aprobar plan]` `[Cambiar algo]`.
 4. `[Aprobar plan]` → plan `approved`, one `posts` row per item → bot sends `plan_approved` → Flow 5 for each post (sequentially, so previews arrive in order).
-5. `[Cambiar algo]` → `awaiting = plan_feedback` → owner: "cambiá la 2 por algo de la promo de sillas" → *Content Strategist revises* → step 3.
+5. `[Cambiar algo]` → `awaiting = plan_feedback` → owner: "cambiá la 2 por algo de la promo de sillas" → *Content Strategist revises* → step 3 (F3.3, Could).
 
-## Flow 5 — Post generation and approval
+## Flow 5 — Post generation and approval (Must)
 
-Trigger: plan approval (one per item), ad-hoc request (Flow 7), or revision (Flow 6).
+Trigger: an ad-hoc request (Flow 7, the demo path), plan approval (one per item, Should), or revision (Flow 6, Should).
 
 ### Image Post
 
@@ -168,14 +172,14 @@ Trigger: plan approval (one per item), ad-hoc request (Flow 7), or revision (Flo
 
 Target time per post: **< 45 s** from start to preview.
 
-### Reel
+### Reel (Could, F4.8)
 
 1. *Copywriter* produces the caption (shorter hook first), hashtags and CTA; no on-image headline.
 2. *Art Director* chooses a reel-suitable video asset and its cover frame (`cover_offset_ms`). No template and no render: the video is published as the owner shot it; the cover is a frame extracted with ffmpeg.
 3. Bot sends the preview with the same `[Aprobar] [Cambiar] [Descartar]` buttons and body as the image Post: the video itself when it fits WhatsApp's media size limit, otherwise the cover image plus a link to the Reel preview in the dashboard.
 4. Post status → `pending_approval`. Approval works exactly as for image Posts ([ADR 0007](../decisions/0007-approve-every-post.md)).
 
-## Flow 6 — Change request (revision)
+## Flow 6 — Change request (revision) (Should)
 
 1. Owner taps `[Cambiar]` → bot sends `post_change_prompt`. `awaiting = post_feedback`.
 2. Owner writes feedback.
@@ -188,20 +192,37 @@ Target time per post: **< 45 s** from start to preview.
 4. `post_revisions` row saved (keeps history); `posts.revision += 1`; Flow 5 step 4 again.
 5. After 3 revisions, bot also sends `revision_photo_hint`.
 
-Free-text approval: if the owner writes "dale, publicalo" while a single post is `pending_approval`, the orchestrator calls `approve_post(post_id)`. If several are pending, it asks which one, showing the list.
+Approving in free text is covered in Flow 8.
 
-## Flow 7 — Ad-hoc post
+## Flow 7 — Post on request (Must, the demo's core)
 
-Trigger: free text like "hacé un post para la promo del finde, 15% en sillas".
+Trigger: the owner asks for a post in their own words, with or without photos. Examples from the [mockups](../design/mockups/README.md):
 
-1. Orchestrator calls `create_post(brief=..., when=null)`; bot sends `post_generating`.
-2. Flow 5 with the brief instead of a plan item. The Copywriter receives the brief verbatim plus the Brand Brain.
-3. If the request is missing something essential (e.g. "hacé un post de la promo" and there is no active Offer or promo in the chat), the orchestrator asks **one** short question before calling the tool. A promo with its conditions given in the request ("15% en sillas este finde") is saved as an Offer first (Flow 12).
-4. "Hacé un reel con el video del taller" → `create_post(format=reel, ...)`; the Art Director picks the matching reel-suitable video. If there is none, the bot says so and asks for a video (3–90 s, vertical).
+- Two photos + "me llegó esta mesa ratona nueva 😍 armame algo para subir"
+- Two photos + "Terminamos hoy la biblioteca para un cliente de Carrasco 🙌 ¿Me armás algo para subir el viernes?"
+- Text only: "hacé un post para la promo del finde, 15% en sillas"
 
-## Flow 8 — Publish or schedule
+1. Photos sent with the request are stored as Brand assets first (Flow 9) and become the preferred photos for this Post.
+2. **At most one question.** If one short answer would change the Post (the angle, a price, what to highlight, whether a client can be named), the orchestrator asks it in one line and waits with `awaiting = post_brief`: "¡Qué linda! 😍 Ya guardé las fotos. ¿La mostramos como novedad o tiene algún precio de lanzamiento?". If the request is already clear, it asks nothing. It never asks two questions in a row before creating; anything else it assumes and the owner can change later.
+3. Orchestrator calls `create_post(brief=..., asset_ids=[photos sent], when=null)`. The bot acknowledges in a generated line that names its choice ("Dale, lo armo con la foto del detalle de la veta ⏳"), falling back to `post_generating`.
+4. Flow 5 with the brief instead of a plan item. The Copywriter receives the brief verbatim (including the owner's answer) plus the Brand Brain. Prices and promos only appear if the owner gave them.
+5. Approval and publishing: Flow 8, by button or by writing.
 
-After `[Aprobar]`:
+Could: a promo with its conditions ("15% en sillas este finde") is saved as an Offer first (Flow 12). "Hacé un reel con el video del taller" → `create_post(format=reel, ...)` (F4.8).
+
+## Flow 8 — Publish or schedule (Must: publish now; Should: schedule)
+
+**By writing (F5.6).** While a Post is `pending_approval`, a message that clearly approves it is the same as `[Aprobar]` plus the choice below:
+
+| Owner writes | Orchestrator does | Bot replies (generated, matching the owner's style) |
+|---|---|---|
+| "subilo", "subila", "dale, publicalo" | `approve_post` → `publish_post(now)` | "arriba ✅" … then `published` with the permalink |
+| "me encanta!! subilo mañana a la tarde" | `approve_post` → `schedule_post(when)` (Should) | "¡Genial! Sale mañana jueves a las 18:00 ✅" |
+| "me gusta" (no action) | asks once: publish now or schedule? (`publish_when_adhoc`) | — |
+
+If several Posts are `pending_approval`, the orchestrator asks which one, showing the list. Vague times map to fixed defaults in the business timezone (mañana = 10:00, tarde = 18:00, noche = 21:00). Anything that isn't a clear yes for a specific Post is never treated as approval ([ADR 0007](../decisions/0007-approve-every-post.md)).
+
+**By button**, after `[Aprobar]`:
 
 1. If the post has a planned date in the future → bot sends `publish_when`.
    If not (ad-hoc) → bot sends `publish_when_adhoc`.
@@ -210,20 +231,24 @@ After `[Aprobar]`:
 4. No Instagram connected → bot sends `need_ig`. The post stays `approved`.
 5. Failure → status `failed` → bot sends `publish_failed`.
 
-## Flow 9 — Owner sends a photo or video in the chat
+## Flow 9 — Owner sends a photo in the chat (Must; videos Could)
 
-1. System downloads the media, stores it as a `brand_assets` row (`kind = photo` or `video`, `source = whatsapp`).
-2. *Asset Analyst analyzes it* (videos from keyframes).
-3. If a post is `pending_approval` and `awaiting = post_feedback`, or the caption says "usá esta para el post", the orchestrator uses it for that post (Art Director revision with `force_asset_id`).
-4. Otherwise bot sends `photo_saved` (for a video, the same confirmation, plus whether it can be used as a Reel).
+1. System downloads the media, stores it as a `brand_assets` row (`kind = photo`, `source = whatsapp`). WhatsApp delivers an album as one message per photo; photos that arrive within a few seconds of each other are handled together.
+2. *Asset Analyst analyzes it.*
+3. If the photos come with a request ("armame algo para subir"), it's Flow 7.
+4. If a post is `pending_approval` and `awaiting = post_feedback`, or the caption says "usá esta para el post", the orchestrator uses it for that post (Art Director revision with `force_asset_id`, Should).
+5. Otherwise bot sends `photo_saved` with `[Sí, armalo]` `[No, guardala]`; "No" → a one-line confirmation ("Listo, queda guardada 👌").
+6. Videos (Could): stored as `kind = video` and read from keyframes; the confirmation says whether it can be used as a Reel.
 
 ## Flow 10 — Everything else
 
 | Situation | Behavior |
 |---|---|
 | "¿Qué podés hacer?" / "ayuda" | Orchestrator explains the 4 things it does in ≤ 5 short lines |
-| "¿Qué tengo programado?" | `list_posts(status in [scheduled, approved, pending_approval])` → short list |
-| "¿Dónde veo todo?" / "link" (once `active`) | Bot sends a fresh dashboard link (Flow 11) |
+| "¿Qué tengo programado?" / "¿cuándo sale lo de la mesa ratona?" | `list_posts(status in [scheduled, approved, pending_approval])` → short answer ("Hoy jueves a las 18:00 ✅ Si querés cambiarle algo antes, decime.") |
+| "No sé qué subir, ¿se te ocurre algo?" | Flow 14 (Should) |
+| "¿Dónde veo todo?" / "link" (once `active`) | Bot sends a fresh dashboard link (Flow 11; read-only dashboard is Should) |
+| "Gracias" / small talk | One short, warm line ("¡De nada! Acá estoy cuando me necesites 🙌"); no tool call |
 | Brand change in chat ("ahora tenemos envío gratis a todo el país") | `update_brand_brain(change)` → Brand Brain new version → orchestrator confirms in one short line |
 | Voice note | MVP: `unsupported_media` (Could: transcribe) |
 | Sticker, location, document | `unsupported_media` (Could: a price-list PDF or photo becomes Products to confirm, F8.8) |
@@ -232,7 +257,7 @@ After `[Aprobar]`:
 | Message while a job is running | Answered normally; jobs post their results when done |
 | Agent or render error | Post → `failed`; bot apologizes in one line, offers `[Reintentar]`; full error in `agent_runs` |
 
-## Flow 11 — Dashboard: Catalog and content
+## Flow 11 — Dashboard: Catalog and content (read-only view Should; editing Could)
 
 Trigger: the owner writes "¿dónde veo todo?" or "link", or the bot suggests it ("Si tenés más fotos o videos, subilos acá 👇"). Wireframes in [../design/web-app.md](../design/web-app.md).
 
@@ -244,10 +269,28 @@ Trigger: the owner writes "¿dónde veo todo?" or "link", or the bot suggests it
 6. Archiving a Product, Brand asset or Offer hides it from the agents and the dashboard. Published and scheduled Posts don't change; draft Posts that use it are flagged for review. Nothing is hard-deleted.
 7. New material is used from the next plan or ad-hoc Post on; the bot doesn't message the owner for each upload.
 
-## Flow 12 — Product or Offer from the chat
+## Flow 12 — Product or Offer from the chat (Could)
 
 Trigger: free text like "agregá la silla Oslo a $4500" or "este finde hay 15% en sillas".
 
 1. Orchestrator extracts the Product or Offer (`save_product` / `save_offer` with `confirmed = false`, see [../architecture/agents.md](../architecture/agents.md)) and reads it back in one short message ending in "¿Lo guardo así?". Prices and conditions come only from what the owner wrote; nothing is invented.
 2. If an Offer is missing a condition that matters (the discount, the price of a pack, until when), the bot asks **one** question → `awaiting = offer_details`.
 3. Owner says yes → the tool is called again with `confirmed = true`: Product saved to the Catalog, or Offer set to active → one-line confirmation. A correction in free text → step 1.
+
+## Flow 13 — Brand without a logo or colors (Could)
+
+Trigger: the owner ticked "Todavía no tengo logo ni colores" in the wizard (Flow 2, step 3). Runs right after `[Sí, es mi marca]`, instead of `ready_open_chat`.
+
+1. Bot: "Vi que todavía no tenés logo ni colores definidos. ¡No pasa nada, lo armamos acá! ¿Me mandás una foto de algo que te represente? Tu local, un producto, o una marca que te guste."
+2. Owner sends a photo ("esto es el taller, me gusta así natural").
+3. *Palette extraction + Brand Strategist* propose 3 named palettes ("Bosque", "Nogal", "Carbón"), sent as one image with the 3 swatches numbered.
+4. Owner picks and adjusts in free text ("la 2, pero el marrón un toque más claro") → new Brand Brain version with those colors → bot shows the result ("Así 👇").
+5. Bot offers a simple text logo with the business name, or to leave it for later. Then `ready_open_chat`.
+
+## Flow 14 — Ideas on request (Should)
+
+Trigger: "no sé qué subir esta semana, se te ocurre algo?"
+
+1. Orchestrator asks the Content Strategist for 3 short ideas from the Brand Brain, recent Posts and the available photos, and sends them as a numbered list ending in "¿Alguna te gusta?".
+2. The owner picks one or more, with or without conditions ("la del taller, pero sin mostrar caras"; "y el tip también").
+3. Each pick becomes a Flow 7 request with the idea + the owner's conditions as the brief; constraints like "sin caras" also go to the Brand Brain if they sound permanent (confirmed in one line: "Anotado, nada de caras 👍").

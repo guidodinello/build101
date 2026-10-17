@@ -36,21 +36,24 @@ CORS: allow every origin in `FRONTEND_ORIGINS` (comma-separated: Vercel URL + `h
 
 ### Onboarding (web wizard)
 
-All under `/api/o/{token}`. The token is the onboarding magic link.
+All under `/api/o/{token}`. The token is the onboarding magic link. Must, except the Instagram feed import endpoints (Could).
 
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/api/o/{token}` | — | `OnboardingState` (below) |
 | PUT | `/api/o/{token}/business` | `{name, category, one_liner, description?, location, website?, instagram_handle?}` | `OnboardingState` |
-| PUT | `/api/o/{token}/products` | `{products: [{id?, name, description, price?, category?}]}` (≥ 1, no maximum) | `OnboardingState`: upserts `products` rows in the given order; rows left out are archived |
-| PUT | `/api/o/{token}/brand` | `{three_words: [str, str, str], colors: [hex...]}` | `OnboardingState` |
-| POST | `/api/o/{token}/uploads` | `UploadRequest` (below) | `UploadTicket`: see [Uploads](#uploads) |
+| PUT | `/api/o/{token}/products` | `{products: [{id?, name, description, price?, category?}]}` (1–5) | `OnboardingState`: upserts `products` rows in the given order; rows left out are archived. More than 5 → `422 too_many_products` |
+| PUT | `/api/o/{token}/brand` | `{three_words: [str, str, str], colors: [hex...], no_brand_yet?: bool}` | `OnboardingState`. `no_brand_yet = true` ("Todavía no tengo logo ni colores") allows an empty `colors` list; the Brand Strategist uses the neutral default palette, and the colors are chosen later in the chat (F2.9, Could) |
+| POST | `/api/o/{token}/uploads` | `UploadRequest` (below) | `UploadTicket`: see [Uploads](#uploads). The wizard accepts `logo` and `photo` only, at most 15 photos (`422 too_many_photos`) |
 | POST | `/api/o/{token}/assets/{asset_id}/complete` | — | `Asset` (logo includes `palette`) |
 | DELETE | `/api/o/{token}/assets/{asset_id}` | — | `204`: archives the asset (the ✕ on a wizard thumbnail) |
 | PUT | `/api/o/{token}/preferences` | `Questionnaire` (below) | `OnboardingState` |
 | POST | `/api/o/{token}/instagram/connect` | `{}` | `{"auth_url": "..."}`: creates the Zernio profile if needed and returns the hosted connect URL. `redirect_url` = `{FRONTEND_URL}/o/{token}?step=instagram&connected=1` |
 | POST | `/api/o/{token}/instagram/callback` | `{account_id?, query: {...}}`: the frontend forwards the query params Zernio appended to the redirect | `OnboardingState` |
-| POST | `/api/o/{token}/complete` | — | `202 {"status": "generating_brand"}`. Validates required fields (name, category, ≥ 1 product, ≥ 3 photos (videos optional), logo optional but recommended), sets state, enqueues `generate_brand`, sends `brand_generating` on WhatsApp |
+| POST | `/api/o/{token}/instagram/import` | `{}` | `202 {"job_id"}`: **Could (F2.8)**, only once a way to read the account's media exists ([integrations.md](integrations.md#reading-the-owners-existing-instagram-media-could)). Lists the recent media and creates `InstagramMedia` candidates |
+| GET | `/api/o/{token}/instagram/media` | — | **Could.** `{status: "importing" \| "done" \| "unavailable", done, total, items: InstagramMedia[]}` for the progress bar and the grid on step 6b |
+| PUT | `/api/o/{token}/instagram/media/selection` | `{excluded_ids: [str]}` | **Could.** The Owner unticks what we shouldn't use; the rest is downloaded as Brand assets (`source = 'instagram'`) by `import_instagram_media` |
+| POST | `/api/o/{token}/complete` | — | `202 {"status": "generating_brand"}`. Validates required fields (name, category, 1–5 products, 3–15 photos, logo optional but recommended), sets state, enqueues `generate_brand`, sends `brand_generating` on WhatsApp |
 
 ```ts
 type OnboardingState = {
@@ -81,6 +84,8 @@ type Asset = {
   analyzed: boolean;
   archived: boolean;
 };
+type InstagramMedia = { id: string; media_type: "image" | "video" | "carousel"; thumbnail_url: string;
+                        permalink: string | null; taken_at: string | null; excluded: boolean };   // Could (F2.8)
 type Product = { id: string; name: string; description: string; price: string | null;
                  category: string | null; position: number; asset_count: number; archived: boolean };
 type Offer = { id: string; kind: "pack" | "promo"; title: string; conditions: string;
@@ -100,7 +105,7 @@ type Questionnaire = {
 
 ### Uploads
 
-The wizard (`/api/o/{token}`) and the dashboard (`/api/b/{token}`) share one upload flow. Files go **from the browser straight to Supabase Storage**; the backend never receives the bytes ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md), facts in [../research/media-uploads.md](../research/media-uploads.md)).
+The wizard (`/api/o/{token}`, Must, photos and logo only) and the dashboard (`/api/b/{token}`, Could) share one upload flow. Files go **from the browser straight to Supabase Storage**; the backend never receives the bytes ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md), facts in [../research/media-uploads.md](../research/media-uploads.md)).
 
 | Method | Path | Body | Response |
 |---|---|---|---|
@@ -116,7 +121,7 @@ Accepted files:
 | Kind | Types | Max size |
 |---|---|---|
 | `photo`, `logo` | `image/jpeg`, `image/png`, `image/webp`, `image/heic` | 10 MB |
-| `video` | `video/mp4`, `video/quicktime` (MOV) | 300 MB |
+| `video` (Could: dashboard only, not the wizard) | `video/mp4`, `video/quicktime` (MOV) | 300 MB |
 
 Anything else → `422 unsupported_file` with a Spanish `message` the UI shows as is. Video duration and size in pixels are read with `ffprobe` during `analyze_asset`, not at upload.
 
@@ -126,23 +131,23 @@ type UploadRequest = { kind: "logo" | "photo" | "video"; filename: string; conte
 type UploadTicket = { asset_id: string; upload_url: string; upload_token: string; resumable: boolean };
 ```
 
-### Dashboard (Must, editable)
+### Dashboard (read Should, editing Could)
 
-Token = a `dashboard` magic link (the bot sends it when the owner asks "¿dónde veo todo?" or "quiero subir fotos"). Valid for **7 days**; writing "link" in WhatsApp sends a new one. Anyone with the link can edit until there are user accounts (F7.4), so **nothing is hard-deleted**: `archived: true` hides a Product, Brand asset or Offer from agents and the dashboard. Archiving material used by a draft Post (`pending_approval`, `revising`) flags that Post for review; published and scheduled Posts don't change.
+Per [ADR 0016](../decisions/0016-demo-scope-one-post.md), the read endpoints (Inicio: Brand Brain + Posts) are **Should** and everything that writes (Products, Brand assets, Offers, dashboard uploads) is **Could**. Token = a `dashboard` magic link (the bot sends it when the owner asks "¿dónde veo todo?" or "quiero subir fotos"). Valid for **7 days**; writing "link" in WhatsApp sends a new one. Anyone with the link can edit until there are user accounts (F7.4), so **nothing is hard-deleted**: `archived: true` hides a Product, Brand asset or Offer from agents and the dashboard. Archiving material used by a draft Post (`pending_approval`, `revising`) flags that Post for review; published and scheduled Posts don't change.
 
-| Method | Path | Body / Query | Response |
-|---|---|---|---|
-| GET | `/api/b/{token}` | — | `{business: {...}, brand_brain: BrandBrain, instagram: {...}, counts: {products, photos, videos, active_offers}}` |
-| GET | `/api/b/{token}/posts?status=` | — | `[{id, title, format, status, image_url, video_url, cover_url, caption, scheduled_for, published_at, permalink, needs_review}]` |
-| GET | `/api/b/{token}/plans/current` | — | `{week_start, status, items: [...]}` |
-| GET | `/api/b/{token}/products?include_archived=` | — | `Product[]` (by `position`) |
-| POST | `/api/b/{token}/products` | `{name, description?, price?, category?}` | `Product` |
-| PATCH | `/api/b/{token}/products/{id}` | any of `{name, description, price, category, position, archived}` | `Product` |
-| GET | `/api/b/{token}/assets?kind=&product_id=&include_archived=` | — | `Asset[]` (newest first; derived frames included, with `derived_from_asset_id`) |
-| PATCH | `/api/b/{token}/assets/{id}` | any of `{owner_hint, product_ids, archived}` | `Asset`. `product_ids` replaces the links and marks them `source = 'owner'` |
-| GET | `/api/b/{token}/offers?status=` | — | `Offer[]` |
-| POST | `/api/b/{token}/offers` | `{kind, title, conditions, price?, starts_on?, ends_on?, product_ids?, status?}` | `Offer` (default `status = 'active'`: the Owner wrote it, so it's confirmed) |
-| PATCH | `/api/b/{token}/offers/{id}` | any Offer field, or `status: "archived"` | `Offer` |
+| Method | Path | Priority | Body / Query | Response |
+|---|---|---|---|---|
+| GET | `/api/b/{token}` | Should | — | `{business: {...}, brand_brain: BrandBrain, instagram: {...}, counts: {products, photos, videos, active_offers}}` |
+| GET | `/api/b/{token}/posts?status=` | Should | — | `[{id, title, format, status, image_url, video_url, cover_url, caption, scheduled_for, published_at, permalink, needs_review}]` |
+| GET | `/api/b/{token}/plans/current` | Should | — | `{week_start, status, items: [...]}` |
+| GET | `/api/b/{token}/products?include_archived=` | Could | — | `Product[]` (by `position`) |
+| POST | `/api/b/{token}/products` | Could | `{name, description?, price?, category?}` | `Product` |
+| PATCH | `/api/b/{token}/products/{id}` | Could | any of `{name, description, price, category, position, archived}` | `Product` |
+| GET | `/api/b/{token}/assets?kind=&product_id=&include_archived=` | Could | — | `Asset[]` (newest first; derived frames included, with `derived_from_asset_id`) |
+| PATCH | `/api/b/{token}/assets/{id}` | Could | any of `{owner_hint, product_ids, archived}` | `Asset`. `product_ids` replaces the links and marks them `source = 'owner'` |
+| GET | `/api/b/{token}/offers?status=` | Could | — | `Offer[]` |
+| POST | `/api/b/{token}/offers` | Could | `{kind, title, conditions, price?, starts_on?, ends_on?, product_ids?, status?}` | `Offer` (default `status = 'active'`: the Owner wrote it, so it's confirmed) |
+| PATCH | `/api/b/{token}/offers/{id}` | Could | any Offer field, or `status: "archived"` | `Offer` |
 
 Uploads from the dashboard use [Uploads](#uploads) with the `b` prefix. Products and Offers created in the chat go through the orchestrator tools in [agents.md](agents.md), and appear here too.
 
@@ -156,7 +161,7 @@ Used by `/dev/chat` (the WhatsApp simulator) and for local testing. The simulato
 | POST | `/dev/sim/{phone}/messages` | `{type: "text", text}` or `{type: "button_reply", button_id, title}` or `{type: "image" \| "video", url}` | `202` |
 | GET | `/dev/sim/{phone}/messages?after=<iso>` | — | `[SimMessage]` (both directions, ascending) |
 | POST | `/dev/businesses/{id}/reset` | `{to_state?: "new" \| "active"}` | resets conversation state (for rehearsals) |
-| POST | `/dev/seed/demo` | — | loads the demo business seed (pre-generated Brand Brain + plan) |
+| POST | `/dev/seed/demo` | — | loads the demo business seed (pre-generated Brand Brain + photos; the stage fallback if live brand generation is slow) |
 | GET | `/dev/agent-runs?business_id=&limit=` | — | latest `agent_runs` (debug panel) |
 
 ```ts
@@ -172,25 +177,25 @@ type SimMessage = {
 
 ## Button IDs
 
-Format: `<action>:<entity_id>` (≤ 256 chars). Parsed by `conversation/button_router.py`. Unknown or stale IDs (entity in a state that doesn't allow the action) → send `stale_button` and do nothing else.
+Free-text approvals ("subilo", "publicalo") reach the same handlers through the orchestrator's `approve_post` tool ([agents.md](agents.md#conversation-rules)). Format: `<action>:<entity_id>` (≤ 256 chars). Parsed by `conversation/button_router.py`. Unknown or stale IDs (entity in a state that doesn't allow the action) → send `stale_button` and do nothing else.
 
 | ID | Allowed when | Handler |
 |---|---|---|
-| `brand_ok` | `awaiting_brand_confirmation` | state → `active`, send `ready_first_plan` |
+| `brand_ok` | `awaiting_brand_confirmation` | state → `active`, send `ready_open_chat` ("¿En qué te puedo ayudar hoy?", F1.10). No plan is proposed |
 | `brand_fix` | `awaiting_brand_confirmation` | `awaiting = brand_correction`, send `brand_fix_prompt` |
-| `plan_start` | active | enqueue `generate_plan`, send `plan_generating` |
-| `plan_later` | active | send `plan_later` |
-| `plan_approve:{plan_id}` | plan `pending_approval` | plan → `approved`, create posts, enqueue `generate_post` sequentially, send `plan_approved` |
-| `plan_change:{plan_id}` | plan `pending_approval` | `awaiting = plan_feedback` |
+| `plan_start` | active | Should. Enqueue `generate_plan`, send `plan_generating`. Only sent if the bot offers a plan; after F1.10 the plan normally starts from text ("armame el plan de la semana") through `plan_week` |
+| `plan_later` | active | Should. Send `plan_later` |
+| `plan_approve:{plan_id}` | plan `pending_approval` (Should) | plan → `approved`, create posts, enqueue `generate_post` sequentially, send `plan_approved` |
+| `plan_change:{plan_id}` | plan `pending_approval` (Could, F3.3) | `awaiting = plan_feedback` |
 | `post_approve:{post_id}` | post `pending_approval` | post → `approved`, `approved_at = now()`, send `publish_when` / `publish_when_adhoc` |
-| `post_change:{post_id}` | post `pending_approval` | `awaiting = post_feedback`, send `post_change_prompt` |
+| `post_change:{post_id}` | post `pending_approval` (revision is Should; until then reply that changes come later and offer `[Descartar]`) | `awaiting = post_feedback`, send `post_change_prompt` |
 | `post_discard:{post_id}` | post `pending_approval` | post → `discarded`, send `post_discarded` |
 | `post_replace:{post_id}` | post `discarded` | new post with the same brief (origin same) → `generate_post` |
 | `post_publish:{post_id}` | post `approved` | enqueue `publish_post(now)` |
-| `post_schedule:{post_id}` | post `approved` | if `scheduled_for` in future → enqueue `publish_post(scheduled_for)`; else `awaiting = schedule_time`, send `schedule_ask` |
+| `post_schedule:{post_id}` | post `approved` (Should) | if `scheduled_for` in future → enqueue `publish_post(scheduled_for)`; else `awaiting = schedule_time`, send `schedule_ask` |
 | `post_retry:{post_id}` | post `failed` | retry the last failed job for that post |
 | `photo_post:{asset_id}` | active | `create_post(origin="photo", asset_id, brief="Post con esta foto")` |
-| `reel_post:{asset_id}` | active, video asset with `reel_suitable` | `create_post(origin="photo", format="reel", asset_id, brief="Reel con este video")` (`origin = "photo"` covers any asset the Owner sent) |
+| `reel_post:{asset_id}` | active, video asset with `reel_suitable` (Could) | `create_post(origin="photo", format="reel", asset_id, brief="Reel con este video")` (`origin = "photo"` covers any asset the Owner sent) |
 | `retry:{job_id}` | job `failed` | re-enqueue same kind + payload |
 | `noop` | always | send nothing (or a 👍 reaction) |
 
@@ -236,7 +241,7 @@ class PublishMedia(BaseModel):
 # app/rendering/renderer.py
 async def render_post(spec: RenderSpec, brand: VisualIdentity, assets: AssetResolver) -> bytes: ...  # JPEG
 
-# app/media/video.py (ffmpeg / ffprobe)
+# app/media/video.py (ffmpeg / ffprobe; Could)
 async def probe(path: Path) -> VideoInfo: ...                                     # duration_ms, width, height, codecs
 async def keyframes(path: Path, count: int = 6, max_side: int = 1568) -> list[Frame]: ...   # JPEG bytes + offset_ms
 async def whatsapp_preview(path: Path) -> bytes | None: ...                        # MP4 ≤ 16 MB, or None if it can't fit
