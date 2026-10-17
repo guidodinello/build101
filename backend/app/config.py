@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     gemini_thinking_level: Literal["minimal", "medium", "high"] = "medium"
     image_gen_max_concurrency: int = 4
 
+    # Replies to the Owner (ADR 0023). INBOUND_HANDLER = chat (Gemini) | echo (no LLM)
+    inbound_handler: Literal["chat", "echo"] = "chat"
+    gemini_chat_model: str = "gemini-3.8-flash"
+    assistant_name: str = "Mora"  # placeholder until the product name is chosen
+
     whatsapp_channel: Literal["kapso", "simulator"] = "kapso"
     kapso_api_key: str | None = None
     kapso_webhook_secret: str | None = None

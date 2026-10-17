@@ -8,10 +8,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 
 from app.config import Settings, get_settings
+from app.conversation.factory import build_inbound_handler
 
 from .base import ChannelPort, InboundMessage
 from .factory import build_channel
-from .inbound import DedupeStore, EchoHandler, InboundHandler, InMemoryDedupeStore, mask
+from .inbound import DedupeStore, InboundHandler, InMemoryDedupeStore, mask
 from .kapso_webhook import MESSAGE_RECEIVED_EVENT, parse_message, verify_signature
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ def get_dedupe_store() -> DedupeStore:
 
 @cache
 def get_inbound_handler() -> InboundHandler:
-    return EchoHandler()
+    return build_inbound_handler(get_settings())
 
 
 @asynccontextmanager

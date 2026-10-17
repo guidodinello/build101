@@ -131,6 +131,7 @@ def test_unparseable_message_is_acknowledged_not_retried(
 def test_no_configured_secret_rejects_everything() -> None:
     app.dependency_overrides[get_settings] = lambda: Settings(kapso_webhook_secret=None)
     app.dependency_overrides[get_channel] = lambda: object()
+    app.dependency_overrides[get_inbound_handler] = RecordingHandler
     try:
         with TestClient(app) as test_client:
             raw = raw_fixture("text")
