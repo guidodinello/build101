@@ -1,20 +1,20 @@
 # Agents
 
-The "agency" is one **orchestrator** (the account manager the owner talks to) plus a **fixed catalog of specialist agents** that become personal to each business through its **Brand Brain**. We don't generate agents per business. Every business gets the same team, and the Brand Brain plus the business's assets and history make their work specific. See [ADR 0006](../decisions/0006-fixed-agent-catalog-brand-brain.md).
+The "agency" is one **orchestrator** (the account manager the owner talks to) plus a **fixed catalog of specialist agents** that become personal to each business through its **Brand Brain**. We don't generate agents per business. Every business gets the same team, and the Brand Brain plus the business's Catalog (Products), Offers, Brand assets (photos and videos) and history make their work specific. See [ADR 0006](../decisions/0006-fixed-agent-catalog-brand-brain.md) and [ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md).
 
-## Catalog
+## Agent roster
 
 | Agent | Kind | Called by | Input → Output | Effort |
 |---|---|---|---|---|
 | **Orchestrator** | Tool-use loop | Inbound handler | Conversation + context → reply text + tool calls | `low` |
-| **Asset Analyst** | Single call, vision, structured | `analyze_asset` job | Image → description, tags, palette, usable-for | `low` |
-| **Brand Strategist** | Single call, structured | `generate_brand` job | Onboarding data + asset descriptions (+ correction) → Brand Brain | `high` |
-| **Content Strategist** | Single call, structured | `generate_plan` job | Brand Brain + recent posts + date + notes → weekly plan | `medium` |
+| **Asset Analyst** | Single call, vision, structured | `analyze_asset` job | Image, or video keyframes + metadata → description, tags, suggested Products, usable-for (+ Reel suitability) | `low` |
+| **Brand Strategist** | Single call, structured | `generate_brand` job | Onboarding data + Catalog + asset descriptions (+ correction) → Brand Brain | `high` |
+| **Content Strategist** | Single call, structured | `generate_plan` job | Brand Brain + Catalog + active Offers + assets + recent posts + date + notes → weekly plan (images and Reels) | `medium` |
 | **Copywriter** | Single call, structured | `generate_post` job | Brand Brain + brief (+ feedback, previous version) → copy | `medium` |
-| **Art Director** | Single call, vision, structured | `generate_post` job | Brand Brain + copy + candidate photos + template catalog → render spec | `medium` |
-| **Feedback Classifier** | Single call, structured | `revise_post` job | Feedback text → `copy` / `image` / `both` + normalized instruction | `low` |
+| **Art Director** | Single call, vision, structured | `generate_post` job | Brand Brain + copy + candidate photos + template catalog → render spec; for a Reel: candidate videos (keyframes) → video + cover frame | `medium` |
+| **Feedback Classifier** | Single call, structured | `revise_post` job | Feedback text → `copy` / `image` / `both` (Reel: `copy` / `cover` / `video`) + normalized instruction | `low` |
 
-Not agents (deterministic services): **Renderer** (render spec → JPEG), **Publisher** (approved post → provider API), **Scheduler** (delegated to the provider).
+Not agents (deterministic services): **Renderer** (render spec → JPEG; not used for Reels), **Frame Extractor** (ffmpeg/ffprobe in the backend: video → metadata + keyframes JPEGs), **Publisher** (approved post → provider API, image or Reel), **Scheduler** (delegated to the provider).
 
 ## LLM client conventions
 
@@ -26,6 +26,7 @@ All Claude calls go through `app/llm/client.py`. It's the only module that impor
 - **Refusal fallback**: enable server-side fallbacks on every call (`betas=["server-side-fallback-2026-07-01"]`, `fallbacks="default"` on `client.beta.messages.create`). Always check `stop_reason` (`refusal`, `max_tokens`) before reading content.
 - **Prompt caching**: top-level `cache_control={"type": "ephemeral"}`. Order the prompt stable → volatile: system prompt (static) → Brand Brain (per business) → dynamic context. Never put timestamps in the system prompt.
 - **Images**: pass by URL (`{"type": "image", "source": {"type": "url", "url": signed_url}}`) using a short-lived signed Supabase URL, or base64 for small files. Resize to max 1568 px on the long side before upload to save tokens.
+- **Video**: Claude takes no video or audio input ([research/media-uploads.md](../research/media-uploads.md#what-claude-can-read)). Agents see a video as its ffprobe metadata plus keyframes (JPEG, ≤ 1568 px long edge) extracted by the Frame Extractor, each labeled with its offset in ms. No transcription in the MVP.
 - **Timeouts/retries**: SDK defaults (2 retries). Per-call timeout 90 s for specialists, 30 s per orchestrator step.
 - **Logging**: each call writes `agent_runs` (business_id, agent, model, effort, input JSON, output JSON, input/output/cache tokens, latency_ms, stop_reason, error).
 - **Max tokens**: 16000 for specialists, 4000 for orchestrator steps.
@@ -58,11 +59,10 @@ class ContentPillar(BaseModel):
     description: str
     example_ideas: list[str]
 
-class Product(BaseModel):
+class FeaturedProduct(BaseModel):
+    product_id: str                   # a row in `products` (the Catalog)
     name: str
-    description: str
-    price: str | None                 # free text as the owner wrote it
-    asset_ids: list[str]              # photos that show it
+    why: str                          # why it leads: "el más vendido", "lo nuevo"
 
 class VisualIdentity(BaseModel):
     primary_color: str                # hex
@@ -85,8 +85,7 @@ class BrandBrain(BaseModel):
     value_props: list[str]            # 3–5
     voice: Voice
     pillars: list[ContentPillar]      # 3–5
-    products: list[Product]
-    current_offers: list[str]
+    featured_products: list[FeaturedProduct]   # ≤ 5, chosen from the Catalog; the full Catalog lives in `products`
     ctas: list[str]                   # "Escribinos por WhatsApp", "Visitá el showroom"
     hashtags: list[str]               # 10–20, mix of niche + local
     posting: PostingPrefs             # posts_per_week, preferred_days, preferred_time ("19:00")
@@ -95,6 +94,11 @@ class BrandBrain(BaseModel):
 ```
 
 `PostingPrefs`: `posts_per_week: int`, `preferred_days: list[Literal["mon",...,"sun"]]`, `preferred_time: str` (HH:MM, local).
+
+The Brand Brain holds **who the brand is**, not what it sells today. Products (the Catalog) and Offers live in their own tables because the Owner edits them constantly from the dashboard and the chat; versioning the whole Brand Brain on every price change would be noise. Agents that need them receive them as separate input blocks:
+
+- `<catalog>`: active Products (`archived_at is null`): id, name, description, price (free text as the Owner wrote it, or null), category, linked asset ids.
+- `<offers>`: Offers with `status = 'active'` whose `starts_on`/`ends_on` include the relevant date: id, kind (`pack` | `promo`), title, conditions, price, dates, product ids. Drafts are never shown to content agents.
 
 Agents receive the Brand Brain rendered as compact JSON inside a `<brand_brain>` tag in the system prompt. It sits right after the static instructions so it's cached per business.
 
@@ -110,16 +114,18 @@ Prompts are written in English (instructions) and require output content in Riop
 
 ### Asset Analyst
 
-**Purpose:** understand each uploaded image so other agents can choose photos without looking at every image again.
+**Purpose:** understand each uploaded photo or video so other agents can choose material without looking at every file again.
 
-- Input: `asset_id`, image (URL), `kind` (`logo` | `photo`), owner-provided hint (optional, e.g. product name).
-- Output:
+- Input: `asset_id`, `kind` (`logo` | `photo` | `video`), owner-provided hint (optional, e.g. product name), the Catalog (product ids + names + descriptions) so it can suggest links.
+  - Photo / logo: the image (URL).
+  - Video: ffprobe metadata (`duration_ms`, `width`, `height`, fps) + ~6 keyframes from the Frame Extractor (one per scene change, topped up at fixed intervals), each with its `frame_offset_ms`.
+- Output (photo / logo):
 
   ```python
   class AssetAnalysis(BaseModel):
       description: str                 # 1–2 sentences in Spanish: what's in the photo
       subjects: list[str]              # ["mesa de comedor", "roble", "living"]
-      product_guess: str | None        # matches a Product.name if obvious
+      product_ids: list[str]           # Catalog Products visible in the photo (0..n), only if clearly shown
       quality: Literal["high", "ok", "low"]   # blur, lighting, framing
       orientation: Literal["portrait", "landscape", "square"]
       has_people: bool
@@ -129,13 +135,33 @@ Prompts are written in English (instructions) and require output content in Riop
       safe_crop_focus: Literal["center", "top", "bottom", "left", "right"]
   ```
 
+- Output (video):
+
+  ```python
+  class VideoAnalysis(BaseModel):
+      description: str                 # 1–2 sentences in Spanish: what happens in the video
+      subjects: list[str]
+      product_ids: list[str]           # Catalog Products shown (0..n)
+      quality: Literal["high", "ok", "low"]   # shake, lighting, framing across keyframes
+      orientation: Literal["portrait", "landscape", "square"]
+      has_people: bool
+      has_text: bool
+      best_frame_offsets_ms: list[int] # ≤ 3 frames worth keeping as photos, from the offsets given
+      cover_offset_ms: int             # best frame to use as the Reel cover
+      reel_suitable: bool
+      reel_reason: str                 # short Spanish reason, e.g. "Vertical, 24 s, buena luz"
+  ```
+
+- `reel_suitable` is a model judgment checked in code: it is forced to `false` unless `3000 ≤ duration_ms ≤ 90000` (Zernio's Reel limit, see [research/media-uploads.md](../research/media-uploads.md#publishing-video-and-carousels-zernio-instagram)) and the video is portrait or square. All offsets must be among the keyframe offsets passed in.
+- Product links: every id in `product_ids` is written to `asset_products` with `source = 'analyst'`. Links with `source = 'owner'` (set or removed from the dashboard) always win; the analyst never re-adds a link the Owner removed.
+- Derived frames (Should): each `best_frame_offsets_ms` frame is saved as a new `photo` Brand asset with `derived_from_asset_id` = the video and `frame_offset_ms`, then analyzed as a photo, so the Art Director can use it in image templates.
 - Logo special case: also run a deterministic palette extraction (Pillow quantize to 5 colors, ignore near-white/near-black/transparent) and store both. The web wizard shows the Pillow palette as editable swatches.
 
 ### Brand Strategist
 
 **Purpose:** turn onboarding inputs into the Brand Brain. Also handles corrections.
 
-- Input: business fields, products, questionnaire answers, owner's "3 words", asset analyses (descriptions only, not images), Pillow palette + owner-confirmed colors, optional `previous_brand_brain` + `correction` (revise mode).
+- Input: business fields, the Catalog (`<catalog>`), questionnaire answers, owner's "3 words", asset analyses (descriptions only, not images), Pillow palette + owner-confirmed colors, optional `previous_brand_brain` + `correction` (revise mode).
 - Output: `BrandBrain`.
 - Rules in the prompt:
   - Use only facts given by the owner; mark nothing as fact that wasn't provided (no invented awards, years, locations).
@@ -143,35 +169,39 @@ Prompts are written in English (instructions) and require output content in Riop
   - `constraints` must include every "no quiero que..." answer verbatim.
   - In revise mode: change only what the correction implies; keep everything else.
   - `whatsapp_summary` follows the 4-bullet format in conversation-design.md.
+  - `featured_products`: up to 5 Products from the Catalog, referenced by id; never a Product that isn't in the Catalog.
 
 ### Content Strategist
 
 **Purpose:** weekly plan.
 
-- Input: Brand Brain, `week_start` (date), `posts_count`, today's date, last 10 posts (title, pillar, date), owner notes ("cambiá la 2 por algo de la promo de sillas"), previous plan (revise mode), list of available assets (id + description + best_for).
+- Input: Brand Brain, `<catalog>`, `<offers>` (active during the plan week), `week_start` (date), `posts_count`, today's date, last 10 posts (title, pillar, format, date), owner notes ("cambiá la 2 por algo de la promo de sillas"), previous plan (revise mode), list of available assets (id + kind + description + best_for + product ids; videos add duration and `reel_suitable`). Archived assets and Products are excluded before the call.
 - Output:
 
   ```python
   class PlanItem(BaseModel):
       scheduled_for: datetime          # local time, within the week, uses preferred days/time
       pillar_id: str
+      format: Literal["image", "reel"]
       title: str                       # ≤ 40 chars, internal + shown in plan list
       idea: str                        # 1–2 sentences: what the post says
       angle: str                       # why it works for the audience
-      suggested_asset_ids: list[str]   # 1–3 candidates from available assets
-      suggested_template: TemplateId
+      product_ids: list[str]           # Catalog Products featured (0..n)
+      offer_id: str | None             # an active Offer this post promotes
+      suggested_asset_ids: list[str]   # 1–3 candidates; for a Reel, reel-suitable videos only
+      suggested_template: TemplateId | None   # null for Reels
   class WeeklyPlan(BaseModel):
       items: list[PlanItem]
       whatsapp_text: str               # numbered list for plan_preview, ≤ 900 chars
   ```
 
-- Rules: rotate pillars, don't repeat a product two posts in a row, use `current_offers` at most once per week unless asked, only reference assets that exist, respect `constraints`. Commercial dates may be used only when they fall in the plan week and come from the `commercial_dates` list passed in the input (a small static list per country in `app/agents/data/commercial_dates_uy.json`, so the model never guesses dates).
+- Rules: rotate pillars, don't repeat a product two posts in a row, promote an active Offer at most once per week unless asked, only reference assets, Products and Offers that exist, respect `constraints`. At most **one Reel** per weekly plan unless the Owner asks for more, and only when a `reel_suitable` video exists; otherwise every item is `image`. Never put a price or discount in `idea` that isn't in a Product or Offer. Commercial dates may be used only when they fall in the plan week and come from the `commercial_dates` list passed in the input (a small static list per country in `app/agents/data/commercial_dates_uy.json`, so the model never guesses dates).
 
 ### Copywriter
 
 **Purpose:** write the caption and on-image text.
 
-- Input: Brand Brain, brief (plan item or ad-hoc request text), platform (`instagram`), optional `previous` copy + `feedback` (revise mode).
+- Input: Brand Brain, brief (plan item or ad-hoc request text), `format` (`image` | `reel`), the Products and Offer the brief references (from `<catalog>` / `<offers>`), platform (`instagram`), optional `previous` copy + `feedback` (revise mode). For a Reel, also the video's `VideoAnalysis.description` so the caption matches what is on screen.
 - Output:
 
   ```python
@@ -184,7 +214,8 @@ Prompts are written in English (instructions) and require output content in Riop
       hashtags: list[str]              # 5–10, without '#' duplicates, lowercase, no spaces
   ```
 
-- Rules: voice from the Brand Brain; first line must hook (≤ 80 chars); no invented facts (prices, discounts, dates only if in brief or Brand Brain); respect emoji policy; Rioplatense *vos*; never mention AI. In revise mode, apply the feedback literally and change as little else as possible.
+- Rules: voice from the Brand Brain; first line must hook (≤ 80 chars); no invented facts (prices, discounts, dates only if in a referenced Product or Offer, or in an ad-hoc brief from the Owner); respect emoji policy; Rioplatense *vos*; never mention AI. In revise mode, apply the feedback literally and change as little else as possible.
+- Reel variant: same `PostCopy` model, but `headline` and `subheadline` are unused (nothing is drawn on the video; set `headline` to the title and `subheadline` to null), the caption is shorter (80–400 chars) and its first line is the hook, because Instagram truncates Reel captions early.
 
 ### Art Director
 
@@ -203,13 +234,24 @@ Prompts are written in English (instructions) and require output content in Riop
       show_logo: bool
   ```
 
-- Rules: only colors from `visual_identity`; text in slots must fit template max lengths (validated after the call, see below); prefer `quality=high` photos; for promos use `promo_band`; for tips/quotes without a strong photo use `quote_card`.
+- Rules: only colors from `visual_identity`; text in slots must fit template max lengths (validated after the call, see below); prefer `quality=high` photos (derived video frames are valid photos); for promos use `promo_band`; for tips/quotes without a strong photo use `quote_card`.
 - **Post-validation (code):** check slot lengths, color hex membership, asset ownership. On violation, retry once with the error list appended; if it fails again, fall back to `product_hero` with the copy headline.
+- **Reel mode:** input is the copy plus up to 3 candidate videos (each as metadata + its keyframes with offsets + `VideoAnalysis`). No template, no render. Output:
+
+  ```python
+  class ReelSpec(BaseModel):
+      video_asset_id: str
+      cover_offset_ms: int             # one of the keyframe offsets; defaults to VideoAnalysis.cover_offset_ms
+  ```
+
+  Post-validation (code): the video belongs to the business, is not archived, is `reel_suitable`, and `0 ≤ cover_offset_ms ≤ duration_ms`. On violation, retry once; then fall back to the first suggested video and its analyzed cover.
 
 ### Feedback Classifier
 
-- Input: feedback text, current copy, current render spec summary.
-- Output: `{"target": "copy" | "image" | "both", "instruction": str}` (instruction = normalized, explicit version of the feedback, e.g. "Acortar el caption a 2 líneas y mencionar envío gratis en Montevideo").
+- Input: feedback text, post `format`, current copy, current render spec summary (image) or current video + cover summary (Reel).
+- Output: `{"target": ..., "instruction": str}` (instruction = normalized, explicit version of the feedback, e.g. "Acortar el caption a 2 líneas y mencionar envío gratis en Montevideo").
+  - Image Post: `target` is `copy` | `image` | `both`.
+  - Reel: `target` is `copy` | `cover` (pick another frame of the same video) | `video` (swap to another reel-suitable video). We don't edit video, so "cortalo más corto" or "ponele música" maps to `copy` with an instruction that the Orchestrator turns into a short "eso todavía no lo puedo hacer" reply plus an offer to swap the video.
 
 ## Orchestrator
 
@@ -243,17 +285,21 @@ run_turn(business, inbound_text):
 |---|---|---|---|
 | `plan_week` | `notes?: str`, `week_start?: date` | Enqueue `generate_plan` | `{job_id, status: "started"}` |
 | `revise_plan` | `plan_id`, `feedback` | Enqueue `generate_plan` (revise mode) | `{job_id}` |
-| `create_post` | `brief: str`, `scheduled_for?: datetime`, `asset_id?: str` | Create post row + enqueue `generate_post` | `{post_id, job_id}` |
+| `create_post` | `brief: str`, `format?: "image" \| "reel"`, `scheduled_for?: datetime`, `asset_id?: str`, `offer_id?: str` | Create post row + enqueue `generate_post`. `format = "reel"` requires a reel-suitable video, else returns `{"error": "no_reel_video"}` | `{post_id, job_id}` |
 | `revise_post` | `post_id`, `feedback` | Enqueue `revise_post` | `{job_id}` |
 | `approve_post` | `post_id` | Same handler as `[Aprobar]` button (sends `publish_when`) | `{status}` |
 | `publish_post` | `post_id`, `when: "now" \| ISO datetime` | Guard: status must be `approved`; enqueue `publish_post` | `{job_id}` or error |
 | `discard_post` | `post_id` | Status → `discarded` | `{status}` |
 | `list_posts` | `statuses?: list[str]`, `limit?: int` | Query posts | `[{id, title, status, scheduled_for, permalink}]` |
-| `get_brand_summary` | — | Read latest Brand Brain | `{whatsapp_summary, pillars, offers, constraints}` |
+| `get_brand_summary` | — | Read latest Brand Brain + active Offers | `{whatsapp_summary, pillars, featured_products, offers, constraints}` |
 | `update_brand_brain` | `change: str` | Enqueue `generate_brand` revise mode (silent: no summary message unless asked) | `{job_id}` |
+| `list_catalog` | `query?: str` | Search active Products by name/category | `[{id, name, price, category}]` |
+| `save_product` | `product_id?: str`, `name`, `description?`, `price?`, `category?`, `confirmed: bool` | Create or update a Product. With `confirmed = false` it only returns the preview; the model must read it back to the Owner ("¿Lo guardo así?") and call again with `confirmed = true` after an explicit yes | `{product, saved}` |
+| `save_offer` | `offer_id?: str`, `kind: "pack" \| "promo"`, `title`, `conditions`, `price?`, `starts_on?`, `ends_on?`, `product_ids?`, `confirmed: bool` | Create or update an Offer. `confirmed = false` saves it as `draft` and returns the preview; `confirmed = true` (after the Owner's explicit yes) sets `status = 'active'`. Prices and conditions come only from the Owner's words | `{offer, status}` |
+| `send_dashboard_link` | — | Create a `dashboard` magic link (7 days) and send it as a CTA URL button ("Abrí tu panel") | `{sent: true}` |
 | `cancel_pending` | — | Clear `conversation_state.awaiting` | `{ok}` |
 
-Guards are in the tool implementations, not in the prompt: `publish_post` returns `{"error": "post_not_approved"}` if the status is wrong, and the model must relay that.
+Guards are in the tool implementations, not in the prompt: `publish_post` returns `{"error": "post_not_approved"}` if the status is wrong, and the model must relay that. `save_product` and `save_offer` never persist active data without `confirmed = true`, and the inbound handler rejects `confirmed = true` unless the Owner's last message is an explicit yes (button reply or affirmative text).
 
 ### Context block (dynamic, after the cache breakpoint)
 
@@ -265,6 +311,10 @@ Guards are in the tool implementations, not in the prompt: `publish_post` return
 - 1a9e… "Promo sillas" — approved — sin fecha
 </pending_posts>
 <instagram_connected>true</instagram_connected>
+<catalog_size>products: 23 · photos: 64 · videos: 7 (reel-suitable: 4)</catalog_size>
+<active_offers>
+- 5c21… promo "15% en sillas" — hasta dom 26
+</active_offers>
 <unannounced_results>
 - 3b7d… "Taller por dentro" — published — https://www.instagram.com/p/…
 </unannounced_results>
@@ -276,12 +326,12 @@ Guards are in the tool implementations, not in the prompt: `publish_post` return
 
 | Job | Steps | Sends to owner |
 |---|---|---|
-| `analyze_asset(asset_id)` | Asset Analyst → save analysis (+ Pillow palette for logos) | nothing (or `photo_saved` for WhatsApp photos) |
+| `analyze_asset(asset_id)` | Photo/logo: Asset Analyst → save analysis (+ Pillow palette for logos) → write analyst `asset_products`. Video: Frame Extractor (ffprobe + keyframes) → Asset Analyst (video mode) → save `VideoAnalysis`, `duration_ms`, `width`, `height` → write analyst `asset_products` → (Should) save best frames as derived photo assets and enqueue `analyze_asset` for each | nothing (or `photo_saved` for WhatsApp photos) |
 | `generate_brand(business_id, correction?)` | wait for pending `analyze_asset` → Brand Strategist → save new version | `brand_summary` (onboarding/correction) |
 | `generate_plan(business_id, notes?, plan_id?)` | Content Strategist → save plan + items | `plan_preview` |
-| `generate_post(post_id)` | Copywriter → Art Director → validate → Renderer → upload → save | `post_preview` |
-| `revise_post(post_id, feedback)` | Feedback Classifier → (Copywriter) → (Art Director) → Renderer → save revision | `post_preview` |
-| `publish_post(post_id, when)` | guard → Publisher (now / schedule) → save external id + permalink | `published` / `scheduled` / `publish_failed` |
+| `generate_post(post_id)` | Image: Copywriter → Art Director → validate → Renderer → upload → save. Reel: Copywriter (Reel variant) → Art Director (Reel mode) → validate → save `video_asset_id` + `cover_offset_ms` + cover JPEG (the keyframe at that offset) | `post_preview`; Reel: `reel_preview` (video header when the preview transcode fits WhatsApp's 16 MB) or `reel_preview_link` (cover + dashboard link), see [integrations.md](integrations.md) |
+| `revise_post(post_id, feedback)` | Feedback Classifier → (Copywriter) → (Art Director) → (Renderer, image only) → save revision | `post_preview` |
+| `publish_post(post_id, when)` | guard → Publisher (now / schedule; image or Reel by `posts.format`) → save external id + permalink | `published` / `scheduled` / `publish_failed` |
 
 Posts from an approved plan are generated **sequentially** in plan order, so previews arrive in order and we stay under rate limits.
 
@@ -289,9 +339,9 @@ Posts from an approved plan are generated **sequentially** in plan order, so pre
 
 Run after every agent call, before saving:
 
-- Caption length 150–900 chars; headline ≤ 40; hashtags 5–10, no duplicates.
+- Caption length 150–900 chars for images, 80–400 for Reels; headline ≤ 40; hashtags 5–10, no duplicates.
 - No phrase from `constraints` appears in caption/headline (case-insensitive substring).
-- No price/discount numbers in copy unless they appear in the brief or Brand Brain (regex for `%`, `$`, `USD`, `UYU`).
-- Referenced asset IDs belong to the business.
+- No price/discount numbers in copy unless they appear in a referenced Product or active Offer, or in the Owner's own ad-hoc brief (regex for `%`, `$`, `USD`, `UYU`).
+- Referenced asset, Product and Offer IDs belong to the business and are not archived; a Reel's video is `reel_suitable`.
 
 On failure: one retry with the violations listed; then accept and log a warning (demo shouldn't block).

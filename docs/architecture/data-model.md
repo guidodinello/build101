@@ -9,7 +9,9 @@ Conventions follow [`.claude/rules/database.md`](../../.claude/rules/database.md
 ```mermaid
 erDiagram
     businesses ||--o{ magic_links : has
+    businesses ||--o{ products : "Catalog"
     businesses ||--o{ brand_assets : has
+    businesses ||--o{ offers : defines
     businesses ||--o{ brand_brains : "versions"
     businesses ||--o{ social_accounts : connects
     businesses ||--o{ content_plans : has
@@ -19,7 +21,13 @@ erDiagram
     businesses ||--o{ agent_runs : logs
     content_plans ||--o{ posts : contains
     posts ||--o{ post_revisions : history
-    brand_assets ||--o{ posts : "photo for"
+    brand_assets ||--o{ posts : "photo or video for"
+    brand_assets ||--o{ brand_assets : "frames from video"
+    brand_assets ||--o{ asset_products : shows
+    products ||--o{ asset_products : "shown in"
+    offers ||--o{ offer_products : includes
+    products ||--o{ offer_products : "part of"
+    offers ||--o{ posts : "promoted by"
 ```
 
 ## Schema
@@ -41,7 +49,7 @@ create table businesses (
   instagram_handle   text,
   timezone           text not null default 'America/Montevideo',
   onboarding_state   text not null default 'new',
-  onboarding_data    jsonb not null default '{}',    -- raw wizard answers: products, questionnaire, 3 words, colors
+  onboarding_data    jsonb not null default '{}',    -- raw wizard answers: questionnaire, 3 words, colors (products live in `products`)
   conversation_state jsonb not null default '{}',    -- {"awaiting": "post_feedback", "post_id": "..."}
   channel            text not null default 'whatsapp',
   plan               text not null default 'free',   -- future billing
@@ -60,7 +68,7 @@ create table magic_links (
   business_id  uuid not null constraint magic_links_business_id_fkey references businesses(id) on delete cascade,
   token_hash   text not null,                         -- sha256(token); the raw token only lives in the URL
   purpose      text not null default 'onboarding',
-  expires_at   timestamptz not null,
+  expires_at   timestamptz not null,                  -- dashboard links (editable): 7 days
   completed_at timestamptz,
   created_at   timestamptz not null default now(),
   constraint uq_magic_links_token_hash unique (token_hash),
@@ -68,23 +76,87 @@ create table magic_links (
 );
 create index ix_magic_links_business_id on magic_links (business_id);
 
+-- The Catalog: everything the Business sells
+create table products (
+  id           uuid primary key default gen_random_uuid(),
+  business_id  uuid not null constraint products_business_id_fkey references businesses(id) on delete cascade,
+  name         text not null,
+  description  text not null default '',           -- variants ("viene en 3 medidas") go here as free text
+  price        text,                                 -- as the Owner wrote it: "$U 4.500", "desde 12.000"
+  category     text,
+  position     int  not null default 0,              -- Owner's order in the dashboard
+  archived_at  timestamptz,                          -- archived = hidden from agents and the dashboard; never hard-deleted
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+create index ix_products_business_id_active on products (business_id) where archived_at is null;
+
 create table brand_assets (
-  id            uuid primary key default gen_random_uuid(),
-  business_id   uuid not null constraint brand_assets_business_id_fkey references businesses(id) on delete cascade,
-  kind          text not null,
-  source        text not null,
-  storage_path  text not null,                        -- in bucket 'assets'
-  mime_type     text not null,
-  width         int,
-  height        int,
-  owner_hint    text,                                 -- optional label from the Owner
-  analysis      jsonb,                                -- AssetAnalysis (null until analyzed)
-  palette       jsonb,                                -- ["#2f3e2c", ...] (logos, Pillow)
-  created_at    timestamptz not null default now(),
-  constraint ck_brand_assets_kind check (kind in ('logo','photo')),
-  constraint ck_brand_assets_source check (source in ('web','whatsapp'))
+  id                     uuid primary key default gen_random_uuid(),
+  business_id            uuid not null constraint brand_assets_business_id_fkey references businesses(id) on delete cascade,
+  kind                   text not null,
+  source                 text not null,
+  status                 text not null default 'uploading',
+  storage_path           text not null,             -- in bucket 'assets'
+  mime_type              text not null,
+  size_bytes             bigint,
+  width                  int,
+  height                 int,
+  duration_ms            int,                       -- videos only
+  derived_from_asset_id  uuid constraint brand_assets_derived_from_asset_id_fkey
+                           references brand_assets(id) on delete cascade,  -- a frame saved from a video
+  frame_offset_ms        int,                       -- where in that video the frame was taken
+  owner_hint             text,                      -- optional label from the Owner
+  analysis               jsonb,                     -- AssetAnalysis (photo, logo) or VideoAnalysis (video); null until analyzed
+  palette                jsonb,                     -- ["#2f3e2c", ...] (logos, Pillow)
+  archived_at            timestamptz,
+  created_at             timestamptz not null default now(),
+  constraint ck_brand_assets_kind check (kind in ('logo','photo','video')),
+  constraint ck_brand_assets_source check (source in ('web','whatsapp')),
+  constraint ck_brand_assets_status check (status in ('uploading','ready','failed')),
+  constraint ck_brand_assets_duration_only_video check (duration_ms is null or kind = 'video'),
+  constraint ck_brand_assets_frame_has_source check (
+    (derived_from_asset_id is null) = (frame_offset_ms is null))
 );
 create index ix_brand_assets_business_id_kind on brand_assets (business_id, kind);
+create index ix_brand_assets_derived_from_asset_id on brand_assets (derived_from_asset_id);
+
+-- Which Products a Brand asset shows (a living-room photo can show the sofa, the table and the rug)
+create table asset_products (
+  asset_id    uuid not null constraint asset_products_asset_id_fkey references brand_assets(id) on delete cascade,
+  product_id  uuid not null constraint asset_products_product_id_fkey references products(id) on delete cascade,
+  source      text not null,                        -- 'analyst' suggested it, or the 'owner' set it
+  created_at  timestamptz not null default now(),
+  constraint pk_asset_products primary key (asset_id, product_id),
+  constraint ck_asset_products_source check (source in ('analyst','owner'))
+);
+create index ix_asset_products_product_id on asset_products (product_id);
+
+-- Packs and promos. Only the Owner defines conditions; the Agency never invents prices
+create table offers (
+  id           uuid primary key default gen_random_uuid(),
+  business_id  uuid not null constraint offers_business_id_fkey references businesses(id) on delete cascade,
+  kind         text not null,
+  title        text not null,
+  conditions   text not null,                       -- "10% off pagando en efectivo, hasta el domingo"
+  price        text,                                -- as the Owner wrote it
+  starts_on    date,
+  ends_on      date,
+  status       text not null default 'draft',
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  constraint ck_offers_kind check (kind in ('pack','promo')),
+  constraint ck_offers_status check (status in ('draft','active','archived')),
+  constraint ck_offers_dates_ordered check (starts_on is null or ends_on is null or starts_on <= ends_on)
+);
+create index ix_offers_business_id_status on offers (business_id, status);
+
+create table offer_products (
+  offer_id    uuid not null constraint offer_products_offer_id_fkey references offers(id) on delete cascade,
+  product_id  uuid not null constraint offer_products_product_id_fkey references products(id) on delete cascade,
+  constraint pk_offer_products primary key (offer_id, product_id)
+);
+create index ix_offer_products_product_id on offer_products (product_id);
 
 create table brand_brains (
   id           uuid primary key default gen_random_uuid(),
@@ -134,6 +206,7 @@ create table posts (
   plan_id           uuid constraint posts_plan_id_fkey references content_plans(id) on delete set null,
   plan_item_index   int,
   origin            text not null,
+  format            text not null default 'image',
   platform          text not null default 'instagram',
   brief             text not null,                    -- plan item idea or Owner request
   status            text not null default 'generating',
@@ -141,8 +214,11 @@ create table posts (
   copy              jsonb,                            -- PostCopy
   render_spec       jsonb,                            -- RenderSpec
   photo_asset_id    uuid constraint posts_photo_asset_id_fkey references brand_assets(id) on delete set null,
-  image_path        text,                             -- in bucket 'renders'
-  image_url         text,                             -- public URL
+  video_asset_id    uuid constraint posts_video_asset_id_fkey references brand_assets(id) on delete set null,  -- Reels
+  cover_offset_ms   int,                              -- Reel cover frame
+  offer_id          uuid constraint posts_offer_id_fkey references offers(id) on delete set null,
+  image_path        text,                             -- in bucket 'renders' (image Posts)
+  image_url         text,                             -- public URL (image Posts)
   revision          int  not null default 0,
   scheduled_for     timestamptz,
   approved_at       timestamptz,
@@ -153,6 +229,9 @@ create table posts (
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now(),
   constraint ck_posts_origin check (origin in ('plan','adhoc','photo')),
+  constraint ck_posts_format check (format in ('image','reel')),
+  -- video_asset_id is "on delete set null", but assets are only ever archived, so a Reel keeps its video
+  constraint ck_posts_reel_has_video check (format <> 'reel' or video_asset_id is not null),
   constraint ck_posts_platform check (platform in ('instagram','facebook')),
   constraint ck_posts_status check (status in ('generating','pending_approval','revising','approved',
     'publishing','scheduled','published','failed','discarded')),
@@ -164,6 +243,8 @@ create table posts (
 create index ix_posts_business_id_status on posts (business_id, status);
 create index ix_posts_plan_id on posts (plan_id);
 create index ix_posts_photo_asset_id on posts (photo_asset_id);
+create index ix_posts_video_asset_id on posts (video_asset_id);
+create index ix_posts_offer_id on posts (offer_id);
 
 create table post_revisions (
   id           uuid primary key default gen_random_uuid(),
@@ -174,9 +255,11 @@ create table post_revisions (
   copy         jsonb,
   render_spec  jsonb,
   image_url    text,
+  video_asset_id  uuid,                               -- Reels: the video and cover at this revision (history only, no FK)
+  cover_offset_ms int,
   created_at   timestamptz not null default now(),
   constraint uq_post_revisions_post_id_revision unique (post_id, revision),
-  constraint ck_post_revisions_target check (target in ('copy','image','both'))
+  constraint ck_post_revisions_target check (target in ('copy','image','both','cover','video'))
 );
 
 create table messages (
@@ -241,5 +324,8 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 
 - **Phone number = identity** in the MVP. Multi-user businesses later need `users` + `business_members`; nothing else in the schema assumes one owner except `businesses.owner_phone`.
 - **Simulator businesses** use fake phone numbers prefixed `sim-` and `channel = 'simulator'`, so the outbound channel is chosen per business.
-- **Row Level Security**: off for the hackathon (the backend uses the service role key and is the only DB client). Turn RLS on before any client talks to Supabase directly.
+- **Row Level Security**: off for the hackathon (the backend uses the service role key and is the only DB client). Turn RLS on before any client talks to Supabase directly. Browser uploads don't break this rule: the browser only writes to Storage, through a signed upload URL the backend issues for one path ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)).
+- **Products and Offers**: the Catalog lives in `products`, not in `onboarding_data` or the Brand Brain. The Brand Brain keeps only a featured summary that references product ids; agents read the full Catalog and the `active` Offers (not past `ends_on`) from these tables. `current_offers` no longer exists.
+- **Archiving, not deleting**: Owners archive Products, Brand assets and Offers (`archived_at`, or `status = 'archived'` for Offers). Archived rows are hidden from agents and the dashboard. Published and scheduled Posts keep their rendered image or video; draft Posts (`pending_approval`, `revising`) that use archived material are flagged for review.
+- **Video frames**: the Asset Analyst saves the best frames of a video as `photo` assets with `derived_from_asset_id` and `frame_offset_ms` set, so the Art Director can use them like any photo.
 - **Seed**: `backend/app/db/seed.py` creates the demo business with a pre-generated Brand Brain and plan (see the demo fallbacks in [../product/mvp.md](../product/mvp.md#demo-fallbacks)).

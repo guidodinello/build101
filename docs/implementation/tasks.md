@@ -9,8 +9,8 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 ### T00: Backend scaffold · AB · M
 
 - Read: [architecture/overview.md](../architecture/overview.md#repository-layout), [setup.md](setup.md)
-- Build: `backend/` with `uv init`, Python 3.13 (per [`.claude/rules/python.md`](../../.claude/rules/python.md)), deps: `fastapi`, `uvicorn[standard]`, `anthropic`, `pydantic`, `pydantic-settings`, `sqlalchemy[asyncio]`, `asyncpg`, `alembic`, `httpx`, `jinja2`, `playwright`, `supabase`, `pillow`, `pillow-heif`, `python-multipart`; dev deps: `pytest`, `pytest-asyncio`, `ruff`. `app/main.py` with `/health`, `app/config.py` (pydantic-settings, all env vars from setup.md), `Dockerfile` per [`.claude/rules/docker.md`](../../.claude/rules/docker.md) with Chromium via `playwright install --with-deps chromium`, `.env.example`. Add the backend job (ruff + pytest) to `.github/workflows/ci.yml` and to the `CI` gate.
-- Done when: `uv run uvicorn app.main:app` serves `/health`; Docker image builds and renders a test HTML to JPEG at startup (log line "renderer ok").
+- Build: `backend/` with `uv init`, Python 3.13 (per [`.claude/rules/python.md`](../../.claude/rules/python.md)), deps: `fastapi`, `uvicorn[standard]`, `anthropic`, `pydantic`, `pydantic-settings`, `sqlalchemy[asyncio]`, `asyncpg`, `alembic`, `httpx`, `jinja2`, `playwright`, `supabase`, `pillow`, `pillow-heif`; dev deps: `pytest`, `pytest-asyncio`, `ruff`. `app/main.py` with `/health`, `app/config.py` (pydantic-settings, all env vars from setup.md), `Dockerfile` per [`.claude/rules/docker.md`](../../.claude/rules/docker.md) with Chromium via `playwright install --with-deps chromium` and `ffmpeg` (apt), `.env.example`. Add the backend job (ruff + pytest) to `.github/workflows/ci.yml` and to the `CI` gate.
+- Done when: `uv run uvicorn app.main:app` serves `/health`; Docker image builds and renders a test HTML to JPEG at startup (log line "renderer ok"); `ffmpeg -version` and `ffprobe -version` succeed at startup (log line "ffmpeg ok").
 
 ### T01: Frontend scaffold · AB · M
 
@@ -20,8 +20,8 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 ### T02: Schema + contracts · AB · M
 
 - Read: [architecture/data-model.md](../architecture/data-model.md), [architecture/agents.md](../architecture/agents.md), [architecture/api.md](../architecture/api.md#internal-module-interfaces)
-- Build: Alembic setup + initial migration `migrations/versions/0001_initial.py` with the schema from data-model.md, applied to Supabase; `app/db/models.py` (SQLAlchemy 2 typed models) + `session.py`; `app/agents/schemas.py` (all Pydantic models: BrandBrain, AssetAnalysis, WeeklyPlan, PostCopy, RenderSpec, ...); `app/channels/base.py`; `app/publishing/base.py`; `app/copy/messages_es.py` (copy deck from conversation-design.md); `frontend/lib/api.ts` types.
-- Done when: `python -c "from app.agents.schemas import BrandBrain; print(BrandBrain.model_json_schema())"` works; tables exist in Supabase.
+- Build: Alembic setup + initial migration `migrations/versions/0001_initial.py` with the schema from data-model.md, applied to Supabase; `app/db/models.py` (SQLAlchemy 2 typed models) + `session.py`; `app/agents/schemas.py` (all Pydantic models: BrandBrain, AssetAnalysis, VideoAnalysis, WeeklyPlan, PostCopy, RenderSpec, ...); `app/channels/base.py`; `app/publishing/base.py`; `app/copy/messages_es.py` (copy deck from conversation-design.md); `frontend/lib/api.ts` types.
+- Done when: `python -c "from app.agents.schemas import BrandBrain; print(BrandBrain.model_json_schema())"` works; tables exist in Supabase, including `products`, `asset_products`, `offers` and `offer_products`, `brand_assets.kind` accepts `video`, and `posts` has `format`, `video_asset_id`, `cover_offset_ms` and `offer_id`.
 
 ### T03: Deploy + webhook verification · AB · M
 
@@ -36,15 +36,15 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 - Build: `app/llm/client.py`: `async def structured(agent: str, system: list, messages: list, output_model: type[T], effort: str, business_id, job_id=None) -> T` and `async def tool_step(...) -> Message` for the orchestrator. Writes `agent_runs`. Handles `refusal` / `max_tokens` stop reasons with typed exceptions (`LLMRefusal`, `LLMTruncated`). Enables prompt caching and server-side fallbacks.
 - Done when: a pytest (marked `live`, skipped without key) gets a valid small Pydantic object back and an `agent_runs` row exists.
 
-### T11: Asset Analyst · A · M
+### T11: Asset Analyst (photos and logo) · A · M
 
-- Build: `app/agents/asset_analyst.py` + prompt; Pillow palette extraction util `app/agents/palette.py` (5 colors, skip near-white/black/transparent).
-- Done when: running it on 3 demo photos + logo returns sensible `AssetAnalysis`; palette of the demo logo looks right.
+- Build: `app/agents/asset_analyst.py` + prompt; Pillow palette extraction util `app/agents/palette.py` (5 colors, skip near-white/black/transparent). Product suggestions: the analysis names the Products it sees, matched against the Business's active `products`, and saved as `asset_products` rows with `source = 'analyst'` (F8.5, Should).
+- Done when: running it on 3 demo photos + logo returns sensible `AssetAnalysis`; palette of the demo logo looks right; a photo of a demo product is linked to that Product.
 
 ### T12: Brand Strategist · A · M
 
-- Build: `app/agents/brand_strategist.py` + prompt (create + revise modes).
-- Done when: with the demo business inputs (fixture `tests/fixtures/demo_business.json`), it returns a BrandBrain whose `whatsapp_summary` the owner-teammate agrees with; revise mode with "somos más divertidos" changes only voice fields.
+- Build: `app/agents/brand_strategist.py` + prompt (create mode; revise mode is F2.6, Could). Reads the Catalog from `products` and keeps only a summary of the main Products in the Brand Brain; Offers are read from `offers`, not stored in the Brand Brain.
+- Done when: with the demo business inputs (fixture `tests/fixtures/demo_business.json`, full Catalog), it returns a BrandBrain whose `whatsapp_summary` the owner-teammate agrees with. If revise mode is built: "somos más divertidos" changes only voice fields.
 
 ### T13: Copywriter · A · M
 
@@ -95,7 +95,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 ### T17: Job pipelines · A · M
 
 - Read: [agents.md § Job pipelines](../architecture/agents.md#job-pipelines)
-- Build: `jobs/asset.py`, `brand.py`, `plan.py`, `post.py` (`generate_post`, `revise_post` with Feedback Classifier), each sending its WhatsApp message via `channel_for`. Storage upload of renders (new path per revision). Plan approval creates posts and generates them sequentially.
+- Build: `jobs/asset.py` (photo and logo; video in T36), `brand.py`, `plan.py`, `post.py` (`generate_post`, `revise_post` with Feedback Classifier; Reels in T39), each sending its WhatsApp message via `channel_for`. Storage upload of renders (new path per revision). Plan approval creates posts and generates them sequentially. Plan changes from free text (F3.3) are Could.
 - Done when: from the simulator, after onboarding is completed via `/dev` seed, the plan → posts → revision flows work.
 
 ### T18: Button router · A · M
@@ -109,17 +109,17 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 - Build: `app/orchestrator/orchestrator.py` (manual loop, max 5 steps), `tools.py` (all tools, strict schemas, guards), `prompts/system.md`; context builder; `awaiting` handling (free text routed with pending context).
 - Done when: the example conversations in conversation-design.md work in the simulator; "publicalo" on a non-approved post does not publish.
 
-### T24: Onboarding REST + storage · B · M
+### T24: Onboarding REST + uploads · B · M
 
-- Read: [api.md § Onboarding](../architecture/api.md#onboarding-web-wizard)
-- Build: `app/api/onboarding.py` + `app/storage.py`; uploads (10 MB, HEIC→JPEG, resize copy for LLM ≤ 1568 px), logo palette sync, `analyze_asset` enqueue, `/complete` (validations, state change, enqueue `generate_brand`, WhatsApp message).
-- Done when: all endpoints work via `curl` with a real token; files land in the right buckets/paths.
+- Read: [api.md § Onboarding](../architecture/api.md#onboarding-web-wizard), [research/media-uploads.md](../research/media-uploads.md)
+- Build: `app/api/onboarding.py` + `app/storage.py`. Uploads go **browser → Supabase** (no multipart through the backend): `POST /api/o/{token}/uploads` validates kind, content type and size (`MAX_PHOTO_MB`, `MAX_VIDEO_MB`), creates the `brand_assets` row in `uploading` status and returns a signed Supabase upload URL (resumable/TUS for files > 6 MB); `POST /api/o/{token}/assets/{id}/complete` checks the object exists, converts HEIC → JPEG, writes the resized LLM copy (≤ 1568 px), runs logo palette sync and enqueues `analyze_asset`. `PUT /api/o/{token}/products` takes any number of Products and writes `products` rows. `/complete` (validations, state change, enqueue `generate_brand`, WhatsApp message); the questionnaire's current promo becomes a draft Offer (T46).
+- Done when: all endpoints work via `curl` with a real token; a 6 MB+ video uploads with TUS from the signed URL; oversized files are rejected before upload; files land in the right buckets/paths.
 
 ### T25: Onboarding wizard UI · B · M
 
 - Read: [design/web-app.md § /o/[token]](../design/web-app.md#otoken-onboarding-wizard), [user-flows.md § Flow 2](../product/user-flows.md#flow-2--web-onboarding-form)
-- Build: steps 1–7, autosave, uploads with thumbnails, color swatches, questionnaire controls, IG connect step, done screen, expired-token screen.
-- Done when: completed on a real phone from the WhatsApp link in < 5 minutes with the demo materials.
+- Build: steps 1–7, autosave, color swatches, questionnaire controls, IG connect step, done screen, expired-token screen. Step 2 takes any number of Products (no cap of 5). Step 4 ("Tus fotos y videos") takes photos and videos: thumbnails (video poster frame), direct uploads to the signed URL with a progress bar (resumable for files > 6 MB), retry on failure, friendly message for files over the limit.
+- Done when: completed on a real phone from the WhatsApp link in < 5 minutes with the demo materials, including one video.
 
 ### T26: Templates `product_hero` + `promo_band` · B · M
 
@@ -137,7 +137,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 
 ### T28: WhatsApp polish · B · M
 
-- Build: post preview as interactive with image header (fallback to text + short body when > 1,024 chars); inbound images → `brand_assets` + `analyze_asset` + Flow 9 message; unsupported media reply.
+- Build: post preview as interactive with image header (fallback to text + short body when > 1,024 chars); inbound images → `brand_assets` + `analyze_asset` + Flow 9 message; inbound videos the same way (F1.5, Should); unsupported media reply.
 - Done when: Flow 5 and Flow 9 look right on a real phone.
 
 ### T29: Zernio webhook · B · S
@@ -161,14 +161,60 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 
 ### T33: Demo seed · A · M
 
-- Build: `app/db/seed.py` + `/dev/seed/demo`: creates the demo business with real assets, a reviewed Brand Brain and a plan, connected IG account id from env.
+- Build: `app/db/seed.py` + `/dev/seed/demo`: creates the demo business with real assets (photos and 2–3 analyzed videos), the full Catalog, one active Offer, a reviewed Brand Brain and a plan that includes one Reel, connected IG account id from env.
 - Done when: a fresh environment reaches "active with plan" in one call.
 
-### T34: Templates `quote_card` + `split_story` · B · S
+### T36: Video analysis · A · M
 
-### T35: Dashboard `/b/[token]` · B · S
+- Read: [agents.md § Asset Analyst](../architecture/agents.md#asset-analyst), [research/media-uploads.md](../research/media-uploads.md#what-claude-can-read)
+- Build: `analyze_asset` for `kind = 'video'`: `ffprobe` for duration, size and codec (saved on `brand_assets`), ~6 keyframes with `ffmpeg` resized to ≤ 1568 px, one vision call returning `VideoAnalysis` (description, tags, Product suggestions, `reel_suitable` with reason, `cover_offset_ms`). Product suggestions saved as `asset_products` like T11.
+- Done when: the demo videos get sensible descriptions; a 15–60 s vertical video is `reel_suitable`, a 4-minute horizontal one is not, and both have a cover offset that looks good as a still.
 
-- Plus `dashboard` magic link via orchestrator ("¿dónde veo todo?").
+### T37: Derived frame photos · A · S
+
+- Build: the best frames from `VideoAnalysis` are saved as `kind = 'photo'` Brand assets with `derived_from_asset_id` set, analyzed like any photo, usable by the Art Director.
+- Done when: a video upload adds 1–3 derived photos that appear in the Contenido tab and can be used in an image Post.
+
+### T38: Dashboard REST · B · M
+
+- Read: [api.md § Dashboard](../architecture/api.md)
+- Build: `app/api/dashboard.py` under `/api/b/{token}`: business + Brand Brain + Posts (existing reads); `uploads` + `assets/{id}/complete` (same flow as T24); assets list (filter by kind, Product, archived) and `PATCH` (`product_ids`, `archived`); Products CRUD with `PATCH archived`; Offers CRUD (F8.6, Should). Nothing is deleted, only archived; archived material is hidden from agents. `dashboard` magic links are editable and expire after `DASHBOARD_LINK_TTL_DAYS`; "link" in WhatsApp sends a new one.
+- Done when: every endpoint works via `curl` with a real token; an archived photo no longer appears in the Content Strategist's asset list; an expired link gets the friendly expired error.
+
+### T35: Dashboard `/b/[token]` · B · M
+
+- Read: [design/web-app.md § /b/[token]](../design/web-app.md)
+- Build: mobile tabs **Inicio** (Brand Brain summary + Posts with status badges, Reels with their cover), **Catálogo** (Products list, add/edit/archive), **Contenido** (photo/video grid, multi-select upload with progress, link Products, archive) and **Promos** (Offers list and form, Should). Plus the `dashboard` magic link via orchestrator ("¿dónde veo todo?").
+- Done when: on a real phone, the Owner adds a Product, uploads 10 photos and a video, links the video to the Product and archives a photo, all from the WhatsApp link.
+
+### T39: Reels in the agents · A · M
+
+- Read: [agents.md](../architecture/agents.md) (Content Strategist, Copywriter, Art Director, Feedback Classifier)
+- Build: plan items carry a `format` (`image` | `reel`); the Content Strategist plans a Reel only from `reel_suitable` videos; the Copywriter writes Reel captions; the Art Director picks `video_asset_id` + `cover_offset_ms` instead of a render spec; the Feedback Classifier routes Reel feedback to copy, cover or a different video. `post.py` handles Reels: no render, the cover frame is extracted as a JPEG for previews.
+- Done when: with the demo seed, the weekly plan includes one Reel; "cambiá el video" swaps the video, "más corto" rewrites only the caption.
+
+### T44: Reel publishing · B · M
+
+- Read: [integrations.md § Zernio](../architecture/integrations.md#publishing-provider-zernio), [research/media-uploads.md](../research/media-uploads.md#publishing-video-and-carousels-zernio-instagram)
+- Build: `ZernioPublisher` publishes `format = 'reel'` Posts as one video media item by public signed URL (valid long enough for Zernio to fetch it) with `thumbOffset = cover_offset_ms`; handles the slower processing (status from the webhook, T29); the mock publisher logs Reels like images.
+- Done when: an approved Reel is published on the demo IG and the permalink arrives in WhatsApp; with `PUBLISHER=mock` the same flow completes.
+
+### T45: WhatsApp Reel preview · B · M
+
+- Read: [integrations.md § WhatsApp](../architecture/integrations.md#whatsapp-cloud-api)
+- Build: Reel previews send the video with the caption and the Aprobar / Cambiar / Descartar buttons when it fits WhatsApp's media size limit; otherwise the cover frame + caption + a dashboard link to watch it. Same in the simulator.
+- Done when: both paths look right on a real phone.
+
+### T46: Catalog and Offers from the chat · A · S
+
+- Build: orchestrator tools to add or edit a Product and to create an Offer from free text ("agregá la silla Oslo a $4500", "este finde 15% en sillas"), always confirming with the Owner before saving; the onboarding current promo becomes a draft Offer confirmed with the Brand Brain summary. Agents read active Offers from `offers` (replacing `current_offers`).
+- Done when: both example messages create the right rows after confirmation; an Offer past its end date is not used by the Content Strategist.
+
+## Demoted to Could (ADR 0012)
+
+- T34: Templates `quote_card` + `split_story` (F4.3, 3+ templates). · B · C
+- Brand Brain correction in chat (F2.6, revise mode of T12). · A · C
+- Plan changes from free text (F3.3). · A · C
 
 ## Could (only after Checkpoint 3)
 
@@ -176,7 +222,8 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 - T41: Facebook cross-post (uses the second Zernio slot). · C
 - T42: Brand Brain correction via web. · C
 - T43: AI background generation behind `ImageGenPort`. · C
+- T47: Price-list extraction: the Owner sends a photo or PDF of their price list and the Agency proposes Products to confirm (F8.8). · A · C
 
 ## Tests (minimum bar)
 
-Unit tests for deterministic logic only (fast, no network): state machine transitions (onboarding, post, plan), button router guards, webhook signature + dedupe, quality checks, render spec validation, contrast guard. Live LLM tests are marked `@pytest.mark.live` and excluded by default. No frontend tests.
+Unit tests for deterministic logic only (fast, no network): state machine transitions (onboarding, post, plan), button router guards, webhook signature + dedupe, quality checks, render spec validation, contrast guard, upload validation (kind, type, size limits), `reel_suitable` rules, archived material hidden from agents. Live LLM tests are marked `@pytest.mark.live` and excluded by default. No frontend tests.

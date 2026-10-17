@@ -44,8 +44,25 @@ _Avoid_: Brand profile, brand kit, context
 _Status_: draft
 
 **Brand asset**:
-A logo or photo the Owner provided, available for use in Posts.
-_Avoid_: Media, upload
+A logo, photo or video the Owner provided, sent through the Channel or the web, that the Agency learns from and can use in Posts.
+_Avoid_: Media, upload, content
+_Status_: draft
+
+## What the Business sells
+
+**Product**:
+Something the Business sells, described by the Owner (name, description, optional price and category) and shown in its Brand assets.
+_Avoid_: Item, SKU, listing
+_Status_: draft
+
+**Catalog**:
+All the Products of one Business; the Brand Brain summarizes only its most important ones.
+_Avoid_: Inventory, store, shop
+_Status_: draft
+
+**Offer**:
+A commercial proposal the Owner has defined with its conditions (price or discount, validity), either a pack of Products sold together or a promo; the Agency may suggest one, but it exists only once the Owner confirms it.
+_Avoid_: Deal, discount, campaign
 _Status_: draft
 
 **Content plan**:
@@ -54,8 +71,13 @@ _Avoid_: Calendar, schedule
 _Status_: draft
 
 **Post**:
-One piece of content for a social network (image plus caption) that goes through creation, Approval and publishing.
+One piece of content for a social network that goes through creation, Approval and publishing: either a branded image with its caption, or a Reel.
 _Avoid_: Publication, piece
+_Status_: draft
+
+**Reel**:
+A Post made from one of the Owner's videos, published as-is with a caption and a cover frame chosen by the Agency.
+_Avoid_: Video post, clip, story
 _Status_: draft
 
 **Approval**:

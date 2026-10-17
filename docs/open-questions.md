@@ -20,6 +20,17 @@ Meta restricted general-purpose AI chatbots on the WhatsApp Business API startin
 - [ ] Confirm the exact query params Zernio appends to the connect redirect (log them in the pre-hackathon test).
 - [ ] Zernio pricing beyond 2 accounts (per-account) vs. building our own Meta app with app review: decide when we have >10 businesses.
 
+## Catalog, content and Reels
+
+From [ADR 0012](decisions/0012-catalog-content-dashboard-reels.md); facts in [research/media-uploads.md](research/media-uploads.md).
+
+- [ ] Reel length cap: Zernio documents 3–90 s, Meta 3 s–15 min. Test a 60 s and a 2-minute video through Zernio before the hackathon.
+- [ ] WhatsApp video preview: confirm the media size limit for outbound video, and whether the cover + dashboard link fallback is enough.
+- [ ] Transcribe video audio (faster-whisper in the backend container) in v1, so the Agency knows what is said in the Owner's videos?
+- [ ] Agency-suggested Offers (F8.9): when and how the Agency proposes packs and promos (for example once a week inside the plan), post-MVP.
+- [ ] Dashboard access without user accounts: anyone with a forwarded link can edit for 7 days. Acceptable until accounts exist (F7.4)?
+- [ ] Supabase Pro (US$25/month) from day one: who pays for it during the hackathon, and storage cost per Business once Owners upload lots of video.
+
 ## Product (post-hackathon)
 
 - [ ] Pricing: posts per month per plan? Free trial length?

@@ -5,6 +5,7 @@
 - Python 3.13 + [uv](https://docs.astral.sh/uv/)
 - Node.js 20+ and npm
 - Docker (to test the production image)
+- `ffmpeg` (includes `ffprobe`) for video analysis: `brew install ffmpeg` or your package manager
 - A tunnel for local WhatsApp testing: `cloudflared` or `ngrok` (optional; the simulator doesn't need it)
 - Accounts and keys: see the checklist in [plan.md](plan.md#before-the-hackathon-checklist)
 
@@ -36,6 +37,9 @@
 | `ENABLE_DEV_ENDPOINTS` | `true` | `/dev/*` |
 | `DEV_TOKEN` | random | Header `X-Dev-Token` |
 | `MAX_CONCURRENT_JOBS` | `4` | |
+| `MAX_PHOTO_MB` | `10` | Rejected before the signed upload URL is issued |
+| `MAX_VIDEO_MB` | `300` | Must not exceed the Supabase Storage global file size limit |
+| `DASHBOARD_LINK_TTL_DAYS` | `7` | Editable dashboard magic links expire after this |
 
 ### Frontend (`frontend/.env.local`)
 
@@ -43,6 +47,12 @@
 |---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` / prod backend URL |
 | `NEXT_PUBLIC_DEV_TOKEN` | same as `DEV_TOKEN` (simulator only; acceptable for a demo, remove for production) |
+
+## Supabase Storage
+
+- **Pro** plan: the Free plan caps files at 50 MB ([research/media-uploads.md](../research/media-uploads.md#storage-supabase)).
+- Storage settings → global file size limit **300 MB** (same as `MAX_VIDEO_MB`).
+- Buckets: `assets` (private; photos, videos, logos, derived frames) and `renders` (public). The browser uploads straight to `assets` with signed upload URLs issued by the backend; files over 6 MB use resumable (TUS) uploads.
 
 ## Run locally
 
@@ -79,5 +89,5 @@ npm run lint && npm run build
 ## Deploy
 
 - **Frontend**: Vercel, root directory `frontend/`, env vars above. Every push to `main` deploys.
-- **Backend**: Tenki (or Railway/Render) building `backend/Dockerfile`. One instance only (in-process jobs and locks). Health check `/health`. ≥ 1 GB RAM.
+- **Backend**: Tenki (or Railway/Render) building `backend/Dockerfile` (Chromium + `ffmpeg`). One instance only (in-process jobs and locks). Health check `/health`. ≥ 1 GB RAM.
 - **After the first backend deploy**: set the Meta webhook URL, run `/dev/seed/demo` if needed, send "hola" from a test phone.

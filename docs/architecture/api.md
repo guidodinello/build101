@@ -42,23 +42,22 @@ All under `/api/o/{token}`. The token is the onboarding magic link.
 |---|---|---|---|
 | GET | `/api/o/{token}` | — | `OnboardingState` (below) |
 | PUT | `/api/o/{token}/business` | `{name, category, one_liner, description?, location, website?, instagram_handle?}` | `OnboardingState` |
-| PUT | `/api/o/{token}/products` | `{products: [{name, description, price?}]}` (max 5) | `OnboardingState` |
+| PUT | `/api/o/{token}/products` | `{products: [{id?, name, description, price?, category?}]}` (≥ 1, no maximum) | `OnboardingState`: upserts `products` rows in the given order; rows left out are archived |
 | PUT | `/api/o/{token}/brand` | `{three_words: [str, str, str], colors: [hex...]}` | `OnboardingState` |
-| POST | `/api/o/{token}/assets` | multipart: `file`, `kind` (`logo`\|`photo`), `owner_hint?` | `Asset` (logo includes `palette`) |
-| DELETE | `/api/o/{token}/assets/{asset_id}` | — | `204` |
+| POST | `/api/o/{token}/uploads` | `UploadRequest` (below) | `UploadTicket`: see [Uploads](#uploads) |
+| POST | `/api/o/{token}/assets/{asset_id}/complete` | — | `Asset` (logo includes `palette`) |
+| DELETE | `/api/o/{token}/assets/{asset_id}` | — | `204`: archives the asset (the ✕ on a wizard thumbnail) |
 | PUT | `/api/o/{token}/preferences` | `Questionnaire` (below) | `OnboardingState` |
 | POST | `/api/o/{token}/instagram/connect` | `{}` | `{"auth_url": "..."}`: creates the Zernio profile if needed and returns the hosted connect URL. `redirect_url` = `{FRONTEND_URL}/o/{token}?step=instagram&connected=1` |
 | POST | `/api/o/{token}/instagram/callback` | `{account_id?, query: {...}}`: the frontend forwards the query params Zernio appended to the redirect | `OnboardingState` |
-| POST | `/api/o/{token}/complete` | — | `202 {"status": "generating_brand"}`. Validates required fields (name, category, ≥ 3 photos, logo optional but recommended), sets state, enqueues `generate_brand`, sends `brand_generating` on WhatsApp |
-
-Uploads: max 10 MB per file; accepted `image/jpeg`, `image/png`, `image/webp`, `image/heic` (HEIC converted to JPEG server-side with `pillow-heif`). Each photo upload enqueues `analyze_asset`. Logo upload runs palette extraction synchronously (fast) and returns it.
+| POST | `/api/o/{token}/complete` | — | `202 {"status": "generating_brand"}`. Validates required fields (name, category, ≥ 1 product, ≥ 3 photos (videos optional), logo optional but recommended), sets state, enqueues `generate_brand`, sends `brand_generating` on WhatsApp |
 
 ```ts
 type OnboardingState = {
   business: { name: string | null; category: string | null; one_liner: string | null;
               description: string | null; location: string | null; website: string | null;
               instagram_handle: string | null };
-  products: { name: string; description: string; price: string | null }[];
+  products: Product[];
   brand: { three_words: string[]; colors: string[] };
   assets: Asset[];
   preferences: Questionnaire | null;
@@ -66,8 +65,27 @@ type OnboardingState = {
   completed: boolean;               // magic_links.completed_at != null
   whatsapp_url: string;             // https://wa.me/<bot number>
 };
-type Asset = { id: string; kind: "logo" | "photo"; url: string /* signed, 1h */;
-               owner_hint: string | null; palette: string[] | null; analyzed: boolean };
+type Asset = {
+  id: string;
+  kind: "logo" | "photo" | "video";
+  status: "uploading" | "ready" | "failed";
+  url: string;                      // signed, 1h
+  thumbnail_url: string | null;     // videos: the cover frame, or the first frame until analyzed
+  width: number | null; height: number | null;
+  duration_ms: number | null;       // videos only
+  derived_from_asset_id: string | null;   // a photo saved from a video's frame
+  owner_hint: string | null;
+  palette: string[] | null;         // logos
+  product_ids: string[];
+  reel_suitable: boolean | null;    // videos: null until analyzed
+  analyzed: boolean;
+  archived: boolean;
+};
+type Product = { id: string; name: string; description: string; price: string | null;
+                 category: string | null; position: number; asset_count: number; archived: boolean };
+type Offer = { id: string; kind: "pack" | "promo"; title: string; conditions: string;
+               price: string | null; starts_on: string | null; ends_on: string | null;   // ISO dates
+               status: "draft" | "active" | "archived"; product_ids: string[] };
 type Questionnaire = {
   goal: "sales" | "awareness" | "launch" | "loyalty";
   audiences: string[];              // from fixed options + free "otro"
@@ -80,15 +98,53 @@ type Questionnaire = {
 };
 ```
 
-### Dashboard (read-only, Should)
+### Uploads
 
-Token = a `dashboard` magic link (the bot sends it when the owner asks "¿dónde veo todo?").
+The wizard (`/api/o/{token}`) and the dashboard (`/api/b/{token}`) share one upload flow. Files go **from the browser straight to Supabase Storage**; the backend never receives the bytes ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md), facts in [../research/media-uploads.md](../research/media-uploads.md)).
 
-| Method | Path | Response |
+| Method | Path | Body | Response |
+|---|---|---|---|
+| POST | `/api/{o\|b}/{token}/uploads` | `UploadRequest` | `UploadTicket`. Validates type and size, creates a `brand_assets` row with `status = 'uploading'`, returns a signed upload URL for `assets/{business_id}/{asset_id}.{ext}` |
+| POST | `/api/{o\|b}/{token}/assets/{asset_id}/complete` | — | `Asset`. Checks the object exists in Storage (else `409 upload_missing`), sets `status = 'ready'` and `size_bytes`, converts HEIC to JPEG (`pillow-heif`), runs logo palette extraction synchronously, enqueues `analyze_asset` for photos and videos |
+
+1. `POST .../uploads` → `UploadTicket`.
+2. The browser uploads to `upload_url`: a single `PUT` when `resumable = false`, or TUS with `x-signature: upload_token` when `resumable = true` (files over 6 MB).
+3. `POST .../assets/{asset_id}/complete`. A ticket never completed stays `uploading` and is ignored; a nightly cleanup can mark it `failed`.
+
+Accepted files:
+
+| Kind | Types | Max size |
 |---|---|---|
-| GET | `/api/b/{token}` | `{business: {...}, brand_brain: BrandBrain, instagram: {...}}` |
-| GET | `/api/b/{token}/posts?status=` | `[{id, title, status, image_url, caption, scheduled_for, published_at, permalink}]` |
-| GET | `/api/b/{token}/plans/current` | `{week_start, status, items: [...]}` |
+| `photo`, `logo` | `image/jpeg`, `image/png`, `image/webp`, `image/heic` | 10 MB |
+| `video` | `video/mp4`, `video/quicktime` (MOV) | 300 MB |
+
+Anything else → `422 unsupported_file` with a Spanish `message` the UI shows as is. Video duration and size in pixels are read with `ffprobe` during `analyze_asset`, not at upload.
+
+```ts
+type UploadRequest = { kind: "logo" | "photo" | "video"; filename: string; content_type: string;
+                       size_bytes: number; owner_hint?: string };
+type UploadTicket = { asset_id: string; upload_url: string; upload_token: string; resumable: boolean };
+```
+
+### Dashboard (Must, editable)
+
+Token = a `dashboard` magic link (the bot sends it when the owner asks "¿dónde veo todo?" or "quiero subir fotos"). Valid for **7 days**; writing "link" in WhatsApp sends a new one. Anyone with the link can edit until there are user accounts (F7.4), so **nothing is hard-deleted**: `archived: true` hides a Product, Brand asset or Offer from agents and the dashboard. Archiving material used by a draft Post (`pending_approval`, `revising`) flags that Post for review; published and scheduled Posts don't change.
+
+| Method | Path | Body / Query | Response |
+|---|---|---|---|
+| GET | `/api/b/{token}` | — | `{business: {...}, brand_brain: BrandBrain, instagram: {...}, counts: {products, photos, videos, active_offers}}` |
+| GET | `/api/b/{token}/posts?status=` | — | `[{id, title, format, status, image_url, video_url, cover_url, caption, scheduled_for, published_at, permalink, needs_review}]` |
+| GET | `/api/b/{token}/plans/current` | — | `{week_start, status, items: [...]}` |
+| GET | `/api/b/{token}/products?include_archived=` | — | `Product[]` (by `position`) |
+| POST | `/api/b/{token}/products` | `{name, description?, price?, category?}` | `Product` |
+| PATCH | `/api/b/{token}/products/{id}` | any of `{name, description, price, category, position, archived}` | `Product` |
+| GET | `/api/b/{token}/assets?kind=&product_id=&include_archived=` | — | `Asset[]` (newest first; derived frames included, with `derived_from_asset_id`) |
+| PATCH | `/api/b/{token}/assets/{id}` | any of `{owner_hint, product_ids, archived}` | `Asset`. `product_ids` replaces the links and marks them `source = 'owner'` |
+| GET | `/api/b/{token}/offers?status=` | — | `Offer[]` |
+| POST | `/api/b/{token}/offers` | `{kind, title, conditions, price?, starts_on?, ends_on?, product_ids?, status?}` | `Offer` (default `status = 'active'`: the Owner wrote it, so it's confirmed) |
+| PATCH | `/api/b/{token}/offers/{id}` | any Offer field, or `status: "archived"` | `Offer` |
+
+Uploads from the dashboard use [Uploads](#uploads) with the `b` prefix. Products and Offers created in the chat go through the orchestrator tools in [agents.md](agents.md), and appear here too.
 
 ### Dev / simulator
 
@@ -97,7 +153,7 @@ Used by `/dev/chat` (the WhatsApp simulator) and for local testing. The simulato
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
 | POST | `/dev/sim/businesses` | `{phone?: str}` | `{business_id, phone}`: creates or resets a simulator business (`sim-<random>`) |
-| POST | `/dev/sim/{phone}/messages` | `{type: "text", text}` or `{type: "button_reply", button_id, title}` or `{type: "image", url}` | `202` |
+| POST | `/dev/sim/{phone}/messages` | `{type: "text", text}` or `{type: "button_reply", button_id, title}` or `{type: "image" \| "video", url}` | `202` |
 | GET | `/dev/sim/{phone}/messages?after=<iso>` | — | `[SimMessage]` (both directions, ascending) |
 | POST | `/dev/businesses/{id}/reset` | `{to_state?: "new" \| "active"}` | resets conversation state (for rehearsals) |
 | POST | `/dev/seed/demo` | — | loads the demo business seed (pre-generated Brand Brain + plan) |
@@ -106,9 +162,10 @@ Used by `/dev/chat` (the WhatsApp simulator) and for local testing. The simulato
 ```ts
 type SimMessage = {
   id: string; direction: "in" | "out"; created_at: string;
-  type: "text" | "image" | "interactive" | "button_reply";
+  type: "text" | "image" | "video" | "interactive" | "button_reply";
   text: string | null;
   image_url: string | null;
+  video_url: string | null;
   buttons: { id: string; title: string }[] | null;   // for interactive messages
 };
 ```
@@ -133,6 +190,7 @@ Format: `<action>:<entity_id>` (≤ 256 chars). Parsed by `conversation/button_r
 | `post_schedule:{post_id}` | post `approved` | if `scheduled_for` in future → enqueue `publish_post(scheduled_for)`; else `awaiting = schedule_time`, send `schedule_ask` |
 | `post_retry:{post_id}` | post `failed` | retry the last failed job for that post |
 | `photo_post:{asset_id}` | active | `create_post(origin="photo", asset_id, brief="Post con esta foto")` |
+| `reel_post:{asset_id}` | active, video asset with `reel_suitable` | `create_post(origin="photo", format="reel", asset_id, brief="Reel con este video")` (`origin = "photo"` covers any asset the Owner sent) |
 | `retry:{job_id}` | job `failed` | re-enqueue same kind + payload |
 | `noop` | always | send nothing (or a 👍 reaction) |
 
@@ -150,7 +208,8 @@ class ChannelPort(Protocol):
     async def send_text(self, to: str, text: str) -> str: ...                       # returns message id
     async def send_image(self, to: str, image_url: str, caption: str | None = None) -> str: ...
     async def send_buttons(self, to: str, body: str, buttons: list[Button],
-                           header_image_url: str | None = None) -> str: ...        # 1–3 buttons
+                           header_image_url: str | None = None,
+                           header_video_url: str | None = None) -> str: ...        # 1–3 buttons; one header at most
     async def mark_read(self, message_id: str) -> None: ...
     async def download_media(self, media_id: str) -> tuple[bytes, str]: ...         # (bytes, mime)
 
@@ -166,11 +225,21 @@ class PublishResult(BaseModel):
 class PublisherPort(Protocol):
     async def ensure_profile(self, business: Business) -> str: ...                  # provider profile id
     async def connect_url(self, business: Business, platform: str, redirect_url: str) -> str: ...
-    async def publish(self, account: SocialAccount, caption: str, image_url: str,
+    async def publish(self, account: SocialAccount, caption: str, media: PublishMedia,
                       when: datetime | None) -> PublishResult: ...
+
+class PublishMedia(BaseModel):
+    format: Literal["image", "reel"]
+    url: str                           # public or long-lived signed URL: the render (image) or the Owner's video (reel)
+    cover_offset_ms: int | None = None # reel only
 
 # app/rendering/renderer.py
 async def render_post(spec: RenderSpec, brand: VisualIdentity, assets: AssetResolver) -> bytes: ...  # JPEG
+
+# app/media/video.py (ffmpeg / ffprobe)
+async def probe(path: Path) -> VideoInfo: ...                                     # duration_ms, width, height, codecs
+async def keyframes(path: Path, count: int = 6, max_side: int = 1568) -> list[Frame]: ...   # JPEG bytes + offset_ms
+async def whatsapp_preview(path: Path) -> bytes | None: ...                        # MP4 ≤ 16 MB, or None if it can't fit
 
 # app/jobs/runner.py
 async def enqueue(kind: str, payload: dict, business_id: UUID | None) -> UUID: ...
