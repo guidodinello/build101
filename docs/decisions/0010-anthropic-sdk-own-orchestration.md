@@ -1,7 +1,8 @@
 # 0010: Anthropic SDK with our own orchestration
 
 - Date: 2026-10-17
-- Status: proposed
+- Status: superseded
+- Superseded by: [0023](0023-gemini-text-llm.md) (provider and SDK only; the own-orchestration choice stands)
 
 ## Context
 

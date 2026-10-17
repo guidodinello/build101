@@ -10,7 +10,7 @@ flowchart LR
     API -- send messages --> Kapso
     Web -- REST --> API
     Web -- "uploads (signed URL)" --> Storage
-    API -- Messages API --> Claude[Claude API]
+    API -- Interactions API --> Gemini[Gemini API]
     API -- reference photos + prompt --> ImgGen[Image service<br/>Gemini, OpenAI fallback]
     API -- SQL --> DB[(Supabase Postgres)]
     API -- files --> Storage[(Supabase Storage)]
@@ -27,7 +27,7 @@ flowchart LR
 | **Backend API** | Python 3.13, FastAPI, uvicorn, one container on Railway ([ADR 0017](../decisions/0017-backend-host-railway.md)) | Webhooks, REST for the web app, orchestrator, agents, jobs, image generation calls, publishing |
 | **Database** | Supabase Postgres | All state. Schema in [data-model.md](data-model.md) |
 | **File storage** | Supabase Storage (Free plan for the Must scope; Pro with a 300 MB file limit only once the Could video work starts, [ADR 0016](../decisions/0016-demo-scope-one-post.md)), two buckets: `assets` (private uploads), `renders` (public JPEGs) | Logos and photos (uploaded straight from the browser or received in the chat), generated post images (variations and carousel slides); videos, frames and Reel previews only with the Could video work |
-| **LLM** | Claude API (`claude-opus-5-5`) via the official `anthropic` Python SDK | Orchestrator + specialist agents. See [agents.md](agents.md) |
+| **LLM** | Gemini API (`gemini-3.8-flash`) via the official `google-genai` Python SDK ([ADR 0023](../decisions/0023-gemini-text-llm.md)) | Orchestrator + specialist agents. See [agents.md](agents.md) |
 | **WhatsApp** | Kapso, on top of Meta's WhatsApp Cloud API ([ADR 0020](../decisions/0020-whatsapp-via-kapso.md)); Meta direct is plan B | Inbound/outbound messages, buttons, media |
 | **Publishing** | Zernio, unified social publishing API (see [integrations.md](integrations.md#publishing-provider-zernio)) | Instagram connect + publish + schedule |
 | **Image generation** | Third-party image service behind `ImageGenPort`: Google Gemini `gemini-nano-banana-2.1`, OpenAI `gpt-image-2.5-sunburst` as fallback ([ADR 0018](../decisions/0018-ai-image-generation-service.md), [ADR 0019](../decisions/0019-image-provider-gemini.md)); Pillow resize to 1080×1350 | Post image variations and carousel slides ([ADR 0022](../decisions/0022-carousels-in-mvp.md)) from the Owner's photos ([integrations.md](integrations.md#image-generation)) |
@@ -48,7 +48,7 @@ flowchart TB
         IN[Inbound handler<br/>dedupe, store, route]
         ONB[Onboarding router<br/>deterministic]
         BTN[Button router<br/>deterministic]
-        ORC[Orchestrator<br/>Claude + tools]
+        ORC[Orchestrator<br/>Gemini + tools]
     end
     subgraph Work["Jobs (app/jobs)"]
         J1[generate_brand]
@@ -98,7 +98,7 @@ flowchart TB
 ### Key design rules
 
 1. **Deterministic where it matters, LLM where it helps.** Button taps, onboarding steps, approval, and publishing are plain code. The LLM handles free text, planning, writing and design choices.
-2. **Agents are functions, not processes.** Each specialist is an async function: typed input (Pydantic) → one Claude call with structured output → typed output. Only the orchestrator runs a tool-use loop.
+2. **Agents are functions, not processes.** Each specialist is an async function: typed input (Pydantic) → one Gemini call with structured output → typed output. Only the orchestrator runs a tool-use loop.
 3. **Long work runs in background jobs.** The webhook returns `200` in < 1 s. The orchestrator's tools *enqueue* jobs and return immediately; jobs send their own WhatsApp messages when they finish.
 4. **Ports for everything external.** `ChannelPort` (WhatsApp through Kapso / Simulator), `PublisherPort` (Provider / Mock), `ImageGenPort` (Gemini / OpenAI / Mock), `TranscriberPort` (Gemini / Mock). Switching is an env var, which is also our demo fallback.
 5. **Per-business serialization.** Inbound messages for the same business are processed one at a time (an in-process `asyncio.Lock` per business ID). Different businesses run concurrently.

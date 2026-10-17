@@ -52,7 +52,7 @@ Check the hackathon rules first: if pre-written code is not allowed, do only acc
 
 **Accounts and keys** (owner: both, **by the day before**):
 
-- [ ] Anthropic API key with credits; check rate limits for `claude-opus-5-5`.
+- [ ] Gemini API key (billing linked); check the rate limits for `gemini-3.8-flash` in AI Studio.
 - [ ] Kapso account (Free plan) and a number: the free US number or the sandbox; webhook pointed at the backend. At the hackathon this moved to hour 1 ([ADR 0020](../decisions/0020-whatsapp-via-kapso.md), [integrations.md](../architecture/integrations.md#kapso-setup-hour-1)). Meta's developer app and System User token only if plan B is needed.
 - [ ] Google project with a **billing account linked** and a Gemini API key (unpaid use trains on images). OpenAI key and Organization Verification only if the fallback is needed ([ADR 0019](../decisions/0019-image-provider-gemini.md)).
 - [ ] Zernio account + API key; demo IG account switched to **Business or Creator**; one manual test post via their dashboard.

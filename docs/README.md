@@ -14,7 +14,7 @@ Everything needed to build the MVP: an AI marketing agency for small business ow
 6. [architecture/agents.md](architecture/agents.md): Brand Brain, each agent's I/O, orchestrator tools, LLM conventions
 7. [architecture/data-model.md](architecture/data-model.md): Postgres schema
 8. [architecture/api.md](architecture/api.md): REST endpoints, webhooks, button IDs, internal interfaces
-9. [architecture/integrations.md](architecture/integrations.md): WhatsApp (Kapso), Zernio, Claude, image generation, Supabase
+9. [architecture/integrations.md](architecture/integrations.md): WhatsApp (Kapso), Zernio, Gemini (text), image generation, Supabase
 10. [design/web-app.md](design/web-app.md): onboarding wizard, dashboard, chat simulator
 11. [implementation/plan.md](implementation/plan.md): 24h timeline, tracks, pre-hackathon checklist, risks
 12. [implementation/tasks.md](implementation/tasks.md): task-by-task breakdown with acceptance criteria

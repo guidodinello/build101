@@ -34,7 +34,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 ### T10: LLM client · A · M
 
 - Read: [architecture/agents.md § LLM client conventions](../architecture/agents.md#llm-client-conventions)
-- Build: `app/llm/client.py`: `async def structured(agent: str, system: list, messages: list, output_model: type[T], effort: str, business_id, job_id=None) -> T` and `async def tool_step(...) -> Message` for the orchestrator. Writes `agent_runs`. Handles `refusal` / `max_tokens` stop reasons with typed exceptions (`LLMRefusal`, `LLMTruncated`). Enables prompt caching and server-side fallbacks.
+- Build: `app/llm/client.py` on Gemini ([ADR 0023](../decisions/0023-gemini-text-llm.md)): `structured(agent, system, history, output_model, thinking_level, business_id, job_id=None) -> T` and a function-calling step for the orchestrator. Writes `agent_runs`. Raises `LLMError` on a non-`completed` status, empty output or SDK error. **Started:** `ChatModel` / `GeminiChat.reply()` (text turn, stateless history with thought steps kept) is in; `structured`, function calling and `agent_runs` are still to do.
 - Done when: a pytest (marked `live`, skipped without key) gets a valid small Pydantic object back and an `agent_runs` row exists.
 
 ### T11: Asset Analyst (photos and logo) · A · M
@@ -85,7 +85,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 ### T23: Inbound handler + onboarding router (Flow 1) · B · M
 
 - Read: [product/user-flows.md](../product/user-flows.md) (state machines, Flow 1), conversation-design.md copy deck
-- Build: `app/conversation/inbound.py` (per-business `asyncio.Lock`, create business on first contact, route by type/state), `onboarding_router.py` (states `new` → `awaiting_web_form`, magic link creation, `link_reminder`, "link" keyword re-sends), stub for `button_router` and orchestrator (echo).
+- Build: `app/conversation/inbound.py` (per-business `asyncio.Lock`, create business on first contact, route by type/state), `onboarding_router.py` (states `new` → `awaiting_web_form`, magic link creation, `link_reminder`, "link" keyword re-sends), stub for `button_router`; the orchestrator side starts from `app/conversation/chat.py` (`ChatHandler`: Gemini replies to text and voice-note transcripts, per-sender lock, in-memory history).
 - Done when: new number → welcome → name → magic link with a working URL, both on WhatsApp and simulator; unit tests for the state transitions.
 
 ## H7–12
