@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 ThinkingLevel = Literal["low", "medium", "high"]
 Step = dict[str, Any]  # an Interactions API step, as sent and as stored in the history
 
-REQUEST_TIMEOUT_S = 30.0
+# Free-tier gemini-3.8-flash took 5–26 s per chat turn on 2026-10-17, and some turns over 30 s.
+REQUEST_TIMEOUT_S = 60.0
 
 
 class LLMError(Exception):

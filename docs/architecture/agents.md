@@ -31,7 +31,7 @@ All text LLM calls go through `app/llm/client.py` ([ADR 0023](../decisions/0023-
 - **Caching**: order the prompt stable → volatile (system instruction → Brand Brain → dynamic context) so implicit context caching can hit. Never put timestamps in the system instruction.
 - **Images**: send as image content (signed Supabase URL, or base64 for small files). Resize to max 1568 px on the long side before upload to save tokens.
 - **Video** (Could): Gemini reads video natively, but agents still get ffprobe metadata plus keyframes from the Frame Extractor until the team decides otherwise ([ADR 0023](../decisions/0023-gemini-text-llm.md)).
-- **Timeouts**: 90 s for specialists, 30 s per orchestrator step.
+- **Timeouts**: 90 s for specialists, 60 s per orchestrator step. On the free tier, `gemini-3.8-flash` took 5–26 s per chat turn with ~400 thought tokens, and some turns went over 30 s (measured over WhatsApp on 2026-10-17); the typing indicator stays on while it runs.
 - **Logging**: each call writes `agent_runs` (business_id, agent, model, thinking level, input JSON, output JSON, input/output/thought/cached tokens, latency_ms, status, error). Until T02 the client logs those fields.
 
 Before changing any of this, check the current Gemini API docs (<https://ai.google.dev/gemini-api/docs>). Model IDs and parameters change.
