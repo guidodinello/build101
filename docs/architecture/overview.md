@@ -229,7 +229,7 @@ build101/
 │   │   │                     # copywriter.py, art_director.py, text_checker.py, schemas.py, prompts/*.md
 │   │   ├── carousel/         # schemas.py (CarouselCopy, CarouselBrief, TextCheck), prompts.py (build_slide_prompt), generator.py (CarouselGenerator)
 │   │   ├── jobs/             # runner.py, brand.py, plan.py, post.py, publish.py, asset.py
-│   │   ├── channels/         # base.py (ChannelPort), whatsapp.py (Kapso; Meta direct on plan B), simulator.py
+│   │   ├── channels/         # base.py (ChannelPort), kapso.py (Kapso; Meta direct on plan B), kapso_webhook.py, inbound.py, router.py, simulator.py
 │   │   ├── publishing/       # base.py (PublisherPort), zernio.py, mock.py
 │   │   ├── imagegen/         # base.py (ImageGenPort), gemini.py, openai.py, mock.py
 │   │   ├── transcription/    # base.py (TranscriberPort), gemini.py, mock.py (voice notes)

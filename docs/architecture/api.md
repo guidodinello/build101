@@ -6,7 +6,7 @@ FastAPI. JSON in and out, `snake_case` fields. Errors use `{"error": {"code": ".
 
 | Caller | Mechanism |
 |---|---|
-| WhatsApp webhook (Kapso) | Kapso's webhook signature, checked with its signing secret (`KAPSO_*`; header and scheme to confirm in [Kapso's docs](https://docs.kapso.ai/docs/platform/webhooks/security.md)). Plan B (Meta direct): `X-Hub-Signature-256` HMAC with `META_APP_SECRET` |
+| WhatsApp webhook (Kapso) | `X-Webhook-Signature`: hex HMAC-SHA256 of the **raw body** with `KAPSO_WEBHOOK_SECRET` (confirmed 2026-10-17, [Kapso's docs](https://docs.kapso.ai/docs/platform/webhooks/security.md)). `401` on a mismatch, a missing header or no configured secret. Plan B (Meta direct): `X-Hub-Signature-256` HMAC with `META_APP_SECRET` |
 | Zernio webhook | `X-Zernio-Signature` HMAC with `ZERNIO_WEBHOOK_SECRET` |
 | Web app (owner) | Magic-link token in the path: `/api/o/{token}/...`. Server hashes it, looks up `magic_links`, checks expiry → `business_id` |
 | Dev tools | Header `X-Dev-Token: $DEV_TOKEN`, only if `ENABLE_DEV_ENDPOINTS=true` |
@@ -26,7 +26,7 @@ CORS: allow every origin in `FRONTEND_ORIGINS` (comma-separated: Vercel URL + `h
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/webhooks/whatsapp` | Plan B (Meta direct) only. Verification: if `hub.mode == "subscribe"` and `hub.verify_token == META_VERIFY_TOKEN`, return `hub.challenge` as plain text, else 403. Whether Kapso needs a verification handshake is part of the first-hour test |
-| POST | `/webhooks/whatsapp` | Verify signature → enqueue handling as a background task → return `200` immediately. Handles `messages` and `statuses` changes. Payload shapes in [integrations.md](integrations.md#whatsapp) |
+| POST | `/webhooks/whatsapp` | Verify signature → dedupe → enqueue handling as a background task → return `200` immediately. Only `X-Webhook-Event: whatsapp.message.received` is handled; other events (and payloads that don't parse) get `200` and are ignored, so Kapso doesn't retry. Dedupe key: `message.id` (the `wamid`), or `X-Idempotency-Key` when the id is missing. Payload shapes in [integrations.md](integrations.md#whatsapp) |
 
 ### Zernio webhook
 
@@ -216,16 +216,41 @@ class ChannelPort(Protocol):
     async def send_buttons(self, to: str, body: str, buttons: list[Button],
                            header_image_url: str | None = None,
                            header_video_url: str | None = None) -> str: ...        # 1–3 buttons; one header at most
-    async def mark_read(self, message_id: str) -> None: ...
+    async def mark_read(self, message_id: str, typing: bool = False) -> None: ...   # typing: also show the typing indicator (~25 s or until we send)
     async def download_media(self, media_id: str) -> tuple[bytes, str]: ...         # (bytes, mime)
 
 def channel_for(business: Business) -> ChannelPort: ...   # whatsapp | simulator
 
+class InboundMedia(BaseModel):         # image or audio payload
+    media_id: str
+    url: str | None                    # Kapso's message.kapso.media_url
+    mime_type: str | None
+    byte_size: int | None
+
 class InboundAudio(BaseModel):         # InboundMessage kind "audio" (voice note, ADR 0021)
     media_id: str
-    mime_type: str                     # audio/ogg (Opus)
+    mime_type: str                     # audio/ogg; codecs=opus
     byte_size: int | None
-    provider_transcript: str | None    # Kapso's message.kapso.transcript.text; None on plan B
+    provider_transcript: str | None    # Kapso's message.kapso.transcript.text; None if empty or on plan B
+
+class InboundMessage(BaseModel):       # app/channels/base.py; one per webhook delivery
+    kind: Literal["text", "button", "image", "audio", "other"]
+    message_id: str                    # wamid; the dedupe key
+    sender: str                        # phone number, digits only
+    phone_number_id: str
+    timestamp: int | None
+    text: str | None                   # the body, or the caption of an image
+    button: Button | None              # kind "button": the id and title of the tapped button
+    media: InboundMedia | None         # kinds "image" and "audio"
+    audio: InboundAudio | None         # kind "audio"
+    raw: dict                          # the webhook body as received
+
+# app/channels/inbound.py: the seams T02 and T23 replace
+class DedupeStore(Protocol):
+    async def first_seen(self, key: str) -> bool: ...      # atomic; True the first time
+
+class InboundHandler(Protocol):
+    async def handle(self, message: InboundMessage, channel: ChannelPort) -> None: ...
 
 # app/transcription/base.py  (ADR 0021; TRANSCRIBE_FALLBACK = gemini | none | mock)
 class Transcript(BaseModel):

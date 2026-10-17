@@ -68,7 +68,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 ### T20: WhatsApp channel + webhook · B · M
 
 - Read: [integrations.md § WhatsApp](../architecture/integrations.md#whatsapp), [ADR 0020](../decisions/0020-whatsapp-via-kapso.md), [api.md](../architecture/api.md), T03's first-hour test results
-- Build: `app/channels/whatsapp.py` against Kapso's REST API with `httpx` (send_text, send_image, send_buttons with optional image header, mark_read, download_media; typing indicator only if Kapso has one); `POST /webhooks/whatsapp` with Kapso's signature check, payload parsing to a normalized `InboundMessage` model (text, button reply, image with caption), dedupe by `external_id`, store in `messages`, background handling; status updates.
+- Build: `app/channels/kapso.py` against Kapso's REST API with `httpx` (send_text, send_image, send_buttons with optional image or video header, `mark_read(message_id, typing=False)`, download_media); `POST /webhooks/whatsapp` with Kapso's signature check, payload parsing to a normalized `InboundMessage` model (text, button reply, image with caption, audio with transcript), dedupe behind a `DedupeStore` and handling behind an `InboundHandler` (in-memory dedupe and an echo handler until T02 and T23; T02 then dedupes by `external_id` and stores in `messages`); status updates.
 - Done when: sending "hola" from a test phone stores the message and an echo reply arrives; duplicate deliveries are ignored (unit test with a fixture payload).
 
 ### T21: Simulator channel + dev endpoints · B · M

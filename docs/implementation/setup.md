@@ -24,9 +24,12 @@
 | `SUPABASE_SERVICE_ROLE_KEY` | `eyJ...` | Backend only |
 | `ANTHROPIC_API_KEY` | `sk-ant-...` | |
 | `LLM_MODEL` | `claude-opus-5-5` | Per-agent override: `LLM_MODEL_<AGENT>` |
-| `KAPSO_API_KEY` | `...` | WhatsApp through Kapso ([ADR 0020](../decisions/0020-whatsapp-via-kapso.md)). Placeholder name: confirm names and the auth header in [Kapso's docs](https://docs.kapso.ai/api/introduction.md) |
-| `KAPSO_WEBHOOK_SECRET` | random | Webhook signature. Placeholder name: confirm in Kapso's [webhook security docs](https://docs.kapso.ai/docs/platform/webhooks/security.md) |
-| `KAPSO_PHONE_NUMBER_ID` | `...` | The connected (or free US) number we send from. Placeholder name: confirm in Kapso's docs |
+| `WHATSAPP_CHANNEL` | `kapso` \| `simulator` | Default `kapso`. `simulator` arrives with T21 |
+| `KAPSO_API_KEY` | `...` | WhatsApp through Kapso ([ADR 0020](../decisions/0020-whatsapp-via-kapso.md)). Sent as the `X-API-Key` header ([API introduction](https://docs.kapso.ai/api/introduction.md)) |
+| `KAPSO_WEBHOOK_SECRET` | random | Webhook signing secret: `X-Webhook-Signature` is the hex HMAC-SHA256 of the raw body ([security](https://docs.kapso.ai/docs/platform/webhooks/security.md)). Without it every webhook gets `401` |
+| `KAPSO_PHONE_NUMBER_ID` | `...` | The connected number we send from: the sandbox now, the free US number later |
+| `KAPSO_BASE_URL` | `https://api.kapso.ai/meta/whatsapp/v24.0` | Optional; this is the default |
+| `KAPSO_TEST_RECIPIENT`, `KAPSO_TEST_MEDIA_ID` | `...` | Only for `uv run pytest -m live`: a verified recipient phone, and a media id taken from an inbound message |
 | `WHATSAPP_BOT_NUMBER` | `15551234567` | For `wa.me` links |
 | `IMAGE_GEN` | `gemini` \| `openai` \| `mock` | Image service ([ADR 0019](../decisions/0019-image-provider-gemini.md)); `openai` is the fallback, `mock` the dev and stage fallback |
 | `GEMINI_API_KEY` | `...` | From a Google project with billing linked: unpaid use trains on the images |
