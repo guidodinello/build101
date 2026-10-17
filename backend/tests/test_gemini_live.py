@@ -16,6 +16,7 @@ async def test_gemini_returns_a_4_5_2k_image_with_usage() -> None:
         api_key=settings.gemini_api_key,
         model=settings.gemini_image_model,
         thinking_level="minimal",
+        image_size="2K",
         max_concurrency=1,
     )
 

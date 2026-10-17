@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_image_model: str = "gemini-nano-banana-2.1"
     gemini_thinking_level: Literal["minimal", "medium", "high"] = "medium"
+    gemini_image_size: Literal["1K", "2K", "4K"] = "2K"
     image_gen_max_concurrency: int = 4
 
     whatsapp_channel: Literal["kapso", "simulator"] = "kapso"

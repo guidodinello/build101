@@ -24,5 +24,6 @@ coverage/
 # Logs
 *.log
 
-# Local carousel CLI output
+# Local carousel CLI input photos and output
+backend/samples/
 backend/out/

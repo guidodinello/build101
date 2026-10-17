@@ -118,7 +118,9 @@ async def test_generate_sends_model_and_4_5_2k_config() -> None:
         calls.append(kwargs)
         return response([image_part(b"image")])
 
-    adapter = GeminiImageGen(fake_client(generate_content), MODEL, "minimal", max_concurrency=2)
+    adapter = GeminiImageGen(
+        fake_client(generate_content), MODEL, "minimal", "2K", max_concurrency=2
+    )
     result = await adapter.generate("prompt", [make_image((100, 125))])
 
     assert result.data == b"image"
@@ -135,7 +137,9 @@ async def test_generate_maps_api_errors_to_unavailable() -> None:
             429, {"error": {"code": 429, "message": "quota", "status": "RESOURCE_EXHAUSTED"}}
         )
 
-    adapter = GeminiImageGen(fake_client(generate_content), MODEL, "medium", max_concurrency=1)
+    adapter = GeminiImageGen(
+        fake_client(generate_content), MODEL, "medium", "2K", max_concurrency=1
+    )
 
     with pytest.raises(ImageGenUnavailable, match="429 RESOURCE_EXHAUSTED"):
         await adapter.generate("prompt", [])

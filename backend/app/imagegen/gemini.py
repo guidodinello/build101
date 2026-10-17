@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 PROVIDER = "gemini"
 ASPECT_RATIO = "4:5"
-IMAGE_SIZE = "2K"
 REQUEST_TIMEOUT_MS = 120_000
 
 # google-genai does not retry unless retry_options is set; with it set, it retries
@@ -40,26 +39,27 @@ class GeminiImageGen:
         client: genai.Client,
         model: str,
         thinking_level: str,
+        image_size: str,
         max_concurrency: int,
     ) -> None:
         self._client = client
         self._model = model
         self._config = types.GenerateContentConfig(
             response_modalities=["TEXT", "IMAGE"],
-            image_config=types.ImageConfig(aspect_ratio=ASPECT_RATIO, image_size=IMAGE_SIZE),
+            image_config=types.ImageConfig(aspect_ratio=ASPECT_RATIO, image_size=image_size),
             thinking_config=types.ThinkingConfig(thinking_level=thinking_level.upper()),
         )
         self._semaphore = asyncio.Semaphore(max_concurrency)
 
     @classmethod
     def from_api_key(
-        cls, api_key: str, model: str, thinking_level: str, max_concurrency: int
+        cls, api_key: str, model: str, thinking_level: str, image_size: str, max_concurrency: int
     ) -> Self:
         client = genai.Client(
             api_key=api_key,
             http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS, retry_options=RETRY_OPTIONS),
         )
-        return cls(client, model, thinking_level, max_concurrency)
+        return cls(client, model, thinking_level, image_size, max_concurrency)
 
     async def generate(
         self,

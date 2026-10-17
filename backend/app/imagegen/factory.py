@@ -14,6 +14,7 @@ def build_image_gen(settings: Settings) -> ImageGenPort:
                 api_key=settings.gemini_api_key,
                 model=settings.gemini_image_model,
                 thinking_level=settings.gemini_thinking_level,
+                image_size=settings.gemini_image_size,
                 max_concurrency=settings.image_gen_max_concurrency,
             )
         case "openai":
