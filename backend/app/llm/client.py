@@ -7,6 +7,10 @@ import httpx
 from google import genai
 from google.genai import errors
 
+# The Interactions API raises its own error family (timeouts, connection and HTTP status
+# errors), not `errors.APIError`, and google-genai 2.31 exports it only from this module.
+from google.genai._gaos.lib.compat_errors import GeminiNextGenAPIClientError
+
 logger = logging.getLogger(__name__)
 
 ThinkingLevel = Literal["low", "medium", "high"]
@@ -64,7 +68,7 @@ class GeminiChat:
                 store=False,
                 timeout=REQUEST_TIMEOUT_S,
             )
-        except (errors.APIError, httpx.HTTPError) as exc:
+        except (GeminiNextGenAPIClientError, errors.APIError, httpx.HTTPError) as exc:
             raise LLMError(f"{agent}: {exc}") from exc
 
         usage = interaction.usage
