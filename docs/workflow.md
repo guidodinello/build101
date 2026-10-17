@@ -12,7 +12,7 @@ How we take a task from "ready" to merged on `main`. It is the hands-on version 
 | 4 | Implement | Approve with **"Yes, and use auto mode"**. Claude implements, runs lint and tests, and commits | Lint clean, tests green, docs updated (step 7 of AGENTS.md) |
 | 5 | Open the PR | Push and open the PR with the [template](../.github/pull_request_template.md) | `CI` runs on the PR |
 | 6 | Wait for review | `CI` must go green. Code PRs get a Tenki review automatically (a few minutes) | Tenki posted its review (code PRs) |
-| 7 | Address the review | Run the `address-pr-comments` skill: it fixes valid findings, declines the rest with evidence, pushes, and replies to every thread | Every thread has a reply; `CI` green again |
+| 7 | Address the review | Run the `address-pr-comments` skill: it fixes valid findings, declines the rest with evidence, pushes, and replies to every thread. Then resolve each thread (below) | Every thread replied and resolved; `CI` green again |
 | 8 | Merge | Squash-merge and delete the branch | The change is on `main` |
 
 ## Starting Claude Code
@@ -36,12 +36,22 @@ The plan review is where most mistakes are caught; approving a plan you did not 
 ## Review comments (step 7)
 
 - Treat Tenki's findings as claims to verify, not orders. Fix what is real; decline what is not with a concrete reason (code, docs or ADR).
-- Every thread gets a reply before merging, even the declined ones.
+- Every thread gets a reply before merging, even the declined ones. Then resolve it: the `main` ruleset blocks the merge while any thread is unresolved, and `address-pr-comments` replies but does not resolve.
+- Resolve from the GitHub UI ("Resolve conversation") or with the gh CLI (GitHub's GraphQL API; there is no `gh pr` subcommand for it):
+
+  ```bash
+  # list unresolved threads of PR <N>
+  gh api graphql -f query='{repository(owner:"guidodinello",name:"build101"){pullRequest(number:<N>){reviewThreads(first:50){nodes{id isResolved path comments(first:1){nodes{body}}}}}}}' \
+    --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved|not) | "\(.id) \(.path)"'
+  # resolve one
+  gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id=<THREAD_ID>
+  ```
+
 - Docs-only PRs get no automatic Tenki review (to save credits). Comment `@tenki-reviewer` on the PR to ask for one, or to re-review after pushes.
 
 ## Merging (step 8)
 
-- The `main` ruleset requires only the `CI` check. It does **not** block on unresolved review threads or require approvals, so "every thread answered" is a team rule you check yourself before merging.
+- The `main` ruleset requires the `CI` check **and every review thread resolved**. It does not require approvals: authors merge their own PRs.
 - Squash merge, with the PR title as the commit title (Conventional Commits).
 
 ## Rules that always apply
