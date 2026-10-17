@@ -28,7 +28,7 @@ When an ADR is superseded, set its Status to `superseded`, add `- Superseded by:
 | [0007](0007-approve-every-post.md) | Every post needs explicit approval | proposed | 2026-10-17 |
 | [0008](0008-publishing-via-zernio.md) | Publish through Zernio | proposed | 2026-10-17 |
 | [0009](0009-branded-templates-over-real-photos.md) | Branded HTML templates over the Owner's real photos | superseded by [0018](0018-ai-image-generation-service.md) | 2026-10-17 |
-| [0010](0010-anthropic-sdk-own-orchestration.md) | Anthropic SDK with our own orchestration | proposed | 2026-10-17 |
+| [0010](0010-anthropic-sdk-own-orchestration.md) | Anthropic SDK with our own orchestration | superseded | 2026-10-17 |
 | [0011](0011-hybrid-onboarding.md) | Hybrid onboarding (WhatsApp + magic-link web form) | proposed | 2026-10-17 |
 | [0012](0012-catalog-content-dashboard-reels.md) | Catalog and content dashboard, with Reels from the Owner's videos | proposed | 2026-10-17 |
 | [0013](0013-focus-marketing.md) | Focus the MVP on marketing and social media | proposed | 2026-10-17 |
@@ -41,3 +41,4 @@ When an ADR is superseded, set its Status to `superseded`, add `- Superseded by:
 | [0020](0020-whatsapp-via-kapso.md) | WhatsApp through Kapso | proposed | 2026-10-17 |
 | [0021](0021-voice-notes-kapso-transcript-gemini-fallback.md) | Voice notes via Kapso's transcript, with Gemini as fallback | proposed | 2026-10-17 |
 | [0022](0022-carousels-in-mvp.md) | Carousels with text slides are in the MVP | proposed | 2026-10-17 |
+| [0023](0023-gemini-text-llm.md) | Gemini as the text LLM | proposed | 2026-10-17 |

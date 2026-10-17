@@ -22,8 +22,9 @@
 | `DATABASE_URL` | `postgresql+asyncpg://...pooler.supabase.com:5432/postgres` | Session pooler |
 | `SUPABASE_URL` | `https://xxxx.supabase.co` | |
 | `SUPABASE_SERVICE_ROLE_KEY` | `eyJ...` | Backend only |
-| `ANTHROPIC_API_KEY` | `sk-ant-...` | |
-| `LLM_MODEL` | `claude-opus-5-5` | Per-agent override: `LLM_MODEL_<AGENT>` |
+| `INBOUND_HANDLER` | `chat` \| `echo` | Default `chat`: answers with Gemini ([ADR 0023](../decisions/0023-gemini-text-llm.md)); `echo` repeats what arrived (channel tests, no LLM) |
+| `GEMINI_CHAT_MODEL` | `gemini-3.8-flash` | Text model; uses `GEMINI_API_KEY` |
+| `ASSISTANT_NAME` | `Mora` | Placeholder until the product name is chosen |
 | `WHATSAPP_CHANNEL` | `kapso` \| `simulator` | Default `kapso`. `simulator` arrives with T21 |
 | `KAPSO_API_KEY` | `...` | WhatsApp through Kapso ([ADR 0020](../decisions/0020-whatsapp-via-kapso.md)). Sent as the `X-API-Key` header ([API introduction](https://docs.kapso.ai/api/introduction.md)) |
 | `KAPSO_WEBHOOK_SECRET` | random | Webhook signing secret: `X-Webhook-Signature` is the hex HMAC-SHA256 of the raw body ([security](https://docs.kapso.ai/docs/platform/webhooks/security.md)). Without it every webhook gets `401` |
@@ -101,7 +102,7 @@ Real WhatsApp against a local backend: `cloudflared tunnel --url http://localhos
 ```bash
 cd backend
 uv run pytest                   # unit tests (no network)
-uv run pytest -m live           # hits Claude, the image service and transcription; needs ANTHROPIC_API_KEY, GEMINI_API_KEY
+uv run pytest -m live           # hits Gemini (text, images, transcription) and Kapso; needs GEMINI_API_KEY
 uv run ruff check . && uv run ruff format --check .
 
 cd frontend

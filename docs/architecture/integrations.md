@@ -213,9 +213,9 @@ Plan for F2.8: test the Zernio endpoint on the demo Instagram before the hackath
 
 `PUBLISHER=mock` → `MockPublisher` returns `published` with `permalink = https://instagram.com/p/MOCK-<post_id>` after a 2 s delay, and `connect_url` returns a frontend URL that marks the account connected. Used for local dev, the simulator, and the stage fallback.
 
-## Claude API
+## Gemini API (text)
 
-See [agents.md](agents.md#llm-client-conventions) for the full conventions (model, effort, structured output, caching, fallbacks, logging). Setup: `ANTHROPIC_API_KEY` from console.anthropic.com. Check the account's rate limits before the hackathon; a demo run is roughly 10–15 calls per post-heavy minute.
+See [agents.md](agents.md#llm-client-conventions) for the full conventions (model, thinking level, history, structured output, errors, logging) and [research/gemini-api.md](../research/gemini-api.md) for prices and limits ([ADR 0023](../decisions/0023-gemini-text-llm.md)). Setup: the same `GEMINI_API_KEY` as image generation, from <https://aistudio.google.com/api-keys> with billing linked. Check the account's rate limits before the hackathon; a demo run is roughly 10–15 calls per post-heavy minute.
 
 ## Supabase (Postgres + Storage)
 

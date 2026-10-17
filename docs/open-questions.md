@@ -46,7 +46,7 @@ From [ADR 0022](decisions/0022-carousels-in-mvp.md).
 
 - [x] **Carousels in the MVP:** Must, one per request, designed slides with text from the Copywriter, consistency by anchoring on the cover, slide redo instead of Variations.
 - [x] **Gemini call shape:** `generateContent` (`client.aio.models.generate_content`), not the Beta Interactions API ([integrations.md](architecture/integrations.md#image-generation)).
-- [ ] **Text check accuracy:** does a `low`-effort Claude vision call catch a misspelled or extra word reliably, and does it flag correct slides as wrong? Measure on the first real carousels.
+- [ ] **Text check accuracy:** does a `low`-thinking Gemini vision call catch a misspelled or extra word reliably, and does it flag correct slides as wrong? Measure on the first real carousels.
 - [ ] **Misspelling fallback:** a slide that still fails after its one regeneration is kept and flagged. Is it sent to the Owner as is, sent with a warning, or held back? And what if the cover fails, since the other slides anchor on it?
 - [ ] **Real latency and cost per carousel:** the ADR estimates $0.30 to $0.40 and 40 to 70 s for 5 slides at 2K; log `usage` and timings on the first calls, with `GEMINI_THINKING_LEVEL` at `minimal` and `medium`.
 - [ ] **Zernio carousel publish:** does a `POST /v1/posts` with several image `mediaItems` publish an Instagram carousel from our public `renders` URLs? Not verified ([integrations.md](architecture/integrations.md#calls)); test once on the demo IG.

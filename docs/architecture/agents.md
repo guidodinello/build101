@@ -6,7 +6,7 @@ The "agency" is one **orchestrator** (the account manager the owner talks to) pl
 
 ## Agent roster
 
-| Agent | Kind | Called by | Input → Output | Effort |
+| Agent | Kind | Called by | Input → Output | Thinking level |
 |---|---|---|---|---|
 | **Orchestrator** | Tool-use loop | Inbound handler | Conversation + context → reply text + tool calls | `low` |
 | **Asset Analyst** | Single call, vision, structured | `analyze_asset` job | Image, or video keyframes + metadata → description, tags, suggested Products, usable-for (+ Reel suitability) | `low` |
@@ -21,20 +21,20 @@ Not agents (deterministic services): **Image generator** (`ImageGenPort`: image 
 
 ## LLM client conventions
 
-All Claude calls go through `app/llm/client.py`. It's the only module that imports `anthropic`.
+All text LLM calls go through `app/llm/client.py` ([ADR 0023](../decisions/0023-gemini-text-llm.md)): the `ChatModel` port and its `GeminiChat` adapter. Facts behind these rules: [research/gemini-api.md](../research/gemini-api.md).
 
-- SDK: official `anthropic` Python SDK, `AsyncAnthropic` client. Read the key from `ANTHROPIC_API_KEY`.
-- Model: `claude-opus-5-5` for every agent (configurable per agent in `config.py`). Tune **effort** per agent (table above) rather than switching models. Thinking is always on in this model, so don't send `thinking: disabled` or `budget_tokens` (both return 400). Control depth with `output_config={"effort": ...}`.
-- **Structured output** for every specialist: Pydantic model → `output_config={"format": {"type": "json_schema", "schema": Model.model_json_schema()}}` (or `client.messages.parse(output_format=Model)`), then `Model.model_validate_json(...)`. Keep schemas simple: objects, strings, ints, enums, lists. Set `additionalProperties: false` and put every field in `required`.
-- **Refusal fallback**: enable server-side fallbacks on every call (`betas=["server-side-fallback-2026-07-01"]`, `fallbacks="default"` on `client.beta.messages.create`). Always check `stop_reason` (`refusal`, `max_tokens`) before reading content.
-- **Prompt caching**: top-level `cache_control={"type": "ephemeral"}`. Order the prompt stable → volatile: system prompt (static) → Brand Brain (per business) → dynamic context. Never put timestamps in the system prompt.
-- **Images**: pass by URL (`{"type": "image", "source": {"type": "url", "url": signed_url}}`) using a short-lived signed Supabase URL, or base64 for small files. Resize to max 1568 px on the long side before upload to save tokens.
-- **Video** (Could): Claude takes no video or audio input ([research/media-uploads.md](../research/media-uploads.md#what-claude-can-read)). Agents see a video as its ffprobe metadata plus keyframes (JPEG, ≤ 1568 px long edge) extracted by the Frame Extractor, each labeled with its offset in ms. No transcription in the MVP.
-- **Timeouts/retries**: SDK defaults (2 retries). Per-call timeout 90 s for specialists, 30 s per orchestrator step.
-- **Logging**: each call writes `agent_runs` (business_id, agent, model, effort, input JSON, output JSON, input/output/cache tokens, latency_ms, stop_reason, error).
-- **Max tokens**: 16000 for specialists, 4000 for orchestrator steps.
+- SDK: official `google-genai`, async client (`genai.Client(api_key=...).aio`), **Interactions API** (`client.aio.interactions.create`). Key: `GEMINI_API_KEY`, from a project with billing linked (shared with image generation, [ADR 0019](../decisions/0019-image-provider-gemini.md)). Never use the deprecated `google-generativeai`.
+- Model: `gemini-3.8-flash` (`GEMINI_CHAT_MODEL`) for every agent. Tune the **thinking level** per agent (table above: `low` / `medium` / `high`) with `generation_config={"thinking_level": ...}` rather than switching models. Thinking can't be turned off, and `max_output_tokens` counts thinking + output, so lower the level instead of capping tokens.
+- **Stateless history**: `store=False`; the conversation is ours and is resent as a list of steps (`user_input`, then the model's steps). **Store the model's steps unchanged, `thought` steps included**: they carry the signatures Gemini needs on later turns. Only a completed turn enters the history.
+- **Structured output** for every specialist: Pydantic model → `response_format={"type": "text", "mime_type": "application/json", "schema": Model.model_json_schema()}`, then `Model.model_validate_json(interaction.output_text)`. Keep schemas simple: objects, strings, ints, enums, lists; very large or deeply nested schemas are rejected. Validate values in code too.
+- **Errors**: no server-side refusal fallback. A non-`completed` status, an empty `output_text`, or an SDK/HTTP error raises `LLMError`; the Owner gets a fixed message from `copy/messages_es.py`.
+- **Caching**: order the prompt stable → volatile (system instruction → Brand Brain → dynamic context) so implicit context caching can hit. Never put timestamps in the system instruction.
+- **Images**: send as image content (signed Supabase URL, or base64 for small files). Resize to max 1568 px on the long side before upload to save tokens.
+- **Video** (Could): Gemini reads video natively, but agents still get ffprobe metadata plus keyframes from the Frame Extractor until the team decides otherwise ([ADR 0023](../decisions/0023-gemini-text-llm.md)).
+- **Timeouts**: 90 s for specialists, 30 s per orchestrator step.
+- **Logging**: each call writes `agent_runs` (business_id, agent, model, thinking level, input JSON, output JSON, input/output/thought/cached tokens, latency_ms, status, error). Until T02 the client logs those fields.
 
-Before changing any of this, check the current Claude API docs. Model IDs and parameters change.
+Before changing any of this, check the current Gemini API docs (<https://ai.google.dev/gemini-api/docs>). Model IDs and parameters change.
 
 ## Brand Brain
 
@@ -306,7 +306,7 @@ Must (carousels, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)). The o
       issues: list[str]
   ```
 
-- One structured `claude-opus-5-5` call with effort `low` ([LLM client conventions](#llm-client-conventions)), in `app/agents/text_checker.py`. `matches` is false when a word is missing, misspelled or added, or when other text (a price, a number, a logo) appears. Called by `CarouselGenerator`: a mismatch regenerates that slide once; if it still fails, the slide is kept with its `TextCheck` saved and flagged.
+- One structured `gemini-3.8-flash` call with thinking level `low` ([LLM client conventions](#llm-client-conventions)), in `app/agents/text_checker.py`. `matches` is false when a word is missing, misspelled or added, or when other text (a price, a number, a logo) appears. Called by `CarouselGenerator`: a mismatch regenerates that slide once; if it still fails, the slide is kept with its `TextCheck` saved and flagged.
 
 ## Orchestrator
 

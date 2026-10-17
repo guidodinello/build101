@@ -19,7 +19,7 @@ An AI marketing agency that lives in the small business owner's WhatsApp. The ow
 
 ## Stack
 
-Python 3.13 · FastAPI · Claude API (`claude-opus-5-5`) · WhatsApp Cloud API · Zernio (Instagram publishing) · Supabase (Postgres + Storage) · Playwright (image rendering) · Next.js · Tailwind · shadcn/ui · Vercel.
+Python 3.13 · FastAPI · Gemini API (`gemini-3.8-flash` for text) · WhatsApp Cloud API · Zernio (Instagram publishing) · Supabase (Postgres + Storage) · Playwright (image rendering) · Next.js · Tailwind · shadcn/ui · Vercel.
 
 ## How we work
 
