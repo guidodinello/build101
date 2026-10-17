@@ -2,7 +2,8 @@
 
 - Date: 2026-10-17
 - Status: proposed
-- Extended by: [0014](0014-whatsapp-cloud-api.md) (policy stance, voice notes)
+- Extended by: [0014](0014-whatsapp-cloud-api.md) (policy stance, voice notes; superseded by [0020](0020-whatsapp-via-kapso.md))
+- Provider revised by: [0020](0020-whatsapp-via-kapso.md) (Kapso on top of the Cloud API instead of Meta directly)
 
 ## Context
 
@@ -10,7 +11,7 @@ The target owner lives in WhatsApp and doesn't use dashboards. Options were a we
 
 ## Decision
 
-The owner talks to the orchestrator on WhatsApp from the MVP, through the **Meta WhatsApp Cloud API directly** (no BSP), using the free test number (setup in [architecture/integrations.md](../architecture/integrations.md#whatsapp-cloud-api)) for the demo. All channel code sits behind a `ChannelPort`; a **web simulator** implements the same port for development and as the stage fallback.
+The owner talks to the orchestrator on WhatsApp from the MVP, through the **Meta WhatsApp Cloud API directly** (no BSP), using the free test number (setup in [architecture/integrations.md](../architecture/integrations.md#plan-b-meta-cloud-api-direct)) for the demo. All channel code sits behind a `ChannelPort`; a **web simulator** implements the same port for development and as the stage fallback.
 
 ## Consequences
 

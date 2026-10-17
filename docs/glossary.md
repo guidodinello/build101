@@ -71,8 +71,13 @@ _Avoid_: Calendar, schedule
 _Status_: draft
 
 **Post**:
-One piece of content for a social network that goes through creation, Approval and publishing: either a branded image with its caption, or a Reel.
+One piece of content for a social network that goes through creation, Approval and publishing: either an image (the Variation the Owner picked) with its caption, or a Reel.
 _Avoid_: Publication, piece
+_Status_: draft
+
+**Variation**:
+One of the candidate images an AI image service generates for an image Post from the Owner's photos; the Owner picks one, and Approval covers only that one.
+_Avoid_: Version, render (in owner-facing Spanish, "opción" is fine)
 _Status_: draft
 
 **Reel**:

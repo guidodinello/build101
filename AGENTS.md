@@ -122,7 +122,7 @@ Rules for anyone (human or agent) writing MVP code. The spec is in [`docs/`](doc
 - **Approval is enforced in code** ([ADR 0007](docs/decisions/0007-approve-every-post.md)): nothing calls the publisher unless the Post is approved. Never let an LLM decide that.
 - **Deterministic first**: buttons, onboarding steps, state transitions and publishing are plain code; LLMs handle free text, planning, writing and design choices.
 - **All Claude calls go through `backend/app/llm/client.py`**, following [agents.md § LLM client conventions](docs/architecture/agents.md#llm-client-conventions). Check the current Claude API docs before changing a model or parameter.
-- **External services only behind ports** (`ChannelPort`, `PublisherPort`). Keep the WhatsApp simulator and the mock publisher working: they are the demo fallback.
+- **External services only behind ports** (`ChannelPort`, `PublisherPort`, `ImageGenPort`). Keep the WhatsApp simulator, the mock publisher and the mock image generator working: they are the demo fallback.
 - **Webhooks return 200 fast**; real work goes to the job runner; inbound WhatsApp messages are deduplicated by message id.
 - **Owner-facing text is Rioplatense Spanish** (*vos*), short, per [`conversation-design.md`](docs/product/conversation-design.md); fixed messages live in `backend/app/copy/messages_es.py`. Code, identifiers and prompt instructions are in English.
 - **Agents never invent facts** (prices, discounts, dates, awards); they only use the Brand Brain and the Owner's brief.

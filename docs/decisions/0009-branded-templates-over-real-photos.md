@@ -1,7 +1,8 @@
 # 0009: Branded HTML templates over the owner's real photos
 
 - Date: 2026-10-17
-- Status: proposed
+- Status: superseded
+- Superseded by: [0018](0018-ai-image-generation-service.md)
 
 ## Context
 

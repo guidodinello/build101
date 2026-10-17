@@ -38,7 +38,7 @@ Priorities follow [ADR 0016](../decisions/0016-demo-scope-one-post.md): the onbo
 | Body font | Figtree 400–700 | Body copy, inputs, buttons, helper text |
 | Mono font | JetBrains Mono | Only the simulator's debug panel |
 
-Fonts load from Google Fonts. Post templates don't use these: they use the Business's own brand fonts (see [post-templates.md](post-templates.md)).
+Fonts load from Google Fonts. Post images don't use these: they are AI-generated with no text on them ([ADR 0018](../decisions/0018-ai-image-generation-service.md)).
 
 Dark mode: not needed for the demo (owners open it from WhatsApp in daylight). Define tokens as CSS variables anyway so it can be added.
 

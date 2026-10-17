@@ -4,16 +4,16 @@ Context: built in a **24-hour hackathon** by **2 people**, as a demo that must l
 
 ## Demo goal
 
-In ~4 minutes on stage, show a real furniture business owner doing a **short onboarding** (WhatsApp + the web form) and then, from WhatsApp, **sending a photo and asking for a post in their own words**. The bot asks at most one question, the branded preview arrives, the owner approves it by tapping or writing "subilo", and it is **really published** on Instagram with the link sent back. Every Must below is on stage; everything else waits ([ADR 0016](../decisions/0016-demo-scope-one-post.md)).
+In ~4 minutes on stage, show a real furniture business owner doing a **short onboarding** (WhatsApp + the web form) and then, from WhatsApp, **sending photos and asking for a post in their own words**. The bot asks at most one question, AI-generated variations of the image arrive ([ADR 0018](../decisions/0018-ai-image-generation-service.md)), the owner picks one and approves it by tapping or writing "subilo", and it is **really published** on Instagram with the link sent back. Every Must below is on stage; everything else waits ([ADR 0016](../decisions/0016-demo-scope-one-post.md)).
 
 ## Success criteria (demo day)
 
 1. A new phone number messages the WhatsApp bot and completes onboarding (WhatsApp + short web form) in under 5 minutes.
 2. The system produces a Brand Brain that the owner recognizes as "their brand" (summary shown in WhatsApp).
 3. After the owner confirms the brand, the bot opens the chat ("¿En qué te puedo ayudar hoy?") instead of pushing a plan.
-4. The owner sends a photo and a request in their own words ("me llegó esta mesa ratona nueva, armame algo para subir") and, after at most one question, gets a branded image + caption with **Aprobar / Cambiar / Descartar** buttons.
+4. The owner sends photos and a request in their own words ("me llegó esta mesa ratona nueva, armame algo para subir") and, after at most one question, gets generated image variations that still show the real product, picks one, and gets it with its caption and **Aprobar / Cambiar / Descartar** buttons.
 5. Approving by button or by writing ("subilo") **really publishes** the post on the business's Instagram, and the bot replies with the permalink.
-6. If WhatsApp or the publisher fails on stage, the same flow runs from the **web chat simulator** and the **mock publisher** (see fallbacks).
+6. If WhatsApp, the image service or the publisher fails on stage, the same flow runs from the **web chat simulator**, the **fallback image provider** (or the mock) and the **mock publisher** (see fallbacks).
 
 The weekly plan, revisions, scheduling, the dashboard and Reels are no longer demo criteria; they are Should or Could below.
 
@@ -25,9 +25,9 @@ Priority uses MoSCoW for the 24h build: **Must** = the demo fails without it; **
 
 | ID | Feature | Priority |
 |---|---|---|
-| F1.1 | Receive text messages via WhatsApp Cloud API webhook; reply with text | Must |
+| F1.1 | Receive text messages via the WhatsApp webhook (Kapso, [ADR 0020](../decisions/0020-whatsapp-via-kapso.md)); reply with text | Must |
 | F1.2 | Interactive reply buttons (approve / change / discard, plan approval) | Must |
-| F1.3 | Send images (Post previews) with caption; video previews belong to F4.8 | Must |
+| F1.3 | Send images (Post variations and previews) with caption; video previews belong to F4.8 | Must |
 | F1.4 | Orchestrator (LLM with tools) answers free text and routes to agents in Rioplatense Spanish | Must |
 | F1.5 | Receive photos sent in the chat and store them as Brand assets (videos in the chat: Could) | Must |
 | F1.6 | "Typing"/progress messages for long jobs ("Lo estoy armando, dame un minuto ⏳") | Must |
@@ -64,12 +64,12 @@ Priority uses MoSCoW for the 24h build: **Must** = the demo fails without it; **
 
 | ID | Feature | Priority |
 |---|---|---|
-| F4.1 | Copywriter writes caption, hashtags, CTA and on-image headline | Must |
-| F4.2 | Art Director chooses template + photo + text; renderer produces a branded 1080×1350 JPEG | Must |
-| F4.3 | At least 3 templates (product highlight, promo, tip/quote) | Must (2) / Could (3+) |
+| F4.1 | Copywriter writes caption, hashtags and CTA (no text goes on the image) | Must |
+| F4.2 | Art Director picks reference photos and writes the image prompt; a third-party image service generates several variations, resized to 1080×1350 JPEG ([ADR 0018](../decisions/0018-ai-image-generation-service.md), [ADR 0019](../decisions/0019-image-provider-gemini.md)); the owner picks one | Must |
+| F4.3 | ~~At least 3 templates~~: dropped, there are no templates since [ADR 0018](../decisions/0018-ai-image-generation-service.md) | — |
 | F4.4 | Revision loop from natural-language feedback | Should |
 | F4.5 | Ad-hoc post from text and/or photos sent in the chat; the bot asks **at most one** short question first when it helps (angle, price, what to highlight). The demo's core | Must |
-| F4.6 | AI-generated images (no key available yet) | Could, behind an interface |
+| F4.6 | ~~AI-generated images behind an interface~~: now the main path, see F4.2 | — |
 | F4.7 | Carousels, stories, edited video (cuts, overlays, music) | Won't |
 | F4.8 | Reels from the owner's own video, unedited, with a Copywriter caption and a cover frame ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)) | Could |
 
@@ -131,7 +131,8 @@ Paid ads, email, SEO, analytics and comment/DM replies (both in the [roadmap](..
 | Risk on stage | Fallback |
 |---|---|
 | WhatsApp webhook/number fails | Run the same flow from `/dev/chat` (web simulator). Same orchestrator, same buttons. |
-| Publishing provider fails or IG token expires | Switch `PUBLISHER=mock`; show the rendered post + "would publish" log. Keep a **pre-published post** on the IG account as proof. |
+| Publishing provider fails or IG token expires | Switch `PUBLISHER=mock`; show the generated post + "would publish" log. Keep a **pre-published post** on the IG account as proof. |
+| Image service fails, blocks or is slow | Switch `IMAGE_GEN=openai` (fallback provider, [ADR 0019](../decisions/0019-image-provider-gemini.md)), only if T43 is built and the OpenAI org is verified; otherwise `IMAGE_GEN=mock` (the Owner's photo, resized). Keep variations generated during rehearsal as proof. |
 | Brand generation is slow on stage | Keep a pre-generated Brand Brain for the demo business; if generation passes ~60 s, load it with the dev seed and continue from the brand summary. |
 | LLM latency spikes during the post | Narrate the wait with the progress message; the pre-published post on the IG account is the proof if it doesn't arrive. |
 | Conference Wi-Fi | Mobile hotspot; the backend is deployed, not local. |

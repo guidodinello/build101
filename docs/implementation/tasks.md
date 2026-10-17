@@ -9,8 +9,8 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 ### T00: Backend scaffold · AB · M
 
 - Read: [architecture/overview.md](../architecture/overview.md#repository-layout), [setup.md](setup.md)
-- Build: `backend/` with `uv init`, Python 3.13 (per [`.claude/rules/python.md`](../../.claude/rules/python.md)), deps: `fastapi`, `uvicorn[standard]`, `anthropic`, `pydantic`, `pydantic-settings`, `sqlalchemy[asyncio]`, `asyncpg`, `alembic`, `httpx`, `jinja2`, `playwright`, `supabase`, `pillow`, `pillow-heif`; dev deps: `pytest`, `pytest-asyncio`, `ruff`. `app/main.py` with `/health`, `app/config.py` (pydantic-settings, all env vars from setup.md), `Dockerfile` per [`.claude/rules/docker.md`](../../.claude/rules/docker.md) with Chromium via `playwright install --with-deps chromium`, `.env.example`. No `ffmpeg` yet: it's added by T36 if the Could video work starts. Add the backend job (ruff + pytest) to `.github/workflows/ci.yml` and to the `CI` gate.
-- Done when: `uv run uvicorn app.main:app` serves `/health`; Docker image builds and renders a test HTML to JPEG at startup (log line "renderer ok").
+- Build: `backend/` with `uv init`, Python 3.13 (per [`.claude/rules/python.md`](../../.claude/rules/python.md)), deps: `fastapi`, `uvicorn[standard]`, `anthropic`, `pydantic`, `pydantic-settings`, `sqlalchemy[asyncio]`, `asyncpg`, `alembic`, `httpx`, `google-genai`, `supabase`, `pillow`, `pillow-heif` (`openai` only with T43); dev deps: `pytest`, `pytest-asyncio`, `ruff`. `app/main.py` with `/health`, `app/config.py` (pydantic-settings, all env vars from setup.md), `Dockerfile` per [`.claude/rules/docker.md`](../../.claude/rules/docker.md) (no browser: images come from the image service, [ADR 0018](../decisions/0018-ai-image-generation-service.md)), `.env.example`. No `ffmpeg` yet: it's added by T36 if the Could video work starts. Add the backend job (ruff + pytest) to `.github/workflows/ci.yml` and to the `CI` gate.
+- Done when: `uv run uvicorn app.main:app` serves `/health`; the Docker image builds and runs.
 
 ### T01: Frontend scaffold · AB · M
 
@@ -20,13 +20,14 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 ### T02: Schema + contracts · AB · M
 
 - Read: [architecture/data-model.md](../architecture/data-model.md), [architecture/agents.md](../architecture/agents.md), [architecture/api.md](../architecture/api.md#internal-module-interfaces)
-- Build: Alembic setup + initial migration `migrations/versions/0001_initial.py` with the whole schema from data-model.md (the Could tables and columns too: they cost nothing now and a migration mid-hackathon does), applied to Supabase; `app/db/models.py` (SQLAlchemy 2 typed models) + `session.py`; `app/agents/schemas.py` (all Pydantic models: BrandBrain, AssetAnalysis, PostCopy, RenderSpec, WeeklyPlan, PostIdeas, ...; VideoAnalysis and ReelSpec can stay stubs); `app/channels/base.py`; `app/publishing/base.py`; `app/copy/messages_es.py` (copy deck from conversation-design.md); `frontend/lib/api.ts` types.
-- Done when: `python -c "from app.agents.schemas import BrandBrain; print(BrandBrain.model_json_schema())"` works; every table exists in Supabase and `posts.candidate_asset_ids` is there.
+- Build: Alembic setup + initial migration `migrations/versions/0001_initial.py` with the whole schema from data-model.md (the Could tables and columns too: they cost nothing now and a migration mid-hackathon does), applied to Supabase; `app/db/models.py` (SQLAlchemy 2 typed models) + `session.py`; `app/agents/schemas.py` (all Pydantic models: BrandBrain, AssetAnalysis, PostCopy, ImageBrief, WeeklyPlan, PostIdeas, ...; VideoAnalysis and ReelSpec can stay stubs); `app/channels/base.py`; `app/publishing/base.py`; `app/imagegen/base.py`; `app/copy/messages_es.py` (copy deck from conversation-design.md); `frontend/lib/api.ts` types.
+- Done when: `python -c "from app.agents.schemas import BrandBrain; print(BrandBrain.model_json_schema())"` works; every table exists in Supabase, including `post_variations`, and `posts.candidate_asset_ids` is there.
 
 ### T03: Deploy + webhook verification · AB · M
 
-- Build: backend deployed on Tenki with env vars; Meta webhook configured and verified (`GET /webhooks/whatsapp` implemented here).
-- Done when: Meta dashboard shows the webhook verified; `/health` is reachable over HTTPS.
+- Read: [ADR 0017](../decisions/0017-backend-host-railway.md), [integrations.md § Kapso setup](../architecture/integrations.md#kapso-setup-hour-1)
+- Build: backend deployed on Railway (root directory `backend/`, one replica, Railway domain) with env vars; Kapso webhook pointed at `https://<backend>/webhooks/whatsapp` (a stub that logs the raw payload and headers and returns `200`). Run the Kapso first-hour test ([open questions](../open-questions.md#whatsapp-through-kapso-first-hour-test)) and record the answers there.
+- Done when: `/health` is reachable over HTTPS on the Railway domain; a message sent to the Kapso number shows up in the backend logs with its payload and signature header. If it doesn't within the hour, switch to plan B (Meta direct, [ADR 0020](../decisions/0020-whatsapp-via-kapso.md)).
 
 ## H1–6
 
@@ -53,19 +54,20 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 
 ### T14: Art Director · A · M
 
-- Build: `app/agents/art_director.py` + prompt; candidates are the photos the Owner sent with the request (`posts.candidate_asset_ids`) or else the best matches from the library; post-validation (slots, colors, asset ownership, candidate membership) with one retry; fallback spec.
-- Done when: given copy + 4 candidate photos it returns a valid RenderSpec; given 2 Owner photos it picks one of those 2; invalid outputs are corrected or fall back.
+- Read: [agents.md § Art Director](../architecture/agents.md#art-director), [ADR 0018](../decisions/0018-ai-image-generation-service.md)
+- Build: `app/agents/art_director.py` + prompt: picks the reference photos (the Owner's photos from `posts.candidate_asset_ids` first, else the best matches from the library) and writes the image prompt from the Brand Brain, the brief and trend notes (optional input; source not decided). Fixed prompt rules appended in code (no text, prices, offers or logo changes; keep the real product). Post-validation (asset ownership, candidate membership, 1–10 references, rules present) with one retry; fallback brief.
+- Done when: given copy + 4 candidate photos it returns a valid `ImageBrief`; given 2 Owner photos its references include those 2 (interim default: only those 2, see the open question on the photo library); the fixed rules are always in the prompt; invalid outputs are corrected or fall back.
 
-### T15: Renderer engine · A · M
+### T15: Image generation adapter + resize · A · M
 
-- Read: [design/post-templates.md](../design/post-templates.md), [integrations.md § Renderer](../architecture/integrations.md#renderer-html--image)
-- Build: `app/rendering/renderer.py` (browser lifecycle on startup/shutdown, `render_post(spec, visual_identity, assets) -> bytes`), `catalog.py`, contrast guard, data-URI embedding, font loading; one placeholder template.
-- Done when: `uv run python -m app.rendering.cli --spec sample.json --out out.jpg` produces a 1080×1350 JPEG in < 3 s.
+- Read: [integrations.md § Image generation](../architecture/integrations.md#image-generation), [ADR 0019](../decisions/0019-image-provider-gemini.md), [research/image-generation-providers.md](../research/image-generation-providers.md)
+- Build: `app/imagegen/base.py` (`ImageGenPort`), `gemini.py` (`gemini-nano-banana-2.1`, 4:5 at 2K, one image per call), `mock.py` (returns the first reference photo), `IMAGE_GEN` switch; `app/media/images.py:to_post_image` (crop to 4:5, resize to 1080×1350 JPEG); provider `usage` logged to `agent_runs` (`agent = 'image_gen'`).
+- Done when: `uv run python -m app.imagegen.cli --brief sample.json --out out.jpg` turns the demo business's real photos into a 1080×1350 JPEG that still shows the real product; the first call confirms 4:5 at 2K, and its latency and cost per image are written into the research doc's open points.
 
 ### T20: WhatsApp channel + webhook · B · M
 
-- Read: [integrations.md § WhatsApp](../architecture/integrations.md#whatsapp-cloud-api), [api.md](../architecture/api.md)
-- Build: `app/channels/whatsapp.py` (send_text, send_image, send_buttons with optional image header, mark_read + typing, download_media); `POST /webhooks/whatsapp` with signature check, payload parsing to a normalized `InboundMessage` model (text, button reply, image with caption), dedupe by `external_id`, store in `messages`, background handling; status updates.
+- Read: [integrations.md § WhatsApp](../architecture/integrations.md#whatsapp), [ADR 0020](../decisions/0020-whatsapp-via-kapso.md), [api.md](../architecture/api.md), T03's first-hour test results
+- Build: `app/channels/whatsapp.py` against Kapso's REST API with `httpx` (send_text, send_image, send_buttons with optional image header, mark_read, download_media; typing indicator only if Kapso has one); `POST /webhooks/whatsapp` with Kapso's signature check, payload parsing to a normalized `InboundMessage` model (text, button reply, image with caption), dedupe by `external_id`, store in `messages`, background handling; status updates.
 - Done when: sending "hola" from a test phone stores the message and an echo reply arrives; duplicate deliveries are ignored (unit test with a fixture payload).
 
 ### T21: Simulator channel + dev endpoints · B · M
@@ -95,19 +97,19 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 ### T17: Job pipelines · A · M
 
 - Read: [agents.md § Job pipelines](../architecture/agents.md#job-pipelines)
-- Build (Must): `jobs/asset.py` (photo and logo), `brand.py`, `post.py` (`generate_post`: waits ≤ 30 s for the candidate photos' analyses, then Copywriter → Art Director → Renderer), each sending its WhatsApp message via `channel_for`. Storage upload of renders (new path per revision).
+- Build (Must): `jobs/asset.py` (photo and logo), `brand.py`, `post.py` (`generate_post`: waits ≤ 30 s for the candidate photos' analyses, then Copywriter → Art Director → image generation, the variations in parallel → resize → upload → `post_variations`), each sending its WhatsApp message via `channel_for`. Storage upload of post images (new path per revision and variation).
 - Build (Should, after Checkpoint 3): `plan.py` (only when the Owner asks; plan approval creates posts and generates them sequentially) and `revise_post` with the Feedback Classifier (F4.4). Plan changes from free text (F3.3) are Could. Video and Reels are Could (T36, T39).
-- Done when (Must): from the simulator, after onboarding (or the `/dev` seed), "hacé un post de la mesa Nórdica" produces a post preview with buttons.
+- Done when (Must): from the simulator, after onboarding (or the `/dev` seed), "hacé un post de la mesa Nórdica" produces the variations and, after a pick, a post preview with buttons.
 
 ### T18: Button router · A · M
 
-- Build: `app/conversation/button_router.py` with the Must IDs from [api.md § Button IDs](../architecture/api.md#button-ids) (`brand_ok`, `brand_fix`, `post_approve`, `post_change`, `post_discard`, `post_replace`, `post_publish`, `post_retry`, `photo_post`, `retry`, `noop`), state guards, stale-button reply. `brand_ok` sends the post-onboarding message (T48). Plan and scheduling buttons come with their Should tasks; `reel_post` with T39.
+- Build: `app/conversation/button_router.py` with the Must IDs from [api.md § Button IDs](../architecture/api.md#button-ids) (`brand_ok`, `brand_fix`, `post_approve`, `post_change`, `post_discard`, `post_replace`, `post_publish`, `post_retry`, `photo_post`, `retry`, `noop`; `variation_pick` if the Owner picks with buttons, see T26), state guards (`post_approve` needs a picked variation), stale-button reply. `brand_ok` sends the post-onboarding message (T48). Plan and scheduling buttons come with their Should tasks; `reel_post` with T39.
 - Done when: unit tests cover each button's allowed/forbidden states.
 
 ### T19: Orchestrator v1 · A · M
 
 - Read: [agents.md § Orchestrator](../architecture/agents.md#orchestrator), conversation-design.md (system prompt skeleton, examples)
-- Build: `app/orchestrator/orchestrator.py` (manual loop, max 5 steps), `tools.py` with the Must tools (`create_post` with `asset_ids`, `approve_post`, `publish_post` now, `discard_post`, `list_posts`, `get_brand_summary`, `cancel_pending`), strict schemas and guards, `prompts/system.md` with the [conversation rules](../architecture/agents.md#conversation-rules); context builder (incl. `<recent_photos>`); `awaiting` handling (free text routed with pending context). Only built tools are registered.
+- Build: `app/orchestrator/orchestrator.py` (manual loop, max 5 steps), `tools.py` with the Must tools (`create_post` with `asset_ids`, `pick_variation`, `approve_post`, `publish_post` now, `discard_post`, `list_posts`, `get_brand_summary`, `cancel_pending`), strict schemas and guards, `prompts/system.md` with the [conversation rules](../architecture/agents.md#conversation-rules); context builder (incl. `<recent_photos>`); `awaiting` handling (free text routed with pending context). Only built tools are registered.
 - Done when: the example conversations in conversation-design.md work in the simulator; "publicalo" on a non-approved post does not publish.
 
 ### T48: Open chat after onboarding (F1.10) · A · M
@@ -120,7 +122,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 
 - Read: [agents.md § Tools](../architecture/agents.md#tools) (photo debounce), [design/mockups/](../design/mockups/README.md) Chat-1, Chat-5
 - Build: inbound photo batching (5 s debounce after the last photo; caption or text within it → one orchestrator turn with `<recent_photos>`, else one `photo_saved` for the batch); `create_post(brief, asset_ids)` storing `candidate_asset_ids`; the "at most one question, only when it changes the result" rule in the prompt, with `awaiting = post_brief` while waiting for the answer so the answer goes to the same post.
-- Done when: in the simulator, 2 photos + "me llegó esta mesa ratona nueva, armame algo para subir" → one short question → the answer → a preview using one of those 2 photos; "hacé un post de la mesa Nórdica" with no photos → no question, straight to a preview; a single photo with no text → `photo_saved` once.
+- Done when: in the simulator, 2 photos + "me llegó esta mesa ratona nueva, armame algo para subir" → one short question → the answer → variations whose image brief references those 2 photos; "hacé un post de la mesa Nórdica" with no photos → no question, straight to generation; a single photo with no text → `photo_saved` once.
 
 ### T24: Onboarding REST + uploads · B · M
 
@@ -134,11 +136,13 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 - Build: the six steps of the second design pass ("Paso N de 6") plus the done and expired-token screens, autosave, color swatches, questionnaire controls, IG connect step. Step 2: up to 5 Products. Step 3: logo + colors, or "Todavía no tengo logo ni colores". Step 4: 3–15 photos with thumbnails, direct uploads to the signed URL with a progress overlay, retry on failure. The feed import screen (6b) is T53 (Could); until then step 6 must not promise it.
 - Done when: completed on a real phone from the WhatsApp link in < 5 minutes with the demo materials.
 
-### T26: Templates `product_hero` + `promo_band` · B · M
+### T26: Variations in WhatsApp and the simulator · B · M
 
-- Read: [design/post-templates.md](../design/post-templates.md)
-- Build: the two HTML templates + `/dev/templates/{id}?sample=1` preview route.
-- Done when: both render correctly with the demo logo/photos across the test cases listed in post-templates.md.
+Replaces the HTML templates task: post templates are superseded by [ADR 0018](../decisions/0018-ai-image-generation-service.md).
+
+- Read: [user-flows.md § Flow 5](../product/user-flows.md#flow-5--post-generation-and-approval-must), [integrations.md § Sending](../architecture/integrations.md#sending), the draft `post_variations` copy in [conversation-design.md](../product/conversation-design.md)
+- Build: send the variations of a Post as numbered images, then the pick prompt (`awaiting = variation_choice`); the pick by text reaches `pick_variation` (T19), by button `variation_pick` (T18) if the team chooses buttons; `/dev/chat` shows the images in order. Use the draft copy until the open question on how the Owner picks is settled.
+- Done when: in the simulator and on a real phone, the variations arrive numbered and in order, "la 2" picks the second one, and the preview that follows shows that image.
 
 ### T27: Zernio publisher + connect · B · M
 
@@ -152,7 +156,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 
 - Read: [agents.md § Conversation rules](../architecture/agents.md#conversation-rules), [ADR 0007](../decisions/0007-approve-every-post.md)
 - Build: `approve_post(next = "publish_now")` for "subilo" / "publicalo" / "dale, subila"; the inbound handler's `explicit_approval` flag (approval phrase + exactly one `pending_approval` post, or the Owner named it); praise without an instruction ("me encanta") → "¿Lo subo?"; several pending posts → ask which one. Approval with a time ("subilo mañana a la tarde") answers that scheduling isn't available yet until T30's Should part exists.
-- Done when: unit tests cover "subilo" with one pending post (publishes), "me encanta" (asks), "subilo" with two pending posts (asks which), and "subilo" on a post that isn't pending (no publish); in the simulator "subilo" publishes through the mock publisher.
+- Done when: unit tests cover "subilo" with variations not picked yet (asks which one, no approval), "subilo" with one pending post (publishes), "me encanta" (asks), "subilo" with two pending posts (asks which), and "subilo" on a post that isn't pending (no publish); in the simulator "subilo" publishes through the mock publisher.
 
 ### T30: Publish job + guards · A · M
 
@@ -162,7 +166,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 
 ### T28: WhatsApp polish · B · M
 
-- Build: post preview as interactive with image header (fallback to text + short body when > 1,024 chars); inbound images → `brand_assets` (`source = 'whatsapp'`, caption kept as the owner hint) + `analyze_asset` + the T49 debounce; unsupported media reply (audio, video, sticker, document while video is Could).
+- Build: post preview as interactive with image header (fallback to text + short body when > 1,024 chars); variations on a real phone (T26); inbound images → `brand_assets` (`source = 'whatsapp'`, caption kept as the owner hint) + `analyze_asset` + the T49 debounce; unsupported media reply (audio, video, sticker, document while video is Could).
 - Done when: Flow 5 and Flow 9 look right on a real phone; 2 photos + caption sent from a real phone reach the orchestrator as one request.
 
 ### T31: Quality checks · A · M
@@ -189,7 +193,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 ### T52: Ideas on request (F3.5) · A · S
 
 - Build: Content Strategist ideas mode (`PostIdeas`, 3 items) + `suggest_ideas` tool storing the ideas in `conversation_state.ideas`; picking one ("la 2", "la del taller, sin caras") calls `create_post` with the idea and the Owner's extra instructions.
-- Done when: "no sé qué subir, ¿se te ocurre algo?" lists 3 ideas that use existing photos, and "la del taller pero sin mostrar caras" creates that post without faces in the chosen photo.
+- Done when: "no sé qué subir, ¿se te ocurre algo?" lists 3 ideas that use existing photos, and "la del taller pero sin mostrar caras" creates that post with no faces in its variations.
 
 ### T17b: Weekly plan on request and revisions · A · S
 
@@ -245,14 +249,13 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 
 ### Other Could
 
-- T34: Templates `quote_card` + `split_story` (F4.3, 3+ templates). · B · C
 - Brand Brain correction in chat (F2.6, revise mode of T12). · A · C
 - Plan changes from free text (F3.3). · A · C
 - T40: Voice notes with faster-whisper. · C
 - T41: Facebook cross-post (uses the second Zernio slot). · C
 - T42: Brand Brain correction via web. · C
-- T43: AI background generation behind `ImageGenPort`. · C
+- T43: OpenAI fallback adapter (`app/imagegen/openai.py`, `gpt-image-2.5-sunburst` through `/v1/images/edits`, size `1088x1360`) behind `ImageGenPort` ([ADR 0019](../decisions/0019-image-provider-gemini.md)). · A · C, or M as soon as Gemini fails the first test or blocks on stage. Needs `OPENAI_API_KEY` and possibly Organization Verification.
 
 ## Tests (minimum bar)
 
-Unit tests for deterministic logic only (fast, no network): state machine transitions (onboarding, post), button router guards, webhook signature + dedupe, free-text approval (`explicit_approval`: one pending post, several, praise without instruction), photo debounce batching, quality checks, render spec validation (incl. candidate membership), contrast guard, upload validation (kind, type, size, 15-photo cap). Should and Could tasks add their own (plan state machine, time parsing, `reel_suitable` rules, archived material hidden from agents). Live LLM tests are marked `@pytest.mark.live` and excluded by default. No frontend tests.
+Unit tests for deterministic logic only (fast, no network): state machine transitions (onboarding, post), button router guards, webhook signature + dedupe, free-text approval (`explicit_approval`: one pending post, several, praise without instruction), photo debounce batching, variation picking (`pick_variation`, approval blocked before a pick), quality checks, image brief validation (incl. candidate membership and the fixed prompt rules), resize to 1080×1350, upload validation (kind, type, size, 15-photo cap). Should and Could tasks add their own (plan state machine, time parsing, `reel_suitable` rules, archived material hidden from agents). Live LLM and image-service tests are marked `@pytest.mark.live` and excluded by default. No frontend tests.

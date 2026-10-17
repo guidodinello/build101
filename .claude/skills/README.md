@@ -24,4 +24,13 @@ Vendored from upstream at the pinned commit, so they can be refreshed by copying
 | [web-design-guidelines](web-design-guidelines/SKILL.md) | Audits UI code against Vercel's Web Interface Guidelines (accessibility, forms, motion, performance, copy); fetches the latest rules on each run | Before opening a frontend PR, or when asked to review UI/UX or accessibility | [vercel-labs/agent-skills `web-design-guidelines`](https://github.com/vercel-labs/agent-skills/tree/063bee94c3f4df8453406c830b0a7df0f2860278/skills/web-design-guidelines), MIT © Vercel, Inc. |
 | [shadcn](shadcn/SKILL.md) | Adds, composes, styles and debugs shadcn/ui components through the shadcn CLI; applies a `DESIGN.md` to the component theme | Any work in a project with a `components.json` | [shadcn-ui/ui `skills/shadcn`](https://github.com/shadcn-ui/ui/tree/d2fba50ee5b9113008b5bb908563527b7efd2f27/skills/shadcn), MIT © 2023 shadcn |
 
+## Infrastructure skills
+
+Vendored from upstream at the pinned commit, copied as-is.
+
+| Skill | What it does | When to use | Source |
+|---|---|---|---|
+| [use-railway](use-railway/SKILL.md) | Operates Railway through the `railway` CLI: projects, services, deploys, variables, domains, logs, metrics | Deploying or troubleshooting the backend on Railway ([ADR 0012](../../docs/decisions/0012-backend-host-railway.md)). Needs the Railway CLI logged in (`railway login`) | [railwayapp/railway-skills `plugins/railway/skills/use-railway`](https://github.com/railwayapp/railway-skills/tree/526e95524e964ed326689cbac4464d97a58ab81c/plugins/railway/skills/use-railway), MIT © 2026 Railway Corporation |
+| [supabase](supabase/SKILL.md) | Supabase guidance: Database, Storage, Auth, migrations, CLI and MCP usage, debugging and logs | Any work on our Supabase project ([ADR 0003](../../docs/decisions/0003-database-supabase-sqlalchemy.md)): schema, buckets, Supabase errors. Needs the Supabase CLI (`brew install supabase/tap/supabase`) | [supabase/agent-skills `skills/supabase`](https://github.com/supabase/agent-skills/tree/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase), MIT © 2026 Supabase |
+
 License texts for the adapted and vendored skills: [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).

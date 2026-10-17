@@ -1,7 +1,8 @@
 # 0014: WhatsApp via the official Cloud API
 
 - Date: 2026-10-17
-- Status: proposed
+- Status: superseded
+- Superseded by: [0020](0020-whatsapp-via-kapso.md)
 
 ## Context
 

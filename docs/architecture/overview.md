@@ -4,13 +4,14 @@
 
 ```mermaid
 flowchart LR
-    Owner((Owner<br/>phone)) -- WhatsApp --> Meta[WhatsApp Cloud API]
+    Owner((Owner<br/>phone)) -- WhatsApp --> Kapso[Kapso<br/>on WhatsApp Cloud API]
     Owner -- magic link --> Web[Next.js web app<br/>Vercel]
-    Meta -- webhook --> API[FastAPI backend]
-    API -- send messages --> Meta
+    Kapso -- webhook --> API[FastAPI backend<br/>Railway]
+    API -- send messages --> Kapso
     Web -- REST --> API
     Web -- "uploads (signed URL)" --> Storage
     API -- Messages API --> Claude[Claude API]
+    API -- reference photos + prompt --> ImgGen[Image service<br/>Gemini, OpenAI fallback]
     API -- SQL --> DB[(Supabase Postgres)]
     API -- files --> Storage[(Supabase Storage)]
     API -- publish / schedule --> Pub[Publishing provider API]
@@ -23,13 +24,13 @@ flowchart LR
 | Component | Tech | Responsibility |
 |---|---|---|
 | **Web app** | Next.js (App Router, TypeScript), Tailwind, shadcn/ui, on Vercel | Onboarding wizard, IG connect hand-off, **dashboard** where the Owner manages their Catalog, Brand assets (photos and videos) and Offers, **chat simulator** (`/dev/chat`) |
-| **Backend API** | Python 3.13, FastAPI, uvicorn, one container (Tenki, or Railway/Render as fallback) | Webhooks, REST for the web app, orchestrator, agents, jobs, rendering, publishing |
+| **Backend API** | Python 3.13, FastAPI, uvicorn, one container on Railway ([ADR 0017](../decisions/0017-backend-host-railway.md)) | Webhooks, REST for the web app, orchestrator, agents, jobs, image generation calls, publishing |
 | **Database** | Supabase Postgres | All state. Schema in [data-model.md](data-model.md) |
-| **File storage** | Supabase Storage (Free plan for the Must scope; Pro with a 300 MB file limit only once the Could video work starts, [ADR 0016](../decisions/0016-demo-scope-one-post.md)), two buckets: `assets` (private uploads), `renders` (public JPEGs) | Logos and photos (uploaded straight from the browser or received in the chat), rendered posts; videos, frames and Reel previews only with the Could video work |
+| **File storage** | Supabase Storage (Free plan for the Must scope; Pro with a 300 MB file limit only once the Could video work starts, [ADR 0016](../decisions/0016-demo-scope-one-post.md)), two buckets: `assets` (private uploads), `renders` (public JPEGs) | Logos and photos (uploaded straight from the browser or received in the chat), generated post images (variations); videos, frames and Reel previews only with the Could video work |
 | **LLM** | Claude API (`claude-opus-5-5`) via the official `anthropic` Python SDK | Orchestrator + specialist agents. See [agents.md](agents.md) |
-| **WhatsApp** | Meta WhatsApp Cloud API (direct) | Inbound/outbound messages, buttons, media |
+| **WhatsApp** | Kapso, on top of Meta's WhatsApp Cloud API ([ADR 0020](../decisions/0020-whatsapp-via-kapso.md)); Meta direct is plan B | Inbound/outbound messages, buttons, media |
 | **Publishing** | Zernio, unified social publishing API (see [integrations.md](integrations.md#publishing-provider-zernio)) | Instagram connect + publish + schedule |
-| **Renderer** | Jinja2 HTML templates → Playwright (headless Chromium) → JPEG | Deterministic branded images |
+| **Image generation** | Third-party image service behind `ImageGenPort`: Google Gemini `gemini-nano-banana-2.1`, OpenAI `gpt-image-2.5-sunburst` as fallback ([ADR 0018](../decisions/0018-ai-image-generation-service.md), [ADR 0019](../decisions/0019-image-provider-gemini.md)); Pillow resize to 1080×1350 | Post image variations from the Owner's photos ([integrations.md](integrations.md#image-generation)) |
 | **Video tools** (Could) | ffmpeg / ffprobe in the backend container, only once the video work starts | Video metadata, keyframes for the Asset Analyst, WhatsApp previews of Reels. Claude reads no video ([integrations.md](integrations.md#video-processing-ffmpeg)) |
 
 ## Backend internal architecture
@@ -66,7 +67,7 @@ flowchart TB
     subgraph Services["Services"]
         CH[Channel port<br/>WhatsApp / Simulator]
         PUB[Publisher port<br/>Provider / Mock]
-        REN[Renderer]
+        IMG[ImageGen port<br/>Gemini / OpenAI / Mock]
         STO[Storage]
         VID[Video tools<br/>ffmpeg]
         LLM[LLM client<br/>logging to agent_runs]
@@ -84,12 +85,12 @@ flowchart TB
     Work --> Agents
     Work --> CH
     Work --> PUB
-    Work --> REN
+    Work --> IMG
     Agents --> LLM
     ONB --> CH
     BTN --> CH
     ORC --> CH
-    REN --> STO
+    IMG --> STO
     Work --> VID
     VID --> STO
 ```
@@ -99,7 +100,7 @@ flowchart TB
 1. **Deterministic where it matters, LLM where it helps.** Button taps, onboarding steps, approval, and publishing are plain code. The LLM handles free text, planning, writing and design choices.
 2. **Agents are functions, not processes.** Each specialist is an async function: typed input (Pydantic) → one Claude call with structured output → typed output. Only the orchestrator runs a tool-use loop.
 3. **Long work runs in background jobs.** The webhook returns `200` in < 1 s. The orchestrator's tools *enqueue* jobs and return immediately; jobs send their own WhatsApp messages when they finish.
-4. **Ports for everything external.** `ChannelPort` (WhatsApp / Simulator), `PublisherPort` (Provider / Mock), `ImageGenPort` (None / future provider). Switching is an env var, which is also our demo fallback.
+4. **Ports for everything external.** `ChannelPort` (WhatsApp through Kapso / Simulator), `PublisherPort` (Provider / Mock), `ImageGenPort` (Gemini / OpenAI / Mock). Switching is an env var, which is also our demo fallback.
 5. **Per-business serialization.** Inbound messages for the same business are processed one at a time (an in-process `asyncio.Lock` per business ID). Different businesses run concurrently.
 6. **Everything is logged.** Every LLM call writes an `agent_runs` row (agent, input, output, tokens, latency, error). It's our debugger during the hackathon.
 
@@ -107,7 +108,7 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
-    participant M as Meta
+    participant M as Kapso
     participant W as Webhook
     participant H as Inbound handler
     participant R as Router
@@ -117,7 +118,7 @@ sequenceDiagram
     participant C as Channel
 
     M->>W: POST /webhooks/whatsapp (signed)
-    W->>W: verify X-Hub-Signature-256
+    W->>W: verify the webhook signature
     W->>H: schedule handle(payload) as background task
     W-->>M: 200 OK (immediately)
     H->>H: dedupe by wa_message_id, store message, mark as read
@@ -132,12 +133,12 @@ sequenceDiagram
         J-->>O: {job_id, status: "started"}
         O->>C: "¡Dale! Lo armo ⏳"
     end
-    J->>A: Copywriter → Art Director
-    J->>J: render JPEG, upload
-    J->>C: post preview with buttons
+    J->>A: Copywriter → Art Director (image brief)
+    J->>J: image service → variations, resize, upload
+    J->>C: variations, then the picked one as a preview with buttons
 ```
 
-For a Reel, the Art Director picks the video and the cover frame instead of a template, nothing is rendered, and the preview's header is the video's WhatsApp preview ([integrations.md](integrations.md#sending)).
+For a Reel, the Art Director picks the video and the cover frame instead of writing an image prompt, nothing is generated, and the preview's header is the video's WhatsApp preview ([integrations.md](integrations.md#sending)).
 
 ## Request lifecycle: upload from the web
 
@@ -191,16 +192,16 @@ The single-process assumption (in-memory locks, in-process jobs) is deliberate f
 | Piece | Where | Notes |
 |---|---|---|
 | Web | Vercel | `NEXT_PUBLIC_API_URL` → backend URL |
-| Backend | Tenki (or Railway/Render): one container, 1 instance, ≥ 1 GB RAM (Chromium); a few GB of temp disk only for the Could video work | Dockerfile per [`.claude/rules/docker.md`](../../.claude/rules/docker.md), with Chromium installed by Playwright (`ffmpeg` only for the Could video work) |
+| Backend | Railway ([ADR 0017](../decisions/0017-backend-host-railway.md)): one service, 1 replica, Trial first (1 GB RAM), Hobby if needed; a few GB of temp disk only for the Could video work | Dockerfile per [`.claude/rules/docker.md`](../../.claude/rules/docker.md), no browser (`ffmpeg` only for the Could video work) |
 | DB + storage | Supabase (Free plan for the Must scope; Pro with a 300 MB global file limit for the Could video work) | Schema applied with `uv run alembic upgrade head` (runs on deploy) |
-| WhatsApp webhook | `https://<backend>/webhooks/whatsapp` | Configured in the Meta app dashboard |
+| WhatsApp webhook | `https://<backend>/webhooks/whatsapp` | Configured in Kapso (in the Meta app dashboard only for plan B) |
 | Secrets | Platform env vars | Full list in [../implementation/setup.md](../implementation/setup.md) |
 
 ## Security (demo-appropriate, production-ready seams)
 
-- WhatsApp webhook: verify `X-Hub-Signature-256` with the app secret; reject unsigned requests.
+- WhatsApp webhook: verify the provider's signature (Kapso's per its [security docs](https://docs.kapso.ai/docs/platform/webhooks/security.md), header to confirm; `X-Hub-Signature-256` with the app secret on plan B); reject unsigned requests.
 - Web access: magic-link token (random 32 bytes, stored hashed, expires in 7 days) is the only credential. Every web endpoint resolves `token → business_id`; there are no business IDs in URLs. The dashboard link can edit, so anyone it's forwarded to can too: edits only archive, never hard-delete, until there are user accounts.
-- Storage: `assets` bucket private (signed URLs for the web, service key for the backend); `renders` bucket public (images must be fetchable by Meta and the publishing provider). Browser uploads use signed upload URLs scoped to one path and issued only after the backend validated type and size; Reel videos reach Zernio and Meta through signed read URLs, never by making `assets` public.
+- Storage: `assets` bucket private (signed URLs for the web, service key for the backend); `renders` bucket public (images must be fetchable by WhatsApp and the publishing provider). Browser uploads use signed upload URLs scoped to one path and issued only after the backend validated type and size; Reel videos reach Zernio and Meta through signed read URLs, never by making `assets` public.
 - Dev endpoints (`/dev/*`) enabled only when `ENABLE_DEV_ENDPOINTS=true`, protected by `DEV_TOKEN`.
 - Secrets only in env vars; `.env.example` in the repo, `.env` gitignored.
 
@@ -223,10 +224,10 @@ build101/
 │   │   ├── agents/           # asset_analyst.py, brand_strategist.py, content_strategist.py,
 │   │   │                     # copywriter.py, art_director.py, schemas.py, prompts/*.md
 │   │   ├── jobs/             # runner.py, brand.py, plan.py, post.py, publish.py, asset.py
-│   │   ├── channels/         # base.py (ChannelPort), whatsapp.py, simulator.py
+│   │   ├── channels/         # base.py (ChannelPort), whatsapp.py (Kapso; Meta direct on plan B), simulator.py
 │   │   ├── publishing/       # base.py (PublisherPort), zernio.py, mock.py
-│   │   ├── rendering/        # renderer.py, templates/*.html, fonts/
-│   │   ├── media/            # video.py (ffprobe, keyframes, WhatsApp preview), images.py (HEIC, palette)
+│   │   ├── imagegen/         # base.py (ImageGenPort), gemini.py, openai.py, mock.py
+│   │   ├── media/            # video.py (ffprobe, keyframes, WhatsApp preview), images.py (HEIC, palette, resize to 1080×1350)
 │   │   ├── llm/              # client.py (wrapper + agent_runs logging)
 │   │   ├── storage.py
 │   │   ├── copy/messages_es.py

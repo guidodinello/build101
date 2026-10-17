@@ -2,6 +2,7 @@
 
 - Date: 2026-10-17
 - Status: proposed
+- Post step revised by: [0018](0018-ai-image-generation-service.md) (several AI-generated variations and a pick before the preview)
 
 ## Context
 

@@ -6,7 +6,7 @@ FastAPI. JSON in and out, `snake_case` fields. Errors use `{"error": {"code": ".
 
 | Caller | Mechanism |
 |---|---|
-| Meta webhook | `X-Hub-Signature-256` HMAC with `META_APP_SECRET` |
+| WhatsApp webhook (Kapso) | Kapso's webhook signature, checked with its signing secret (`KAPSO_*`; header and scheme to confirm in [Kapso's docs](https://docs.kapso.ai/docs/platform/webhooks/security.md)). Plan B (Meta direct): `X-Hub-Signature-256` HMAC with `META_APP_SECRET` |
 | Zernio webhook | `X-Zernio-Signature` HMAC with `ZERNIO_WEBHOOK_SECRET` |
 | Web app (owner) | Magic-link token in the path: `/api/o/{token}/...`. Server hashes it, looks up `magic_links`, checks expiry → `business_id` |
 | Dev tools | Header `X-Dev-Token: $DEV_TOKEN`, only if `ENABLE_DEV_ENDPOINTS=true` |
@@ -25,8 +25,8 @@ CORS: allow every origin in `FRONTEND_ORIGINS` (comma-separated: Vercel URL + `h
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/webhooks/whatsapp` | Verification: if `hub.mode == "subscribe"` and `hub.verify_token == META_VERIFY_TOKEN`, return `hub.challenge` as plain text, else 403 |
-| POST | `/webhooks/whatsapp` | Verify signature → enqueue handling as a background task → return `200` immediately. Handles `messages` and `statuses` changes. Payload shapes in [integrations.md](integrations.md#whatsapp-cloud-api) |
+| GET | `/webhooks/whatsapp` | Plan B (Meta direct) only. Verification: if `hub.mode == "subscribe"` and `hub.verify_token == META_VERIFY_TOKEN`, return `hub.challenge` as plain text, else 403. Whether Kapso needs a verification handshake is part of the first-hour test |
+| POST | `/webhooks/whatsapp` | Verify signature → enqueue handling as a background task → return `200` immediately. Handles `messages` and `statuses` changes. Payload shapes in [integrations.md](integrations.md#whatsapp) |
 
 ### Zernio webhook
 
@@ -177,7 +177,7 @@ type SimMessage = {
 
 ## Button IDs
 
-Free-text approvals ("subilo", "publicalo") reach the same handlers through the orchestrator's `approve_post` tool ([agents.md](agents.md#conversation-rules)). Format: `<action>:<entity_id>` (≤ 256 chars). Parsed by `conversation/button_router.py`. Unknown or stale IDs (entity in a state that doesn't allow the action) → send `stale_button` and do nothing else.
+Free-text approvals ("subilo", "publicalo") reach the same handlers through the orchestrator's `approve_post` tool ([agents.md](agents.md#conversation-rules)). Format: `<action>:<entity_id>`, or `<action>:<entity_id>:<n>` for `variation_pick` (≤ 256 chars). Parsed by `conversation/button_router.py`. Unknown or stale IDs (entity in a state that doesn't allow the action) → send `stale_button` and do nothing else.
 
 | ID | Allowed when | Handler |
 |---|---|---|
@@ -187,7 +187,8 @@ Free-text approvals ("subilo", "publicalo") reach the same handlers through the 
 | `plan_later` | active | Should. Send `plan_later` |
 | `plan_approve:{plan_id}` | plan `pending_approval` (Should) | plan → `approved`, create posts, enqueue `generate_post` sequentially, send `plan_approved` |
 | `plan_change:{plan_id}` | plan `pending_approval` (Could, F3.3) | `awaiting = plan_feedback` |
-| `post_approve:{post_id}` | post `pending_approval` | post → `approved`, `approved_at = now()`, send `publish_when` / `publish_when_adhoc` |
+| `variation_pick:{post_id}:{n}` | post `pending_approval`, no variation picked yet | Draft: only if the Owner picks with buttons (max 3, so up to 3 variations; [open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)). Same handler as the `pick_variation` tool: copy variation `n` to the Post, send `post_preview` |
+| `post_approve:{post_id}` | post `pending_approval` with a picked variation (image Posts) | post → `approved`, `approved_at = now()`, send `publish_when` / `publish_when_adhoc` |
 | `post_change:{post_id}` | post `pending_approval` (revision is Should; until then reply that changes come later and offer `[Descartar]`) | `awaiting = post_feedback`, send `post_change_prompt` |
 | `post_discard:{post_id}` | post `pending_approval` | post → `discarded`, send `post_discarded` |
 | `post_replace:{post_id}` | post `discarded` | new post with the same brief (origin same) → `generate_post` |
@@ -235,11 +236,22 @@ class PublisherPort(Protocol):
 
 class PublishMedia(BaseModel):
     format: Literal["image", "reel"]
-    url: str                           # public or long-lived signed URL: the render (image) or the Owner's video (reel)
+    url: str                           # public or long-lived signed URL: the picked variation (image) or the Owner's video (reel)
     cover_offset_ms: int | None = None # reel only
 
-# app/rendering/renderer.py
-async def render_post(spec: RenderSpec, brand: VisualIdentity, assets: AssetResolver) -> bytes: ...  # JPEG
+# app/imagegen/base.py  (ADR 0018, 0019; IMAGE_GEN = gemini | openai | mock)
+class GeneratedImage(BaseModel):
+    data: bytes                        # provider output, before resizing
+    mime: str
+    provider: str                      # gemini | openai | mock
+    model: str | None
+    usage: dict                        # provider usage, logged to agent_runs (agent = "image_gen")
+
+class ImageGenPort(Protocol):
+    async def generate(self, prompt: str, reference_images: list[bytes]) -> GeneratedImage: ...   # one image per call
+
+# app/media/images.py
+def to_post_image(data: bytes) -> bytes: ...       # center-crop to 4:5 and resize to 1080x1350 JPEG
 
 # app/media/video.py (ffmpeg / ffprobe; Could)
 async def probe(path: Path) -> VideoInfo: ...                                     # duration_ms, width, height, codecs

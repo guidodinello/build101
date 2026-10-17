@@ -42,15 +42,15 @@ Narrator:
 
 1. Owner sends `{PHOTOS}` + `{REQUEST}`. Narrator: "Sin menús ni formularios: le escribe como a una persona."
 2. Bot asks one question ("¿La mostramos como novedad o tiene algún precio de lanzamiento?") → owner answers in a few words.
-3. Bot: "Dale, lo armo con la foto del detalle ⏳". Narrator, while it works (~40 s): "Una redactora escribe en su tono, un director de arte elige la foto y arma la pieza con sus colores y su logo."
-4. Preview arrives: branded image + caption + `[Aprobar] [Cambiar] [Descartar]`. Narrator: "Su foto real, su marca, su forma de hablar."
+3. Bot: "Dale, lo armo con la foto del detalle ⏳". Narrator, while it works (duration to measure with the real image service): "Una redactora escribe en su tono, un director de arte elige sus fotos y le pide a un generador de imágenes varias versiones con los colores de su marca."
+4. The variations arrive ([ADR 0018](../decisions/0018-ai-image-generation-service.md)); the owner picks one ("la 2"; how the pick works is still open, see [open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)) → preview: that image + caption + `[Aprobar] [Cambiar] [Descartar]`. Narrator: "Su producto real, su marca, su forma de hablar."
 
 ### 3:15 – Publish (20 s)
 
 1. Owner writes "subila" (no button needed) → "arriba ✅" → "¡Publicado! 🎉 <link>".
 2. Open `{IG_HANDLE}` on the projector: **the Post is live.**
 
-> Fallback: if publishing fails, switch `PUBLISHER=mock`, show the rendered Post and the "would publish" log, and open the pre-published post from rehearsal.
+> Fallback: if publishing fails, switch `PUBLISHER=mock`, show the generated Post and the "would publish" log, and open the pre-published post from rehearsal.
 
 ### 3:35 – Close (20 s)
 >
@@ -59,7 +59,7 @@ Narrator:
 ## What to say if asked
 
 - **"¿Y si el agente se equivoca?"** Nothing is published without the owner's yes, by tap or in writing; approval is enforced in code, not left to the AI.
-- **"¿Inventa cosas?"** The agents only use facts the owner gave; prices and promos only appear if the owner mentioned them; there are automated checks for that.
+- **"¿Inventa cosas?"** The agents only use facts the owner gave; prices and promos only appear in the caption, and only if the owner mentioned them; there are automated checks for that. The images are generated from the owner's real photos with prompts that forbid text, prices and logo changes, and the owner picks and approves every one ([ADR 0018](../decisions/0018-ai-image-generation-service.md)).
 - **"¿Qué más hace?"** Proposes ideas when you don't know what to post, plans the week if you ask, schedules ("subilo mañana a la tarde") and takes changes in your own words.
 - **"¿Hace Reels?"** Next: Reels from the owner's own videos, published as-is with a caption and a cover chosen by the agents ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)).
 - **"¿Cómo escala?"** One team of specialized agents shared by all businesses, personalized by each business's brand profile; adding a business costs no setup.

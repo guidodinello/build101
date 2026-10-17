@@ -13,10 +13,10 @@ The "agency" is one **orchestrator** (the account manager the owner talks to) pl
 | **Brand Strategist** | Single call, structured | `generate_brand` job | Onboarding data + Catalog + asset descriptions (+ correction) → Brand Brain | `high` |
 | **Content Strategist** | Single call, structured | `generate_plan` job; `suggest_ideas` tool | Brand Brain + Catalog + active Offers + assets + recent posts + date + notes → weekly plan (images and Reels), or 3 ideas | `medium` |
 | **Copywriter** | Single call, structured | `generate_post` job | Brand Brain + brief + the Owner's own words (+ feedback, previous version) → copy | `medium` |
-| **Art Director** | Single call, vision, structured | `generate_post` job | Brand Brain + copy + candidate photos (the ones the Owner sent with the request, if any) + template catalog → render spec; for a Reel: candidate videos (keyframes) → video + cover frame | `medium` |
+| **Art Director** | Single call, vision, structured | `generate_post` job | Brand Brain + brief + copy + candidate photos (the ones the Owner sent with the request, if any) + trend notes → image brief (reference photos + image prompt); for a Reel: candidate videos (keyframes) → video + cover frame | `medium` |
 | **Feedback Classifier** | Single call, structured | `revise_post` job | Feedback text → `copy` / `image` / `both` (Reel: `copy` / `cover` / `video`) + normalized instruction | `low` |
 
-Not agents (deterministic services): **Renderer** (render spec → JPEG; not used for Reels), **Frame Extractor** (Could; ffmpeg/ffprobe in the backend: video → metadata + keyframes JPEGs), **Publisher** (approved post → provider API, image or Reel), **Scheduler** (delegated to the provider).
+Not agents (deterministic services): **Image generator** (`ImageGenPort`: image brief → variations from the third-party image service, resized to 1080×1350 JPEG, [ADR 0018](../decisions/0018-ai-image-generation-service.md); not used for Reels), **Frame Extractor** (Could; ffmpeg/ffprobe in the backend: video → metadata + keyframes JPEGs), **Publisher** (approved post → provider API, image or Reel), **Scheduler** (delegated to the provider).
 
 ## LLM client conventions
 
@@ -72,9 +72,8 @@ class VisualIdentity(BaseModel):
     accent_color: str
     background_color: str
     text_color: str
-    font_pair: Literal["modern", "classic", "warm", "bold"]   # maps to bundled fonts
     logo_asset_id: str | None
-    photo_style: str                  # "luz natural, madera, ambientes cálidos"
+    photo_style: str                  # "luz natural, madera, ambientes cálidos"; feeds the image prompt
 
 class BrandBrain(BaseModel):
     business_name: str
@@ -157,7 +156,7 @@ Prompts are written in English (instructions) and require output content in Riop
 
 - `reel_suitable` is a model judgment checked in code: it is forced to `false` unless `3000 ≤ duration_ms ≤ 90000` (Zernio's Reel limit, see [research/media-uploads.md](../research/media-uploads.md#publishing-video-and-carousels-zernio-instagram)) and the video is portrait or square. All offsets must be among the keyframe offsets passed in.
 - Product links (Could, F8.5): every id in `product_ids` is written to `asset_products` with `source = 'analyst'`. Links with `source = 'owner'` (set or removed from the dashboard) always win; the analyst never re-adds a link the Owner removed.
-- Derived frames (Could): each `best_frame_offsets_ms` frame is saved as a new `photo` Brand asset with `derived_from_asset_id` = the video and `frame_offset_ms`, then analyzed as a photo, so the Art Director can use it in image templates.
+- Derived frames (Could): each `best_frame_offsets_ms` frame is saved as a new `photo` Brand asset with `derived_from_asset_id` = the video and `frame_offset_ms`, then analyzed as a photo, so the Art Director can use it as a reference photo.
 - Logo special case: also run a deterministic palette extraction (Pillow quantize to 5 colors, ignore near-white/near-black/transparent) and store both. The web wizard shows the Pillow palette as editable swatches.
 
 ### Brand Strategist
@@ -174,8 +173,8 @@ Prompts are written in English (instructions) and require output content in Riop
   - In revise mode: change only what the correction implies; keep everything else.
   - `whatsapp_summary` follows the 4-bullet format in conversation-design.md.
   - `featured_products`: up to 5 Products from the Catalog, referenced by id; never a Product that isn't in the Catalog.
-  - No logo and no colors (the Owner ticked "Todavía no tengo logo ni colores" in the wizard): use the neutral default palette and `font_pair = "modern"`, and say in `whatsapp_summary` that colors can be chosen later in the chat.
-- **Palette proposals (Could, F2.9):** for an Owner without colors, a separate structured call takes one photo the Owner sent (its Pillow palette + `AssetAnalysis`) and returns 3 named palettes (`[{name, colors: [hex × 3]}]`, e.g. "Bosque", "Nogal", "Carbón"). The Owner picks one in the chat, optionally with a tweak ("el marrón un toque más claro"); the result is saved as owner-confirmed colors and a new Brand Brain version. A simple text logo (business name set in the brand's font pair) is offered after the colors; generating a graphic logo is out of scope.
+  - No logo and no colors (the Owner ticked "Todavía no tengo logo ni colores" in the wizard): use the neutral default palette, and say in `whatsapp_summary` that colors can be chosen later in the chat.
+- **Palette proposals (Could, F2.9):** for an Owner without colors, a separate structured call takes one photo the Owner sent (its Pillow palette + `AssetAnalysis`) and returns 3 named palettes (`[{name, colors: [hex × 3]}]`, e.g. "Bosque", "Nogal", "Carbón"). The Owner picks one in the chat, optionally with a tweak ("el marrón un toque más claro"); the result is saved as owner-confirmed colors and a new Brand Brain version. A simple text logo (the business name) was offered after the colors when the backend rendered templates; with generated images ([ADR 0018](../decisions/0018-ai-image-generation-service.md)) how to produce it is open ([open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)). Generating a graphic logo is out of scope.
 
 ### Content Strategist
 
@@ -195,7 +194,6 @@ Prompts are written in English (instructions) and require output content in Riop
       product_ids: list[str]           # Catalog Products featured (0..n)
       offer_id: str | None             # an active Offer this post promotes
       suggested_asset_ids: list[str]   # 1–3 candidates; for a Reel, reel-suitable videos only
-      suggested_template: TemplateId | None   # null for Reels
   class WeeklyPlan(BaseModel):
       items: list[PlanItem]
       whatsapp_text: str               # numbered list for plan_preview, ≤ 900 chars
@@ -206,7 +204,7 @@ Prompts are written in English (instructions) and require output content in Riop
 
 ### Copywriter
 
-**Purpose:** write the caption and on-image text.
+**Purpose:** write the caption. Post images carry no text ([ADR 0018](../decisions/0018-ai-image-generation-service.md)), so there is no on-image copy.
 
 - Input: Brand Brain, brief (plan item or ad-hoc request text), `owner_words` (the Owner's own messages about this post, verbatim: the request, the answer to the bot's question), `format` (`image` | `reel`), the Products and Offer the brief references (from `<catalog>` / `<offers>`), the analyses of the photos the Owner sent with the request (if any), platform (`instagram`), optional `previous` copy + `feedback` (revise mode). For a Reel, also the video's `VideoAnalysis.description` so the caption matches what is on screen.
 - Output:
@@ -214,37 +212,38 @@ Prompts are written in English (instructions) and require output content in Riop
   ```python
   class PostCopy(BaseModel):
       title: str                       # internal title, ≤ 40 chars
-      headline: str                    # on-image, ≤ 40 chars, no hashtags/emojis
-      subheadline: str | None          # on-image, ≤ 60 chars
       caption: str                     # 150–900 chars, Instagram-ready, line breaks allowed
       cta: str                         # included at the end of the caption too
       hashtags: list[str]              # 5–10, without '#' duplicates, lowercase, no spaces
   ```
 
 - Rules: voice from the Brand Brain; first line must hook (≤ 80 chars); no invented facts (prices, discounts, dates only if in a referenced Product or Offer, or in an ad-hoc brief from the Owner); respect emoji policy; Rioplatense *vos*; never mention AI. Keep the angle and the concrete details the Owner asked for in `owner_words` ("que se luzca la madera", "que se note que es a medida", "sin nombrar al cliente"); the caption's voice still comes from the Brand Brain, not from how the Owner writes in the chat. In revise mode, apply the feedback literally and change as little else as possible.
-- Reel variant (Could): same `PostCopy` model, but `headline` and `subheadline` are unused (nothing is drawn on the video; set `headline` to the title and `subheadline` to null), the caption is shorter (80–400 chars) and its first line is the hook, because Instagram truncates Reel captions early.
+- Reel variant (Could): same `PostCopy` model, but the caption is shorter (80–400 chars) and its first line is the hook, because Instagram truncates Reel captions early.
 
 ### Art Director
 
-**Purpose:** decide what the image looks like. It picks, it doesn't draw.
+**Purpose:** decide what the image shows and how it looks. It doesn't draw and doesn't compose: it picks the reference photos and writes the prompt; a third-party image service generates the variations ([ADR 0018](../decisions/0018-ai-image-generation-service.md), provider in [ADR 0019](../decisions/0019-image-provider-gemini.md)).
 
-- Input: Brand Brain (visual identity), `PostCopy`, candidate assets (IDs + analyses + **the images themselves**, max 4, as URLs), template catalog (IDs, slots, best-for — see [../design/post-templates.md](../design/post-templates.md)), optional feedback + previous spec (revise mode), optional `force_asset_id`.
-- Candidates: when the Owner sent photos with the request (`posts.candidate_asset_ids`), the candidates are exactly those photos and the Art Director must pick one of them; otherwise the best matches from the Business's photos (by the brief, `best_for` and `quality`).
-- Output (`RenderSpec`):
+- Input: Brand Brain (visual identity: palette, `photo_style`; voice; `constraints`), the brief and `owner_words`, `PostCopy` (for the angle; none of it goes on the image), candidate photos (IDs + analyses + **the images themselves**, as URLs), trend notes (optional; their source is not decided, see [open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)), optional feedback + previous brief (revise mode), optional `force_asset_id`.
+- Candidates: when the Owner sent photos with the request (`posts.candidate_asset_ids`), those photos are the preferred references; whether the Business's photo library also complements them is not decided ([open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)). With no photos in the request, the best matches from the library (by the brief, `best_for` and `quality`).
+- Output (`ImageBrief`):
 
   ```python
-  class RenderSpec(BaseModel):
-      template_id: TemplateId          # "product_hero" | "promo_band" | "quote_card" | "split_story"
-      photo_asset_id: str | None       # required unless template is text-only
-      crop_focus: Literal["center", "top", "bottom", "left", "right"]
-      slots: dict[str, str]            # template slot → text, e.g. {"headline": "...", "badge": "15% OFF"}
-      color_roles: ColorRoles          # background, text, accent: hex from the brand palette only
-      show_logo: bool
+  class ImageBrief(BaseModel):
+      reference_asset_ids: list[str]   # 1–10 photos of the real product (Gemini takes up to 10 object references)
+      prompt: str                      # English instructions for the image model: scene, composition, light, palette, mood
+      style_notes: str                 # short Spanish summary for the Owner and the revision loop
   ```
 
-- Rules: only colors from `visual_identity`; text in slots must fit template max lengths (validated after the call, see below); prefer `quality=high` photos (derived video frames are valid photos); for promos use `promo_band`; for tips/quotes without a strong photo use `quote_card`.
-- **Post-validation (code):** check slot lengths, color hex membership, asset ownership. On violation, retry once with the error list appended; if it fails again, fall back to `product_hero` with the copy headline.
-- **Reel mode (Could):** input is the copy plus up to 3 candidate videos (each as metadata + its keyframes with offsets + `VideoAnalysis`). No template, no render. Output:
+- **Prompt rules** (in the system prompt, and appended in code to every `prompt` so they can't be dropped):
+  - Show the real product from the reference photos; keep its shape, color, material and proportions. Change the scene, light and styling, never the product.
+  - **No text of any kind** in the image: no headlines, prices, discounts, offers, dates, slogans or watermarks. Prices and offers only appear in the caption, and only when they come from a Product, an Offer or the Owner's words.
+  - **No logos:** don't draw, invent or alter a logo. Whether the Owner's real logo appears on the image is not decided ([open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)).
+  - Use the Brand Brain palette and `photo_style`; respect `constraints` (e.g. "sin mostrar caras").
+  - Trend notes may change the scene or styling, never the facts.
+- **Post-validation (code):** reference ids belong to the business and are not archived; when the Owner sent photos, they are among the references (interim default: only those photos, until the open question on the library is settled); 1–10 references; the fixed rules are present. On violation, retry once with the error list appended; if it fails again, fall back to the candidate photos with a plain prompt built from the brief and `photo_style`.
+- The generated variations are not checked by an LLM before the Owner sees them: the Owner picks one and approves it ([ADR 0007](../decisions/0007-approve-every-post.md)), and nothing is published without that Approval.
+- **Reel mode (Could):** input is the copy plus up to 3 candidate videos (each as metadata + its keyframes with offsets + `VideoAnalysis`). No image generation: the video is published as the Owner shot it. Output:
 
   ```python
   class ReelSpec(BaseModel):
@@ -258,9 +257,9 @@ Prompts are written in English (instructions) and require output content in Riop
 
 Should (revisions, F4.4).
 
-- Input: feedback text, post `format`, current copy, current render spec summary (image) or current video + cover summary (Reel).
+- Input: feedback text, post `format`, current copy, current image brief summary (`style_notes`, image Posts) or current video + cover summary (Reel).
 - Output: `{"target": ..., "instruction": str}` (instruction = normalized, explicit version of the feedback, e.g. "Acortar el caption a 2 líneas y mencionar envío gratis en Montevideo").
-  - Image Post: `target` is `copy` | `image` | `both`.
+  - Image Post: `target` is `copy` | `image` | `both` (`image` regenerates the variations from a revised image brief).
   - Reel (Could): `target` is `copy` | `cover` (pick another frame of the same video) | `video` (swap to another reel-suitable video). We don't edit video, so "cortalo más corto" or "ponele música" maps to `copy` with an instruction that the Orchestrator turns into a short "eso todavía no lo puedo hacer" reply plus an offer to swap the video.
 
 ## Orchestrator
@@ -305,6 +304,7 @@ From the second design pass ([../design/mockups/](../design/mockups/README.md), 
 | Tool | Priority | Input | Does | Returns |
 |---|---|---|---|---|
 | `create_post` | Must | `brief: str`, `asset_ids?: list[str]`, `format?: "image" \| "reel"`, `scheduled_for?: datetime`, `offer_id?: str` | Create post row (`origin = "adhoc"`, `candidate_asset_ids = asset_ids`) + enqueue `generate_post`. `asset_ids` are photos the Owner sent (from `<recent_photos>`); they must belong to the business. `format = "reel"` (Could) requires a reel-suitable video, else returns `{"error": "no_reel_video"}`; `offer_id` is Could | `{post_id, job_id}` |
+| `pick_variation` | Must | `post_id`, `n: int` | Choose variation `n` of the current revision: copy its image to the Post, clear `awaiting`, send `post_preview`. Only while the post is `pending_approval` with no variation picked | `{status}` |
 | `approve_post` | Must | `post_id`, `next?: "ask" \| "publish_now" \| "schedule"`, `when?: datetime` | Same handler as the `[Aprobar]` button. `next = "ask"` (default) sends `publish_when`; `"publish_now"` approves and enqueues `publish_post(now)` in one step ("subilo"); `"schedule"` (Should) approves and schedules at `when` | `{status, job_id?}` |
 | `publish_post` | Must (`now`), Should (datetime) | `post_id`, `when: "now" \| ISO datetime` | Guard: status must be `approved`; enqueue `publish_post` | `{job_id}` or error |
 | `discard_post` | Must | `post_id` | Status → `discarded` | `{status}` |
@@ -325,9 +325,11 @@ From the second design pass ([../design/mockups/](../design/mockups/README.md), 
 
 Tools that are not built yet are not registered, so the model can't call them; the system prompt only describes registered tools.
 
-Guards are in the tool implementations, not in the prompt: `publish_post` returns `{"error": "post_not_approved"}` if the status is wrong, and the model must relay that. `approve_post` called from free text (not a button) is accepted only when the Owner's last message is an explicit approval of that post ([ADR 0007](../decisions/0007-approve-every-post.md)): the inbound handler marks the turn with `explicit_approval = true` when the message matches an approval phrase ("subilo", "publicalo", "dale, subila", "aprobado") and only one post is `pending_approval`, or the Owner named which one; otherwise the tool returns `{"error": "approval_not_explicit"}` and the bot asks. `save_product`, `save_offer` and `save_brand_colors` never persist active data without `confirmed = true`, and the inbound handler rejects `confirmed = true` unless the Owner's last message is an explicit yes (button reply or affirmative text).
+Guards are in the tool implementations, not in the prompt: `publish_post` returns `{"error": "post_not_approved"}` if the status is wrong, and the model must relay that. `approve_post` called from free text (not a button) is accepted only when the Owner's last message is an explicit approval of that post ([ADR 0007](../decisions/0007-approve-every-post.md)): the inbound handler marks the turn with `explicit_approval = true` when the message matches an approval phrase ("subilo", "publicalo", "dale, subila", "aprobado") and only one post is `pending_approval`, or the Owner named which one; otherwise the tool returns `{"error": "approval_not_explicit"}` and the bot asks. An image Post with several variations and none picked yet can't be approved: `approve_post` returns `{"error": "variation_not_picked"}` and the bot asks which one. `save_product`, `save_offer` and `save_brand_colors` never persist active data without `confirmed = true`, and the inbound handler rejects `confirmed = true` unless the Owner's last message is an explicit yes (button reply or affirmative text).
 
 **Photos sent with a request.** WhatsApp delivers each photo as its own message, with the caption (if any) on one of them. The inbound handler stores each photo as a Brand asset (`source = 'whatsapp'`), enqueues `analyze_asset`, and waits a short debounce (5 s after the last photo) before deciding: if any photo has a caption, or a text arrives within the debounce, one orchestrator turn runs with all those photos in `<recent_photos>`; if not, the bot sends `photo_saved` once for the batch with its `[Sí, armalo]` button (Flow 9). `generate_post` waits up to 30 s for the candidate photos' `analyze_asset` jobs, then proceeds with whatever analyses exist (the Art Director sees the images anyway).
+
+**Picking a variation.** When `generate_post` produced more than one variation, the post waits in `pending_approval` with `awaiting = variation_choice`; the Owner's pick (a button or a reply such as "la 2") goes to `pick_variation(post_id, n)`, which copies that variation to the Post and sends `post_preview`. Approval applies to the picked variation only. How the Owner picks, and how many variations there are, is not decided ([open questions](../open-questions.md#post-images-generated-by-ai-adr-0018); draft copy in [conversation-design.md](../product/conversation-design.md)).
 
 ### Context block (dynamic, after the cache breakpoint)
 
@@ -363,10 +365,10 @@ Guards are in the tool implementations, not in the prompt: `publish_post` return
 |---|---|---|---|
 | `analyze_asset(asset_id)` | Must (photo, logo), Could (video) | Photo/logo: Asset Analyst → save analysis (+ Pillow palette for logos) → (Could) write analyst `asset_products`. Video: Frame Extractor (ffprobe + keyframes) → Asset Analyst (video mode) → save `VideoAnalysis`, `duration_ms`, `width`, `height` → write analyst `asset_products` → save best frames as derived photo assets and enqueue `analyze_asset` for each | nothing (WhatsApp photos without a request: `photo_saved`, sent by the inbound handler after the debounce) |
 | `generate_brand(business_id, correction?)` | Must (create), Could (correction) | wait for pending `analyze_asset` → Brand Strategist → save new version | `brand_summary` (onboarding/correction) |
-| `generate_post(post_id)` | Must (image), Could (Reel) | Image: wait for the candidate photos' analyses (≤ 30 s) → Copywriter → Art Director → validate → Renderer → upload → save. Reel: Copywriter (Reel variant) → Art Director (Reel mode) → validate → save `video_asset_id` + `cover_offset_ms` + cover JPEG (the keyframe at that offset) | `post_preview`; Reel: `reel_preview` (video header when the preview transcode fits WhatsApp's 16 MB) or `reel_preview_link` (cover + dashboard link), see [integrations.md](integrations.md) |
+| `generate_post(post_id)` | Must (image), Could (Reel) | Image: wait for the candidate photos' analyses (≤ 30 s) → Copywriter → Art Director → validate → Image generator (the variations in parallel) → resize to 1080×1350 → upload → save `post_variations`. Reel: Copywriter (Reel variant) → Art Director (Reel mode) → validate → save `video_asset_id` + `cover_offset_ms` + cover JPEG (the keyframe at that offset) | several variations: `post_variations` (each image, numbered), then `post_preview` once the Owner picks; one variation: `post_preview` directly; Reel: `reel_preview` (video header when the preview transcode fits WhatsApp's 16 MB) or `reel_preview_link` (cover + dashboard link), see [integrations.md](integrations.md) |
 | `publish_post(post_id, when)` | Must (now), Should (scheduled) | guard → Publisher (now / schedule; image or Reel by `posts.format`) → save external id + permalink | `published` / `scheduled` / `publish_failed` |
 | `generate_plan(business_id, notes?, plan_id?)` | Should | Content Strategist → save plan + items | `plan_preview` |
-| `revise_post(post_id, feedback)` | Should | Feedback Classifier → (Copywriter) → (Art Director) → (Renderer, image only) → save revision | `post_preview` |
+| `revise_post(post_id, feedback)` | Should | Feedback Classifier → (Copywriter) → (Art Director → Image generator, image only) → save revision | `post_preview`, or `post_variations` first when the image was regenerated |
 | `import_instagram_media(business_id)` | Could (F2.8) | List the connected account's recent media ([integrations.md](integrations.md#reading-the-owners-existing-instagram-media-could)) → download the images the Owner kept → store as Brand assets (`source = 'instagram'`) → enqueue `analyze_asset` for each | nothing (the wizard shows progress) |
 
 Posts from an approved plan are generated **sequentially** in plan order, so previews arrive in order and we stay under rate limits.
@@ -375,8 +377,8 @@ Posts from an approved plan are generated **sequentially** in plan order, so pre
 
 Run after every agent call, before saving:
 
-- Caption length 150–900 chars for images, 80–400 for Reels; headline ≤ 40; hashtags 5–10, no duplicates.
-- No phrase from `constraints` appears in caption/headline (case-insensitive substring).
+- Caption length 150–900 chars for images, 80–400 for Reels; hashtags 5–10, no duplicates.
+- No phrase from `constraints` appears in the caption (case-insensitive substring).
 - No price/discount numbers in copy unless they appear in a referenced Product or active Offer, or in the Owner's own ad-hoc brief (regex for `%`, `$`, `USD`, `UYU`).
 - Referenced asset, Product and Offer IDs belong to the business and are not archived; a Reel's video is `reel_suitable`.
 

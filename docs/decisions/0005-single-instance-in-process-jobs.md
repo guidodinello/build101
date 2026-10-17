@@ -5,11 +5,11 @@
 
 ## Context
 
-Generating a post takes 30–60 s (several LLM calls plus rendering), so WhatsApp webhooks must return immediately and the work must run in the background. A real queue (Redis + workers) adds infrastructure that a 2-person, 24h build can't afford to debug. See [architecture/overview.md](../architecture/overview.md#background-jobs).
+Generating a post takes 30–60 s (several LLM calls plus image generation), so WhatsApp webhooks must return immediately and the work must run in the background. A real queue (Redis + workers) adds infrastructure that a 2-person, 24h build can't afford to debug. See [architecture/overview.md](../architecture/overview.md#background-jobs).
 
 ## Decision
 
-Run **exactly one backend container** (Tenki, or Railway/Render as fallback). Background jobs run in-process (`asyncio` tasks behind a small `JobRunner` that records each job in a `jobs` table), and messages from the same Business are serialized with an in-memory lock.
+Run **exactly one backend container** (on Railway, [ADR 0017](0017-backend-host-railway.md)). Background jobs run in-process (`asyncio` tasks behind a small `JobRunner` that records each job in a `jobs` table), and messages from the same Business are serialized with an in-memory lock.
 
 ## Consequences
 

@@ -21,7 +21,8 @@ erDiagram
     businesses ||--o{ agent_runs : logs
     content_plans ||--o{ posts : contains
     posts ||--o{ post_revisions : history
-    brand_assets ||--o{ posts : "photo or video for"
+    posts ||--o{ post_variations : "generated images"
+    brand_assets ||--o{ posts : "video for (Reels)"
     brand_assets ||--o{ brand_assets : "frames from video"
     brand_assets ||--o{ asset_products : shows
     products ||--o{ asset_products : "shown in"
@@ -212,14 +213,15 @@ create table posts (
   status            text not null default 'generating',
   title             text,
   copy              jsonb,                            -- PostCopy
-  render_spec       jsonb,                            -- RenderSpec
-  candidate_asset_ids uuid[] not null default '{}',  -- photos the Owner sent with the request; the Art Director picks from these
-  photo_asset_id    uuid constraint posts_photo_asset_id_fkey references brand_assets(id) on delete set null,
+  image_brief       jsonb,                            -- ImageBrief (Art Director): reference photos + image prompt
+  candidate_asset_ids uuid[] not null default '{}',  -- photos the Owner sent with the request; preferred references for the Art Director
+  reference_asset_ids uuid[] not null default '{}',  -- photos sent to the image service (ImageBrief.reference_asset_ids)
   video_asset_id    uuid constraint posts_video_asset_id_fkey references brand_assets(id) on delete set null,  -- Reels
   cover_offset_ms   int,                              -- Reel cover frame
   offer_id          uuid constraint posts_offer_id_fkey references offers(id) on delete set null,
-  image_path        text,                             -- in bucket 'renders' (image Posts)
-  image_url         text,                             -- public URL (image Posts)
+  variation_n       int,                              -- picked variation of the current revision; null until the Owner picks
+  image_path        text,                             -- in bucket 'renders': the picked variation (image Posts)
+  image_url         text,                             -- public URL of the picked variation (image Posts)
   revision          int  not null default 0,
   scheduled_for     timestamptz,
   approved_at       timestamptz,
@@ -243,7 +245,6 @@ create table posts (
 );
 create index ix_posts_business_id_status on posts (business_id, status);
 create index ix_posts_plan_id on posts (plan_id);
-create index ix_posts_photo_asset_id on posts (photo_asset_id);
 create index ix_posts_video_asset_id on posts (video_asset_id);
 create index ix_posts_offer_id on posts (offer_id);
 
@@ -254,13 +255,28 @@ create table post_revisions (
   feedback     text,
   target       text,
   copy         jsonb,
-  render_spec  jsonb,
-  image_url    text,
+  image_brief  jsonb,
+  image_url    text,                                  -- the variation picked at this revision
   video_asset_id  uuid,                               -- Reels: the video and cover at this revision (history only, no FK)
   cover_offset_ms int,
   created_at   timestamptz not null default now(),
   constraint uq_post_revisions_post_id_revision unique (post_id, revision),
   constraint ck_post_revisions_target check (target in ('copy','image','both','cover','video'))
+);
+
+-- Images generated for an image Post (ADR 0018); the Owner picks one per revision
+create table post_variations (
+  id           uuid primary key default gen_random_uuid(),
+  post_id      uuid not null constraint post_variations_post_id_fkey references posts(id) on delete cascade,
+  revision     int  not null,                         -- posts.revision when generated
+  n            int  not null,                         -- 1-based number shown to the Owner
+  image_path   text not null,                         -- in bucket 'renders', resized to 1080x1350
+  image_url    text not null,
+  provider     text not null,                         -- gemini | openai | mock
+  model        text,
+  created_at   timestamptz not null default now(),
+  constraint uq_post_variations_post_id_revision_n unique (post_id, revision, n),
+  constraint ck_post_variations_n_positive check (n >= 1)
 );
 
 create table messages (
@@ -302,7 +318,7 @@ create table agent_runs (
   id                uuid primary key default gen_random_uuid(),
   business_id       uuid constraint agent_runs_business_id_fkey references businesses(id) on delete cascade,
   job_id            uuid constraint agent_runs_job_id_fkey references jobs(id) on delete set null,
-  agent             text not null,                    -- orchestrator | asset_analyst | brand_strategist | ...
+  agent             text not null,                    -- orchestrator | asset_analyst | brand_strategist | ... | image_gen (provider usage, for cost per variation)
   model             text not null,
   effort            text,
   input             jsonb,
@@ -327,7 +343,8 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 - **Simulator businesses** use fake phone numbers prefixed `sim-` and `channel = 'simulator'`, so the outbound channel is chosen per business.
 - **Row Level Security**: off for the hackathon (the backend uses the service role key and is the only DB client). Turn RLS on before any client talks to Supabase directly. Browser uploads don't break this rule: the browser only writes to Storage, through a signed upload URL the backend issues for one path ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)).
 - **Products and Offers**: the Catalog lives in `products`, not in `onboarding_data` or the Brand Brain. The Brand Brain keeps only a featured summary that references product ids; agents read the full Catalog and the `active` Offers (not past `ends_on`) from these tables. `current_offers` no longer exists.
-- **Archiving, not deleting**: Owners archive Products, Brand assets and Offers (`archived_at`, or `status = 'archived'` for Offers). Archived rows are hidden from agents and the dashboard. Published and scheduled Posts keep their rendered image or video; draft Posts (`pending_approval`, `revising`) that use archived material are flagged for review.
+- **Archiving, not deleting**: Owners archive Products, Brand assets and Offers (`archived_at`, or `status = 'archived'` for Offers). Archived rows are hidden from agents and the dashboard. Published and scheduled Posts keep their generated image or video; draft Posts (`pending_approval`, `revising`) that use archived material are flagged for review.
+- **Variations**: `generate_post` writes one `post_variations` row per generated image; picking one copies its path and URL to `posts.image_path` / `image_url` and sets `variation_n`. Approval ([ADR 0007](../decisions/0007-approve-every-post.md)) applies to the picked variation; the publisher only ever reads `posts.image_url`. Image-service cost is logged in `agent_runs` with `agent = 'image_gen'`.
 - **Video frames**: the Asset Analyst saves the best frames of a video as `photo` assets with `derived_from_asset_id` and `frame_offset_ms` set, so the Art Director can use them like any photo.
 - **Build priority** ([ADR 0016](../decisions/0016-demo-scope-one-post.md)): the first migration creates the whole schema, including the Catalog, Offer, video and Reel columns from [ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md), because a column costs nothing and a later migration mid-hackathon does. The Must scope only writes businesses, magic links, photos and logos (wizard and chat), Brand Brains, ad-hoc posts and the conversation tables; `products` holds the 1–5 wizard Products. The rest stays empty until its Could feature is built.
 - **Seed**: `backend/app/db/seed.py` creates the demo business with a pre-generated Brand Brain and plan (see the demo fallbacks in [../product/mvp.md](../product/mvp.md#demo-fallbacks)).

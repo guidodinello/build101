@@ -9,14 +9,14 @@ One live loop, scoped by [ADR 0016](decisions/0016-demo-scope-one-post.md): a sh
 - Run it on the pilot owner's real account every day; log every correction the owner makes
 - Finish the MVP's *Should* items: weekly plan on request and every Monday with Uruguayan commercial dates, ideas on request, revisions, scheduling by writing, matching the owner's style, read-only dashboard ([ADR 0016](decisions/0016-demo-scope-one-post.md))
 - Replies to comments and DMs, sales flow and a WhatsApp alert to the owner on each sale, through our own Meta app with Instagram Login ([ADR 0013](decisions/0013-focus-marketing.md), [ADR 0015](decisions/0015-instagram-login.md))
-- Voice notes transcribed ([ADR 0014](decisions/0014-whatsapp-cloud-api.md))
+- Voice notes transcribed ([ADR 0020](decisions/0020-whatsapp-via-kapso.md); how Kapso hands us the audio is still to verify)
 - Brand voice learns from corrections, not only from past posts
 - Catalog, content uploads and Offers in the dashboard; Reels v1 from the owner's own videos ([ADR 0012](decisions/0012-catalog-content-dashboard-reels.md))
 - From the second design pass ([design/mockups/](design/mockups/README.md)), beyond the MVP:
   - Import the photos and videos of the owner's Instagram feed after connecting, so the Agency starts with real material (Wizard 6b; F2.8, read access to verify)
   - Build colors, and optionally a simple logo, in the chat when the owner has none (WA-Sin-marca; F2.9)
-  - Instagram stories from a request ("el sábado abrimos el taller de 10 a 14, hacé una historia"): a vertical 1080×1920 template; publishing support through Zernio to verify (Chat 6; F4.7, Won't in the MVP)
-- Designer agent: before/after layouts and carousel templates from real photos (no invented images of the product)
+  - Instagram stories from a request ("el sábado abrimos el taller de 10 a 14, hacé una historia"): a vertical 1080×1920 generated image ([ADR 0018](decisions/0018-ai-image-generation-service.md)); publishing support through Zernio to verify (Chat 6; F4.7, Won't in the MVP)
+- Designer agent: before/after layouts and carousels from real photos, through the same image service ([ADR 0018](decisions/0018-ai-image-generation-service.md)), never altering the product
 - Reels v2: before/after video built from the photos (with royalty-free audio; Instagram's music library isn't available through the API)
 - Basic metrics: weekly WhatsApp summary from Instagram Insights
 - **Success metric**: hours per week the owner spends on social media, before vs. after; plus DMs answered and sales closed by the bot

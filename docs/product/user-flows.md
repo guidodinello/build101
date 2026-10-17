@@ -35,8 +35,8 @@ While `onboarding_state != active`, inbound messages are handled by the **onboar
 ```mermaid
 stateDiagram-v2
     [*] --> generating
-    generating --> pending_approval: preview sent
-    generating --> failed: agent/render error
+    generating --> pending_approval: variations or preview sent
+    generating --> failed: agent or image generation error
     pending_approval --> approved: [Aprobar]
     pending_approval --> revising: [Cambiar] + feedback
     pending_approval --> discarded: [Descartar]
@@ -52,9 +52,9 @@ stateDiagram-v2
     discarded --> [*]
 ```
 
-A Post has a format, `image` (branded image + caption) or `reel` (the owner's video + caption + cover frame, F4.8 Could); both follow this state machine.
+A Post has a format, `image` (an AI-generated image + caption, [ADR 0018](../decisions/0018-ai-image-generation-service.md)) or `reel` (the owner's video + caption + cover frame, F4.8 Could); both follow this state machine.
 
-Rule: **the only way into `approved` is the owner's explicit yes**: the `[Aprobar]` tap, or a message that clearly approves that Post ("subilo", "dale, publicalo") which the orchestrator converts into the same `approve_post` handler (Flow 8). The publish service refuses any post that is not `approved` or `scheduled`.
+Rule: **the only way into `approved` is the owner's explicit yes**: the `[Aprobar]` tap, or a message that clearly approves that Post ("subilo", "dale, publicalo") which the orchestrator converts into the same `approve_post` handler (Flow 8). The publish service refuses any post that is not `approved` or `scheduled`. An image Post with several variations can only be approved once the Owner has picked one; the Approval covers that variation.
 
 ### Content plan status (`content_plans.status`) — Should
 
@@ -72,6 +72,7 @@ A small JSON object that says what the next free-text message means. It is set b
 | `plan_feedback` | owner taps [Cambiar] on a plan | feedback for the plan (`plan_id`) |
 | `post_feedback` | owner taps [Cambiar] on a post | feedback for the post (`post_id`) |
 | `schedule_time` | owner taps [Programar] | a date/time in natural language (`post_id`) |
+| `variation_choice` | `generate_post` sent several variations of a Post | the Owner's pick ("la 2"), passed to `pick_variation` (`post_id`); how the Owner picks is not decided ([open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)) |
 | `post_brief` | the orchestrator asked its one question before creating a Post (Flow 7) | the answer, added to the brief of that request (photos and request kept in the context) |
 | `offer_details` | the orchestrator asked for a missing Offer condition (Flow 12, Could) | the price, discount or validity for the draft Offer (`offer_id`) |
 
@@ -133,7 +134,7 @@ Target time from form submit to summary: **< 60 s**.
 Trigger: only on request, free text like "armame el plan de la semana" (orchestrator → `plan_week`). The bot never offers the plan unprompted.
 
 1. Bot sends `plan_generating`.
-2. *Content Strategist generates N items (N = posts per week from onboarding; demo default 3) from the Brand Brain, the Catalog, the active Offers and the Brand assets. Each item: date, pillar, format, idea, angle, Product and Offer IDs (optional), suggested asset IDs, suggested template. Reels (`format = reel`) only once F4.8 is built: at most one per plan, and only when a reel-suitable video exists.*
+2. *Content Strategist generates N items (N = posts per week from onboarding; demo default 3) from the Brand Brain, the Catalog, the active Offers and the Brand assets. Each item: date, pillar, format, idea, angle, Product and Offer IDs (optional), suggested asset IDs. Reels (`format = reel`) only once F4.8 is built: at most one per plan, and only when a reel-suitable video exists.*
 3. Bot sends the plan as one message:
 
    ```text
@@ -153,10 +154,11 @@ Trigger: an ad-hoc request (Flow 7, the demo path), plan approval (one per item,
 
 ### Image Post
 
-1. *Copywriter* produces: caption (150–900 chars), hashtags (5–10), CTA, `headline` (≤ 40 chars for the image), optional `subheadline` (≤ 60 chars).
-2. *Art Director* chooses: template ID, photo asset ID (from the business's photos), text for each template slot, color roles (from the Brand Brain palette). Output is a **render spec** (JSON).
-3. *Renderer* (deterministic, no LLM) renders HTML template → JPEG 1080×1350 → uploads to storage → public URL.
-4. Bot sends **one interactive message**: image header + body (label line + full caption + hashtags) + buttons:
+1. *Copywriter* produces: caption (150–900 chars), hashtags (5–10), CTA. Nothing is written on the image.
+2. *Art Director* picks the reference photos (the ones the Owner sent with the request first) and writes the image prompt from the Brand Brain, the brief and trend notes. Output is an **image brief** (JSON). The prompt forbids any text, price, offer or logo change in the image ([agents.md](../architecture/agents.md#art-director)).
+3. *Image generator* (no LLM of ours) sends the reference photos and the prompt to the image service ([ADR 0019](../decisions/0019-image-provider-gemini.md)) once per variation, in parallel, resizes each result to 1080×1350 JPEG and uploads it to storage.
+4. If there are several variations, the bot sends them as numbered images and waits for the Owner's pick (`awaiting = variation_choice`; draft copy `post_variations` in [conversation-design.md](conversation-design.md)). The number of variations and how the Owner picks are not decided ([open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)).
+5. With the picked variation (or the only one), the bot sends **one interactive message**: image header + body (label line + full caption + hashtags) + buttons:
 
    ```text
    [image header]
@@ -167,15 +169,15 @@ Trigger: an ad-hoc request (Flow 7, the demo path), plan approval (one per item,
    [Aprobar] [Cambiar] [Descartar]
    ```
 
-   WhatsApp limits the interactive body to 1,024 chars. If the body would exceed it, send the full caption first as a plain text message and use a short body ("📝 Post para el martes 21 — ¿lo aprobás?") in the interactive message. See [../architecture/integrations.md](../architecture/integrations.md#whatsapp-cloud-api).
-5. Post status → `pending_approval`.
+   WhatsApp limits the interactive body to 1,024 chars. If the body would exceed it, send the full caption first as a plain text message and use a short body ("📝 Post para el martes 21 — ¿lo aprobás?") in the interactive message. See [../architecture/integrations.md](../architecture/integrations.md#whatsapp).
+6. Post status → `pending_approval` from the first message the Owner sees (variations or preview).
 
-Target time per post: **< 45 s** from start to preview.
+Target time per post: **< 45 s** from start to preview was set for rendered templates. Image generation latency is not measured yet (no official Gemini figure; OpenAI documents up to 2 minutes for complex prompts), so the target is re-set after the first real calls ([research](../research/image-generation-providers.md#open-points-test-hands-on-before-committing)).
 
 ### Reel (Could, F4.8)
 
 1. *Copywriter* produces the caption (shorter hook first), hashtags and CTA; no on-image headline.
-2. *Art Director* chooses a reel-suitable video asset and its cover frame (`cover_offset_ms`). No template and no render: the video is published as the owner shot it; the cover is a frame extracted with ffmpeg.
+2. *Art Director* chooses a reel-suitable video asset and its cover frame (`cover_offset_ms`). No image generation: the video is published as the owner shot it; the cover is a frame extracted with ffmpeg.
 3. Bot sends the preview with the same `[Aprobar] [Cambiar] [Descartar]` buttons and body as the image Post: the video itself when it fits WhatsApp's media size limit, otherwise the cover image plus a link to the Reel preview in the dashboard.
 4. Post status → `pending_approval`. Approval works exactly as for image Posts ([ADR 0007](../decisions/0007-approve-every-post.md)).
 
@@ -185,11 +187,11 @@ Target time per post: **< 45 s** from start to preview.
 2. Owner writes feedback.
 3. System classifies the feedback (inside the revision job, one LLM call). Image Posts: `copy` / `image` / `both`. Reels: `copy` / `cover` / `video`.
    - `copy` → Copywriter revises with feedback + previous version.
-   - `image` → Art Director re-picks photo/template/text; re-render.
+   - `image` → Art Director revises the image brief (references and prompt); the variations are generated again and the Owner picks again.
    - `both` → both, copy first.
    - `cover` → Art Director picks another cover frame of the same video.
    - `video` → Art Director swaps to another reel-suitable video ("usá el video de la mesa"). Requests to edit the video itself (cuts, music, text on top) get a short "todavía no edito videos" reply.
-4. `post_revisions` row saved (keeps history); `posts.revision += 1`; Flow 5 step 4 again.
+4. `post_revisions` row saved (keeps history); `posts.revision += 1`; Flow 5 from step 4 again (new variations only when the image changed, otherwise straight to the preview).
 5. After 3 revisions, bot also sends `revision_photo_hint`.
 
 Approving in free text is covered in Flow 8.
@@ -202,7 +204,7 @@ Trigger: the owner asks for a post in their own words, with or without photos. E
 - Two photos + "Terminamos hoy la biblioteca para un cliente de Carrasco 🙌 ¿Me armás algo para subir el viernes?"
 - Text only: "hacé un post para la promo del finde, 15% en sillas"
 
-1. Photos sent with the request are stored as Brand assets first (Flow 9) and become the preferred photos for this Post.
+1. Photos sent with the request are stored as Brand assets first (Flow 9) and become the preferred reference photos for this Post's image. Whether they replace or complement the Business's photo library is not decided ([open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)).
 2. **At most one question.** If one short answer would change the Post (the angle, a price, what to highlight, whether a client can be named), the orchestrator asks it in one line and waits with `awaiting = post_brief`: "¡Qué linda! 😍 Ya guardé las fotos. ¿La mostramos como novedad o tiene algún precio de lanzamiento?". If the request is already clear, it asks nothing. It never asks two questions in a row before creating; anything else it assumes and the owner can change later.
 3. Orchestrator calls `create_post(brief=..., asset_ids=[photos sent], when=null)`. The bot acknowledges in a generated line that names its choice ("Dale, lo armo con la foto del detalle de la veta ⏳"), falling back to `post_generating`.
 4. Flow 5 with the brief instead of a plan item. The Copywriter receives the brief verbatim (including the owner's answer) plus the Brand Brain. Prices and promos only appear if the owner gave them.
@@ -255,7 +257,7 @@ If several Posts are `pending_approval`, the orchestrator asks which one, showin
 | Out-of-scope request ("¿me hacés una factura?") | Explain what it does; no tool call |
 | Repeated webhook delivery | Ignored (idempotency on `wa_message_id`) |
 | Message while a job is running | Answered normally; jobs post their results when done |
-| Agent or render error | Post → `failed`; bot apologizes in one line, offers `[Reintentar]`; full error in `agent_runs` |
+| Agent or image generation error | Post → `failed`; bot apologizes in one line, offers `[Reintentar]`; full error in `agent_runs` |
 
 ## Flow 11 — Dashboard: Catalog and content (read-only view Should; editing Could)
 

@@ -14,19 +14,18 @@ Everything needed to build the MVP: an AI marketing agency for small business ow
 6. [architecture/agents.md](architecture/agents.md): Brand Brain, each agent's I/O, orchestrator tools, LLM conventions
 7. [architecture/data-model.md](architecture/data-model.md): Postgres schema
 8. [architecture/api.md](architecture/api.md): REST endpoints, webhooks, button IDs, internal interfaces
-9. [architecture/integrations.md](architecture/integrations.md): WhatsApp Cloud API, Zernio, Claude, Supabase, renderer
+9. [architecture/integrations.md](architecture/integrations.md): WhatsApp (Kapso), Zernio, Claude, image generation, Supabase
 10. [design/web-app.md](design/web-app.md): onboarding wizard, dashboard, chat simulator
-11. [design/post-templates.md](design/post-templates.md): branded image templates
-12. [implementation/plan.md](implementation/plan.md): 24h timeline, tracks, pre-hackathon checklist, risks
-13. [implementation/tasks.md](implementation/tasks.md): task-by-task breakdown with acceptance criteria
-14. [implementation/setup.md](implementation/setup.md): env vars, local run, deploy
-15. [product/demo-script.md](product/demo-script.md): the 4-minute demo
+11. [implementation/plan.md](implementation/plan.md): 24h timeline, tracks, pre-hackathon checklist, risks
+12. [implementation/tasks.md](implementation/tasks.md): task-by-task breakdown with acceptance criteria
+13. [implementation/setup.md](implementation/setup.md): env vars, local run, deploy
+14. [product/demo-script.md](product/demo-script.md): the 4-minute demo
 
 ## Folders
 
 - **[product/](product/README.md)**: what the MVP does and how it behaves.
 - **[architecture/](architecture/README.md)**: components, agents, data model, API and integrations.
-- **[design/](design/README.md)**: web app and post template design.
+- **[design/](design/README.md)**: web app design (the post templates are superseded by AI-generated images, [ADR 0018](decisions/0018-ai-image-generation-service.md)).
 - **[implementation/](implementation/README.md)**: 24h plan, tasks and setup.
 - **[research/](research/README.md)**: investigations behind the decisions.
 - **[decisions/](decisions/README.md)**: ADRs.

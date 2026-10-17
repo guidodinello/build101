@@ -2,11 +2,48 @@
 
 External services, how we call them, and the gotchas that will bite in a 24h build. Verify shapes against the official docs linked in each section. APIs change; this was written in October 2026.
 
-## WhatsApp Cloud API
+## WhatsApp
 
-Meta's official API, called directly (no BSP). Docs: <https://developers.facebook.com/docs/whatsapp/cloud-api>
+The Owner's WhatsApp goes through **Kapso**, a platform for the official WhatsApp API built on top of Meta's Cloud API ([ADR 0020](../decisions/0020-whatsapp-via-kapso.md)). We call its REST API with `httpx` from `app/channels/whatsapp.py`, behind `ChannelPort`; Kapso has no Python SDK (its SDK is TypeScript only). If Kapso fails the first-hour test, [Plan B](#plan-b-meta-cloud-api-direct) is Meta's Cloud API directly behind the same port. The web simulator stays the dev channel and the stage fallback.
 
-### Setup (before the hackathon, ~1 hour)
+Kapso docs (read 2026-10-17): [API introduction](https://docs.kapso.ai/api/introduction.md), [webhooks](https://docs.kapso.ai/docs/platform/webhooks/overview.md), [webhook signatures](https://docs.kapso.ai/docs/platform/webhooks/security.md), [retries and ordering](https://docs.kapso.ai/docs/platform/webhooks/advanced.md), [reply buttons](https://docs.kapso.ai/docs/whatsapp/send-messages/buttons.md), [images](https://docs.kapso.ai/docs/whatsapp/send-messages/image.md), [sandbox](https://docs.kapso.ai/docs/how-to/whatsapp/use-sandbox-for-testing.md). Pricing: Free plan with 2,000 messages/month, 1 connected number plus a free pre-verified US number, $2 credits; Meta's fees passed through at cost ([pricing](https://kapso.com/pricing)).
+
+### Kapso setup (hour 1)
+
+1. Create a Kapso account on the Free plan and get a number: the free pre-verified US number, or the sandbox (it only messages the registered recipient and sends no templates).
+2. Create an API key and configure the webhook to `https://<backend>/webhooks/whatsapp` with a signing secret, following the webhook docs above.
+3. Record the values as `KAPSO_*` env vars ([setup.md](../implementation/setup.md#environment-variables)). Their exact names and the auth header come from Kapso's docs; confirm them before writing the adapter.
+4. Run the first-hour test in [open-questions.md](../open-questions.md#whatsapp-through-kapso-first-hour-test): whether the US number is ours and delivers webhooks to our backend, the recipient limit, the payload format, and media download. Until it passes, build against the simulator.
+
+**Policy note:** since Jan 15, 2026 Meta restricts *general-purpose* AI assistants on the WhatsApp Business API. Kapso runs on the same API, so the rule applies unchanged. Our bot is a task-specific business service (marketing for the owner's own business). That fits the allowed use, but confirm before a public launch (see [../open-questions.md](../open-questions.md)).
+
+### Sending
+
+What `ChannelPort` sends: text, an image with a caption, reply buttons with an optional image (or video) header, and mark-as-read. The request shapes are Kapso's ([buttons](https://docs.kapso.ai/docs/whatsapp/send-messages/buttons.md), [image](https://docs.kapso.ai/docs/whatsapp/send-messages/image.md)); Meta's shapes are under [Plan B](#plan-b-meta-cloud-api-direct). Whether Kapso offers a typing indicator is not checked.
+
+Limits we design around. They are WhatsApp's own limits (Meta's Cloud API), so we assume they apply through Kapso too: max **3** reply buttons; button title ≤ **20** chars; button id ≤ 256 chars; interactive body ≤ **1,024** chars; image caption ≤ 1,024 chars.
+
+**Media limits** (read 2026-10-17, [supported media types](https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media)): images JPEG/PNG ≤ **5 MB**, 8-bit RGB(A); video MP4 or 3GPP ≤ **16 MB**, H.264 video + AAC audio only, single audio stream or none. Android clients don't play H.264 "High" profile with B-frames; Meta recommends "Main" profile without B-frames (or "Baseline") and the `moov` box before `mdat`. Reply-button messages accept a **video header** as well as an image header ([interactive reply buttons](https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-reply-buttons-messages), read 2026-10-17).
+
+**Post variations.** An image Post has several generated variations ([ADR 0018](../decisions/0018-ai-image-generation-service.md)). The Owner sees each one as its own image message, numbered, and then picks one; the picked variation is sent as the normal post preview with `[Aprobar] [Cambiar] [Descartar]`. How the Owner picks (number buttons, which only fit up to 3 variations, or a reply in text) is not decided ([open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)).
+
+**Reel previews (Could):** the Owner's video is usually far over 16 MB, so `analyze_asset` makes a preview with ffmpeg (`app/media/video.py:whatsapp_preview`: 720 px long side, H.264 Main, no B-frames, AAC, `+faststart`, bitrate sized to fit 16 MB) and stores it at `assets/{business_id}/{asset_id}-wa.mp4`. The Reel approval message uses it as the video header. If it can't fit (very long videos), the header is the cover frame image and the body ends with a link to the Post in the dashboard.
+
+### Receiving
+
+Handling rules, whichever provider sits behind the port:
+
+- **Verify the signature** on the raw bytes, before JSON parsing: Kapso signs its webhooks ([security](https://docs.kapso.ai/docs/platform/webhooks/security.md); header and algorithm to confirm in the first-hour test); Meta direct uses `X-Hub-Signature-256` ([Plan B](#plan-b-meta-cloud-api-direct)).
+- **Return 200 fast.** Providers retry on slow or failed responses (Kapso documents its retries and ordering in [advanced](https://docs.kapso.ai/docs/platform/webhooks/advanced.md)), and that produces duplicates. Dedupe on the WhatsApp message id (unique `messages.external_id`).
+- **Normalize** every payload into one `InboundMessage` (text, button reply, image with caption, video, unsupported). Whether Kapso forwards Meta's payload as-is is not verified; if it does, the Meta shape below applies.
+- **Media download:** photos the Owner sends are *Must* (F1.5: they are how the Owner asks for a post), videos *Could*. They become Brand assets with `source = 'whatsapp'`; stream videos to Storage instead of holding them in memory. A photo's `caption` is the Owner's request or hint: keep it with the asset and pass it to the orchestrator (see the photo debounce in [agents.md](agents.md#tools)). How Kapso exposes media (a download URL, Meta's media id, or its own endpoint) is not verified; `ChannelPort.download_media` hides the difference ([open question](../open-questions.md#whatsapp-through-kapso-first-hour-test)).
+- **24-hour window:** free-form messages can only be sent within 24 h of the Owner's last message; outside it only approved templates go through (post-MVP; WhatsApp's rule, so it holds through Kapso too). Job results arrive within minutes, so they are fine. **Scheduled posts are not**: the `published` / `publish_failed` notification for a post scheduled more than 24 h after the Owner's last message will be rejected. MVP behavior: send it anyway, and if it is rejected, log it and keep the status visible on the dashboard; the Owner sees it next time they write (the orchestrator mentions newly published posts). The demo only schedules within the window.
+
+### Plan B: Meta Cloud API direct
+
+Only if Kapso fails the first-hour test ([ADR 0020](../decisions/0020-whatsapp-via-kapso.md)). Meta's official API, called directly (no BSP). Docs: <https://developers.facebook.com/docs/whatsapp/cloud-api>
+
+Setup (~1 hour):
 
 1. Create a Meta developer app (type *Business*) and add the **WhatsApp** product.
 2. Use the free **test phone number**. Add the demo phones (both builders + the furniture owner) as **recipient numbers**. The test number can only message up to 5 verified recipients, which is fine for the demo.
@@ -14,11 +51,7 @@ Meta's official API, called directly (no BSP). Docs: <https://developers.faceboo
 4. Configure the webhook: callback URL `https://<backend>/webhooks/whatsapp`, verify token = `META_VERIFY_TOKEN`; subscribe to the `messages` field.
 5. Record: `META_PHONE_NUMBER_ID`, `META_ACCESS_TOKEN`, `META_APP_SECRET`, `META_VERIFY_TOKEN`, `META_GRAPH_VERSION` (use the latest version shown in the app dashboard), `WHATSAPP_BOT_NUMBER` (for wa.me links).
 
-**Policy note:** since Jan 15, 2026 Meta restricts *general-purpose* AI assistants on the WhatsApp Business API. Our bot is a task-specific business service (marketing for the owner's own business). That fits the allowed use, but confirm before a public launch (see [../open-questions.md](../open-questions.md)). The test number is fine for the demo.
-
-### Sending
-
-`POST https://graph.facebook.com/{META_GRAPH_VERSION}/{META_PHONE_NUMBER_ID}/messages` with `Authorization: Bearer {META_ACCESS_TOKEN}`.
+Sending: `POST https://graph.facebook.com/{META_GRAPH_VERSION}/{META_PHONE_NUMBER_ID}/messages` with `Authorization: Bearer {META_ACCESS_TOKEN}`.
 
 ```jsonc
 // text
@@ -46,12 +79,6 @@ Meta's official API, called directly (no BSP). Docs: <https://developers.faceboo
  "typing_indicator": {"type": "text"}}
 ```
 
-Limits we design around: max **3** reply buttons; button title ≤ **20** chars; button id ≤ 256 chars; interactive body ≤ **1,024** chars; image caption ≤ 1,024 chars.
-
-**Media limits** (read 2026-10-17, [supported media types](https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media)): images JPEG/PNG ≤ **5 MB**, 8-bit RGB(A); video MP4 or 3GPP ≤ **16 MB**, H.264 video + AAC audio only, single audio stream or none. Android clients don't play H.264 "High" profile with B-frames; Meta recommends "Main" profile without B-frames (or "Baseline") and the `moov` box before `mdat`. Reply-button messages accept a **video header** as well as an image header ([interactive reply buttons](https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-reply-buttons-messages), read 2026-10-17).
-
-**Reel previews (Could):** the Owner's video is usually far over 16 MB, so `analyze_asset` makes a preview with ffmpeg (`app/media/video.py:whatsapp_preview`: 720 px long side, H.264 Main, no B-frames, AAC, `+faststart`, bitrate sized to fit 16 MB) and stores it at `assets/{business_id}/{asset_id}-wa.mp4`. The Reel approval message uses it as the video header. If it can't fit (very long videos), the header is the cover frame image and the body ends with a link to the Post in the dashboard.
-
 ```jsonc
 // Reel preview: reply buttons with video header
 {"messaging_product": "whatsapp", "to": "59899123456", "type": "interactive",
@@ -62,9 +89,7 @@ Limits we design around: max **3** reply buttons; button title ≤ **20** chars;
    "action": {"buttons": [ /* Aprobar / Cambiar / Descartar, same ids as image Posts */ ]}}}
 ```
 
-### Receiving
-
-Webhook payload (simplified). Iterate `entry[].changes[].value`:
+Receiving: `GET /webhooks/whatsapp` answers Meta's verification (`hub.mode == "subscribe"` and `hub.verify_token == META_VERIFY_TOKEN` → return `hub.challenge`). Webhook payload (simplified); iterate `entry[].changes[].value`:
 
 ```jsonc
 {
@@ -81,12 +106,8 @@ Webhook payload (simplified). Iterate `entry[].changes[].value`:
 }
 ```
 
-Handling rules:
-
-- **Verify** `X-Hub-Signature-256` = `sha256=` + HMAC-SHA256(app secret, raw body). Compute on the raw bytes, before JSON parsing.
-- **Return 200 fast.** Meta retries on slow or failed responses, and that produces duplicates. Dedupe on `messages.id` (unique `messages.external_id`).
-- **Media download:** `GET /{version}/{media_id}` → `{"url": ...}`, then `GET url` with the same bearer token. URLs expire in minutes, so download immediately. Photos and videos the Owner sends become Brand assets with `source = 'whatsapp'` (photos *Must*, F1.5: they are how the Owner asks for a post; videos *Could*); stream videos to Storage instead of holding them in memory. A photo's `caption` is the Owner's request or hint: keep it with the asset and pass it to the orchestrator (see the photo debounce in [agents.md](agents.md#tools)).
-- **24-hour window:** free-form messages can only be sent within 24 h of the Owner's last message; outside it only approved templates go through (post-MVP, [ADR 0002](../decisions/0002-whatsapp-cloud-api-channel.md)). Job results arrive within minutes, so they are fine. **Scheduled posts are not**: the `published` / `publish_failed` notification for a post scheduled more than 24 h after the Owner's last message will be rejected. MVP behavior: send it anyway, and if Meta rejects it, log it and keep the status visible on the dashboard; the Owner sees it next time they write (the orchestrator mentions newly published posts). The demo only schedules within the window.
+- **Signature:** `X-Hub-Signature-256` = `sha256=` + HMAC-SHA256(app secret, raw body).
+- **Media download:** `GET /{version}/{media_id}` → `{"url": ...}`, then `GET url` with the same bearer token. URLs expire in minutes, so download immediately.
 
 ## Publishing provider: Zernio
 
@@ -143,7 +164,7 @@ POST /v1/posts
 
 Gotchas:
 
-- Media URL must be **public HTTPS returning the raw file**, JPEG/PNG < 8 MB, aspect ratio between 4:5 and 1.91:1. Our renders are 1080×1350 (4:5) JPEG in the public `renders` bucket, which fits.
+- Media URL must be **public HTTPS returning the raw file**, JPEG/PNG < 8 MB, aspect ratio between 4:5 and 1.91:1. Our post images are 1080×1350 (4:5) JPEG in the public `renders` bucket, which fits.
 - **Reels** (Could; [Zernio Instagram](https://docs.zernio.com/platforms/instagram), [research](../research/media-uploads.md)): MP4/MOV, H.264, 3–90 s, ≤ 300 MB, 9:16 recommended. The Owner's video lives in the **private** `assets` bucket, so pass a signed URL valid long enough for Zernio to fetch it (24 h; for a scheduled Reel, sign it when `publish_post` runs, not when the Post is approved). Zernio caps Reels at 90 s while Meta allows 15 min: the Asset Analyst only marks videos of 3–90 s as `reel_suitable` until a real test proves otherwise. Videos that aren't H.264 (e.g. iPhone HEVC) may need a transcode; test with a real phone video before the hackathon.
 - Reels publish slower than images (Meta processes the video), so "publish now" can take a minute or more; the Zernio `post.published` webhook, not the `201`, is what confirms it.
 - Treat `207` and any `post.status != "published"` as failure for "publish now".
@@ -171,10 +192,10 @@ See [agents.md](agents.md#llm-client-conventions) for the full conventions (mode
 
 - **Plan:** the **Free plan** is enough for the Must scope ([ADR 0016](../decisions/0016-demo-scope-one-post.md)): photos and logos only, ≤ 10 MB each, well under its 50 MB per-file and 1 GB storage caps. Move to **Pro** (US$25/month) and set the **global file size limit to 300 MB** (the Instagram Reel maximum) only when the Could video work starts ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md), [research](../research/media-uploads.md)). Record `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (backend only, never in the frontend), `DATABASE_URL` (use the **session pooler** connection string for asyncpg; the transaction pooler breaks prepared statements unless `statement_cache_size=0`).
 - Apply the schema with `uv run alembic upgrade head` (see [data-model.md](data-model.md)).
-- Buckets: `assets` (**private**; bucket file limit 10 MB for the Must scope, 300 MB once video is on) and `renders` (**public**).
+- Buckets: `assets` (**private**; bucket file limit 10 MB for the Must scope, 300 MB once video is on) and `renders` (**public**; the final 1080×1350 post images, i.e. the resized variations from [Image generation](#image-generation); the name is kept from the template design).
 - Python: `supabase` client for storage only (`storage.from_(bucket).upload(path, data, {"content-type": mime})`, `create_signed_url(path, 3600)`, `create_signed_upload_url(path)`, `get_public_url(path)`); SQLAlchemy 2 async + asyncpg for the DB.
 - **Browser uploads** ([api.md](api.md#uploads)): the backend calls `create_signed_upload_url(path)` (valid 2 h) and returns the URL and token. The frontend uploads with `uploadToSignedUrl` from `@supabase/supabase-js` for files up to 6 MB, and with TUS (`tus-js-client`, 6 MB chunks, endpoint `{SUPABASE_URL}/storage/v1/upload/resumable/sign`, header `x-signature: <token>`) above that, so a dropped phone connection resumes instead of restarting. The frontend only needs `NEXT_PUBLIC_SUPABASE_URL` and the anon key; the signed token is what authorizes the write. Not verified yet: whether signed uploads need any Storage policy with RLS on the bucket; test it before the hackathon.
-- Storage paths: `assets/{business_id}/{asset_id}.{ext}`, `assets/{business_id}/{asset_id}-wa.mp4` (WhatsApp preview of a video), `assets/{business_id}/{frame_asset_id}.jpg` (frames saved from a video), `renders/{business_id}/{post_id}-r{revision}.jpg` (new path per revision, so WhatsApp/IG never serve a cached old image).
+- Storage paths: `assets/{business_id}/{asset_id}.{ext}`, `assets/{business_id}/{asset_id}-wa.mp4` (WhatsApp preview of a video), `assets/{business_id}/{frame_asset_id}.jpg` (frames saved from a video), `renders/{business_id}/{post_id}-r{revision}-v{n}.jpg` (variation `n` of a revision; a new path per revision, so WhatsApp/IG never serve a cached old image).
 
 ## Video processing (ffmpeg)
 
@@ -184,19 +205,29 @@ Could: only needed for the Could video work (video analysis, Reels). Claude read
 - `keyframes`: 6 frames spread over the video (skip the first and last 0.5 s), scaled to ≤ 1568 px on the long side, JPEG. Scene-change detection (`select='gt(scene,0.3)'`) is a later improvement.
 - `whatsapp_preview`: see [Reel previews](#sending).
 - Runs inside `analyze_asset` on the downloaded file in a temp dir; delete it afterwards. A 300 MB video takes a few seconds to probe and a few more to cut frames on the backend's CPU; the preview transcode is the slow part (tens of seconds), so it runs after the analysis is saved.
-- Docker: when video work starts, install `ffmpeg` from the distro packages in the final stage, next to Chromium (see [Renderer](#renderer-html--image)). The Must image doesn't need it.
+- Docker: when video work starts, install `ffmpeg` from the distro packages in the final stage of the image (per [`.claude/rules/docker.md`](../../.claude/rules/docker.md)). The Must image doesn't need it.
 - No audio transcription in the MVP (see [Optional](#optional-could)).
 
-## Renderer (HTML → image)
+## Image generation
 
-- Templates: Jinja2 HTML + CSS in `backend/app/rendering/templates/{template_id}.html`. Specs in [../design/post-templates.md](../design/post-templates.md).
-- Engine: Playwright (async, Chromium). Launch **one browser at app startup**; per render: new page, viewport 1080×1350, `set_content(html)`, wait for `document.fonts.ready` and images loaded, `screenshot(type="jpeg", quality=90)`, close page.
-- Assets in HTML: embed the photo and logo as **data URIs** (bytes fetched from storage by the backend) and the fonts as base64 `@font-face` (loaded once at startup). No network access during render, so rendering is deterministic.
-- Fonts bundled in `backend/app/rendering/fonts/` (Google Fonts, OFL): `modern` = Inter + Inter Tight, `classic` = Playfair Display + Source Sans 3, `warm` = Fraunces + DM Sans, `bold` = Archivo Black + Archivo.
-- Docker: follow [`.claude/rules/docker.md`](../../.claude/rules/docker.md) (pinned `python:3.13-slim-*` base, multi-stage, non-root) and install the browser in the final stage with `playwright install --with-deps chromium`; add `ffmpeg` only for the Could video work ([Video processing](#video-processing-ffmpeg)). Needs ≥ 1 GB RAM.
-- Target: < 3 s per render.
+Post images are generated by a third-party AI image service, never composed by the backend ([ADR 0018](../decisions/0018-ai-image-generation-service.md)). Provider: Google Gemini, with OpenAI as fallback ([ADR 0019](../decisions/0019-image-provider-gemini.md)). Facts and prices: [research/image-generation-providers.md](../research/image-generation-providers.md) (read 2026-10-17, not tested hands-on). The Art Director writes the prompt and picks the reference photos ([agents.md](agents.md#art-director)); this layer only calls the provider and post-processes.
+
+`ImageGenPort` (`app/imagegen/`, contract in [api.md](api.md#internal-module-interfaces)), selected by `IMAGE_GEN`:
+
+| Adapter | When | Call |
+|---|---|---|
+| `gemini` | Primary | `gemini-nano-banana-2.1` through the official `google-genai` SDK: `client.interactions.create(model=..., input=..., response_format={"type": "image", "aspect_ratio": "4:5", "image_size": "2K"})`, synchronous, image returned as base64. Up to 10 object reference images "with high-fidelity". One image per call (the model doesn't always return the number of images asked for), so variations run as parallel calls. Try thinking `minimal` to cut cost and latency |
+| `openai` | Fallback | `gpt-image-2.5-sunburst` through `POST /v1/images/edits` (official `openai` SDK): up to 16 reference images, `size = "1088x1360"` (exactly 4:5, multiples of 16), `jpeg` output (faster than `png`). Complex prompts can take up to 2 minutes |
+| `mock` | Local dev, simulator, stage fallback | Returns the first reference photo, cropped and resized, after a short delay. No provider call |
+
+- **Post-processing** (`app/media/images.py`, Pillow): center-crop to 4:5 if needed (Gemini 2K is 1856×2304, slightly off 4:5) and resize to **1080×1350**, JPEG quality 90, then upload to the public `renders` bucket. This is resizing, not composing: nothing is drawn on the image.
+- **Runs in the job runner**, never in the webhook ([ADR 0005](../decisions/0005-single-instance-in-process-jobs.md)). Variations of one Post run concurrently, under a small per-job limit so a Post doesn't exhaust the provider's rate limit.
+- **Cost:** every call logs the provider's `usage` (input images, prompt, thinking, output) in `agent_runs` (`agent = 'image_gen'`), so the dollars per variation can be computed. Gemini lists $0.0504 per 2K output image plus input and thinking tokens; OpenAI's per-image cost for 2.5 is not documented.
+- **Data:** only call Gemini from a project with billing linked: unpaid use (AI Studio, free quota) is used for training. Paid-tier Gemini and the OpenAI API don't train on our images.
+- **Limits:** Gemini Tier 1 has a $10 per 10-minute spend limit and a $250 billing cap; images per minute for 2.1 are not on the public page. OpenAI's Build tier allows 20 images per minute.
+- To confirm on the first real call ([ADR 0019](../decisions/0019-image-provider-gemini.md)): 4:5 at 2K on `gemini-nano-banana-2.1`, latency per image, and that the crop keeps the product in frame.
+- Docker: no browser, no fonts; Pillow is already a dependency.
 
 ## Optional (Could)
 
-- **Voice notes**: WhatsApp audio is OGG/Opus. Transcribe with `faster-whisper` (`small` model, CPU, `language="es"`) inside the backend container, then treat the transcript as text. Adds ~500 MB to the image and a few seconds per note; only if everything else is done. The same model could transcribe what the Owner says in their videos and feed it to the Asset Analyst (post-MVP).
-- **AI image generation**: `ImageGenPort` with a `NoneImageGen` default. If a Google AI Studio or OpenAI key becomes available, add an implementation used by the Art Director for `background`-only fills (never for products: real photos of real furniture beat generated ones).
+- **Voice notes**: WhatsApp audio is OGG/Opus (how Kapso hands us the file is not verified, see [Receiving](#receiving)). Transcribe with `faster-whisper` (`small` model, CPU, `language="es"`) inside the backend container, then treat the transcript as text. Adds ~500 MB to the image and a few seconds per note; only if everything else is done. The same model could transcribe what the Owner says in their videos and feed it to the Asset Analyst (post-MVP).
