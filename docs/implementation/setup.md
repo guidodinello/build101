@@ -47,6 +47,8 @@
 |---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` / prod backend URL |
 | `NEXT_PUBLIC_DEV_TOKEN` | same as `DEV_TOKEN` (simulator only; acceptable for a demo, remove for production) |
+| `NEXT_PUBLIC_WHATSAPP_URL` | `https://wa.me/15551234567` (same number as `WHATSAPP_BOT_NUMBER`; used by the expired-link screen, which has no onboarding state) |
+| `ENABLE_MOCK_API` | `true` locally to serve an in-memory mock of the onboarding API at `/mock-api` (then `NEXT_PUBLIC_API_URL=http://localhost:3000/mock-api`); never set in production |
 
 ## Supabase Storage
 
