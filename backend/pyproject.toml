@@ -45,3 +45,10 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "ruff>=0.17.1",
 ]
+
+[tool.uv]
+# cryptography >= 49 ships no Intel macOS wheels, so `uv sync` on an Intel Mac
+# would try to build it from source with Rust. Drop this once nobody builds on one.
+constraint-dependencies = [
+    "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+]
