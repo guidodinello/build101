@@ -52,9 +52,9 @@ stateDiagram-v2
     discarded --> [*]
 ```
 
-A Post has a format, `image` (an AI-generated image + caption, [ADR 0018](../decisions/0018-ai-image-generation-service.md)) or `reel` (the owner's video + caption + cover frame, F4.8 Could); both follow this state machine.
+A Post has a format, `image` (an AI-generated image + caption, [ADR 0018](../decisions/0018-ai-image-generation-service.md)), `carousel` (3–10 generated slides with text from the copy + caption, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)) or `reel` (the owner's video + caption + cover frame, F4.8 Could); all follow this state machine. A carousel slide redo goes `pending_approval → revising → pending_approval` like a revision.
 
-Rule: **the only way into `approved` is the owner's explicit yes**: the `[Aprobar]` tap, or a message that clearly approves that Post ("subilo", "dale, publicalo") which the orchestrator converts into the same `approve_post` handler (Flow 8). The publish service refuses any post that is not `approved` or `scheduled`. An image Post with several variations can only be approved once the Owner has picked one; the Approval covers that variation.
+Rule: **the only way into `approved` is the owner's explicit yes**: the `[Aprobar]` tap, or a message that clearly approves that Post ("subilo", "dale, publicalo") which the orchestrator converts into the same `approve_post` handler (Flow 8). The publish service refuses any post that is not `approved` or `scheduled`. An image Post with several variations can only be approved once the Owner has picked one; the Approval covers that variation. A carousel's Approval covers all its slides at the current revision.
 
 ### Content plan status (`content_plans.status`) — Should
 
@@ -70,7 +70,7 @@ A small JSON object that says what the next free-text message means. It is set b
 | `business_name` | onboarding step 1 | the business name |
 | `brand_correction` | owner taps [Corregir algo] on the Brand Brain summary | a correction to the Brand Brain |
 | `plan_feedback` | owner taps [Cambiar] on a plan | feedback for the plan (`plan_id`) |
-| `post_feedback` | owner taps [Cambiar] on a post | feedback for the post (`post_id`) |
+| `post_feedback` | owner taps [Cambiar] on a post | feedback for the post (`post_id`); on a carousel, which slides to redo and how, turned into `redo_slides` by the orchestrator |
 | `schedule_time` | owner taps [Programar] | a date/time in natural language (`post_id`) |
 | `variation_choice` | `generate_post` sent several variations of a Post | the Owner's pick ("la 2"), passed to `pick_variation` (`post_id`); how the Owner picks is not decided ([open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)) |
 | `post_brief` | the orchestrator asked its one question before creating a Post (Flow 7) | the answer, added to the brief of that request (photos and request kept in the context) |
@@ -174,6 +174,26 @@ Trigger: an ad-hoc request (Flow 7, the demo path), plan approval (one per item,
 
 Target time per post: **< 45 s** from start to preview was set for rendered templates. Image generation latency is not measured yet (no official Gemini figure; OpenAI documents up to 2 minutes for complex prompts), so the target is re-set after the first real calls ([research](../research/image-generation-providers.md#open-points-test-hands-on-before-committing)).
 
+### Carousel (Must, F4.9)
+
+[ADR 0022](../decisions/0022-carousels-in-mvp.md). Trigger: the Owner asks for a carousel ("armame un carrusel con estas fotos", "hacé uno de 6 slides") → `create_post(format = "carousel", slide_count)`.
+
+1. *Copywriter* (carousel mode) writes the caption, hashtags and the text of each slide: a cover, content slides and usually a closing call to action; 3–5 slides, or the Owner's number up to 10.
+2. *Art Director* (carousel mode) picks the reference photos and writes one shared style plus one scene per slide. It writes no text.
+3. *Carousel generator* generates the cover first, then the other slides in parallel with the cover as a style reference; each slide is resized to 1080×1350 and its text checked against the copy by the *Text Checker*, and regenerated once if it doesn't match.
+4. The bot sends the slides in order as numbered images ("1/5", "2/5"…), then `carousel_preview`:
+
+   ```text
+   🖼️ Carrusel para {when_label} — "{title}" ({count} slides)
+
+   <full caption + hashtags>
+
+   [Aprobar] [Cambiar] [Descartar]
+   ```
+
+5. `[Cambiar]` → `carousel_redo_ask` ("¿Qué slide cambio y cómo? Decime el número."). The Owner can also write it directly while the preview is pending ("cambiá la 3, más luminosa"). `redo_slides` regenerates only those slides, sends them again numbered, then the preview. There are no Variations: one carousel per request.
+6. Approval and publishing as for image Posts (Flow 8); the publisher sends the slides in order as one Instagram carousel.
+
 ### Reel (Could, F4.8)
 
 1. *Copywriter* produces the caption (shorter hook first), hashtags and CTA; no on-image headline.
@@ -209,6 +229,8 @@ Trigger: the owner asks for a post in their own words, with or without photos. E
 3. Orchestrator calls `create_post(brief=..., asset_ids=[photos sent], when=null)`. The bot acknowledges in a generated line that names its choice ("Dale, lo armo con la foto del detalle de la veta ⏳"), falling back to `post_generating`.
 4. Flow 5 with the brief instead of a plan item. The Copywriter receives the brief verbatim (including the owner's answer) plus the Brand Brain. Prices and promos only appear if the owner gave them.
 5. Approval and publishing: Flow 8, by button or by writing.
+
+A carousel request ("armame un carrusel con estas fotos") follows the same steps with `create_post(format = "carousel", slide_count)` and Flow 5's carousel path ([ADR 0022](../decisions/0022-carousels-in-mvp.md)).
 
 Could: a promo with its conditions ("15% en sillas este finde") is saved as an Offer first (Flow 12). "Hacé un reel con el video del taller" → `create_post(format=reel, ...)` (F4.8).
 

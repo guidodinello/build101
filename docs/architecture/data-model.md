@@ -22,6 +22,7 @@ erDiagram
     content_plans ||--o{ posts : contains
     posts ||--o{ post_revisions : history
     posts ||--o{ post_variations : "generated images"
+    posts ||--o{ post_slides : "carousel slides"
     brand_assets ||--o{ posts : "video for (Reels)"
     brand_assets ||--o{ brand_assets : "frames from video"
     brand_assets ||--o{ asset_products : shows
@@ -212,8 +213,8 @@ create table posts (
   brief             text not null,                    -- plan item idea or Owner request
   status            text not null default 'generating',
   title             text,
-  copy              jsonb,                            -- PostCopy
-  image_brief       jsonb,                            -- ImageBrief (Art Director): reference photos + image prompt
+  copy              jsonb,                            -- PostCopy, or CarouselCopy for carousels (ADR 0022)
+  image_brief       jsonb,                            -- ImageBrief (Art Director): reference photos + image prompt; CarouselBrief for carousels
   candidate_asset_ids uuid[] not null default '{}',  -- photos the Owner sent with the request; preferred references for the Art Director
   reference_asset_ids uuid[] not null default '{}',  -- photos sent to the image service (ImageBrief.reference_asset_ids)
   video_asset_id    uuid constraint posts_video_asset_id_fkey references brand_assets(id) on delete set null,  -- Reels
@@ -232,7 +233,7 @@ create table posts (
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now(),
   constraint ck_posts_origin check (origin in ('plan','adhoc','photo')),
-  constraint ck_posts_format check (format in ('image','reel')),
+  constraint ck_posts_format check (format in ('image','reel','carousel')),
   -- video_asset_id is "on delete set null", but assets are only ever archived, so a Reel keeps its video
   constraint ck_posts_reel_has_video check (format <> 'reel' or video_asset_id is not null),
   constraint ck_posts_platform check (platform in ('instagram','facebook')),
@@ -261,7 +262,7 @@ create table post_revisions (
   cover_offset_ms int,
   created_at   timestamptz not null default now(),
   constraint uq_post_revisions_post_id_revision unique (post_id, revision),
-  constraint ck_post_revisions_target check (target in ('copy','image','both','cover','video'))
+  constraint ck_post_revisions_target check (target in ('copy','image','both','cover','video','slides'))
 );
 
 -- Images generated for an image Post (ADR 0018); the Owner picks one per revision
@@ -277,6 +278,26 @@ create table post_variations (
   created_at   timestamptz not null default now(),
   constraint uq_post_variations_post_id_revision_n unique (post_id, revision, n),
   constraint ck_post_variations_n_positive check (n >= 1)
+);
+
+-- Slides of a carousel Post (ADR 0022); a slide redo bumps posts.revision and copies the unchanged rows
+create table post_slides (
+  id           uuid primary key default gen_random_uuid(),
+  post_id      uuid not null constraint post_slides_post_id_fkey references posts(id) on delete cascade,
+  revision     int  not null,
+  idx          int  not null,                         -- 1-based slide position
+  role         text not null,
+  text         jsonb not null,                        -- SlideCopy
+  prompt       text not null,
+  image_path   text not null,                         -- in bucket 'renders', 1080x1350
+  image_url    text not null,
+  provider     text not null,
+  model        text,
+  text_check   jsonb,                                 -- TextCheck, null when not checked
+  created_at   timestamptz not null default now(),
+  constraint uq_post_slides_post_id_revision_idx unique (post_id, revision, idx),
+  constraint ck_post_slides_idx_range check (idx between 1 and 10),
+  constraint ck_post_slides_role check (role in ('cover','content','cta'))
 );
 
 create table messages (
@@ -308,7 +329,7 @@ create table jobs (
   finished_at  timestamptz,
   created_at   timestamptz not null default now(),
   constraint ck_jobs_kind check (kind in ('analyze_asset','generate_brand','generate_plan',
-    'generate_post','revise_post','publish_post')),
+    'generate_post','revise_post','redo_slides','publish_post')),
   constraint ck_jobs_status check (status in ('queued','running','succeeded','failed'))
 );
 create index ix_jobs_business_id on jobs (business_id);
@@ -344,7 +365,8 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 - **Row Level Security**: off for the hackathon (the backend uses the service role key and is the only DB client). Turn RLS on before any client talks to Supabase directly. Browser uploads don't break this rule: the browser only writes to Storage, through a signed upload URL the backend issues for one path ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)).
 - **Products and Offers**: the Catalog lives in `products`, not in `onboarding_data` or the Brand Brain. The Brand Brain keeps only a featured summary that references product ids; agents read the full Catalog and the `active` Offers (not past `ends_on`) from these tables. `current_offers` no longer exists.
 - **Archiving, not deleting**: Owners archive Products, Brand assets and Offers (`archived_at`, or `status = 'archived'` for Offers). Archived rows are hidden from agents and the dashboard. Published and scheduled Posts keep their generated image or video; draft Posts (`pending_approval`, `revising`) that use archived material are flagged for review.
-- **Variations**: `generate_post` writes one `post_variations` row per generated image; picking one copies its path and URL to `posts.image_path` / `image_url` and sets `variation_n`. Approval ([ADR 0007](../decisions/0007-approve-every-post.md)) applies to the picked variation; the publisher only ever reads `posts.image_url`. Image-service cost is logged in `agent_runs` with `agent = 'image_gen'`.
+- **Variations**: `generate_post` writes one `post_variations` row per generated image; picking one copies its path and URL to `posts.image_path` / `image_url` and sets `variation_n`. Approval ([ADR 0007](../decisions/0007-approve-every-post.md)) applies to the picked variation; for an image Post the publisher only ever reads `posts.image_url`. Image-service cost is logged in `agent_runs` with `agent = 'image_gen'`.
+- **Carousel slides** ([ADR 0022](../decisions/0022-carousels-in-mvp.md)): a carousel (`posts.format = 'carousel'`) has no Variations and leaves `posts.image_path` / `image_url` / `variation_n` null. `generate_post` writes one `post_slides` row per slide at `posts.revision`; `redo_slides` bumps the revision, writes the redone slides and copies the unchanged rows, so each revision is a complete carousel. The publisher reads the current revision's rows in `idx` order. Images are stored at `renders/{business_id}/{post_id}-r{revision}-s{idx}.jpg`. `text_check` keeps the Text Checker's result; a slide that still fails after its one regeneration is kept with `matches = false`.
 - **Video frames**: the Asset Analyst saves the best frames of a video as `photo` assets with `derived_from_asset_id` and `frame_offset_ms` set, so the Art Director can use them like any photo.
 - **Build priority** ([ADR 0016](../decisions/0016-demo-scope-one-post.md)): the first migration creates the whole schema, including the Catalog, Offer, video and Reel columns from [ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md), because a column costs nothing and a later migration mid-hackathon does. The Must scope only writes businesses, magic links, photos and logos (wizard and chat), Brand Brains, ad-hoc posts and the conversation tables; `products` holds the 1–5 wizard Products. The rest stays empty until its Could feature is built.
 - **Seed**: `backend/app/db/seed.py` creates the demo business with a pre-generated Brand Brain and plan (see the demo fallbacks in [../product/mvp.md](../product/mvp.md#demo-fallbacks)).

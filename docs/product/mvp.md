@@ -4,7 +4,7 @@ Context: built in a **24-hour hackathon** by **2 people**, as a demo that must l
 
 ## Demo goal
 
-In ~4 minutes on stage, show a real furniture business owner doing a **short onboarding** (WhatsApp + the web form) and then, from WhatsApp, **sending photos and asking for a post in their own words**. The bot asks at most one question, AI-generated variations of the image arrive ([ADR 0018](../decisions/0018-ai-image-generation-service.md)), the owner picks one and approves it by tapping or writing "subilo", and it is **really published** on Instagram with the link sent back. Every Must below is on stage; everything else waits ([ADR 0016](../decisions/0016-demo-scope-one-post.md)).
+In ~4 minutes on stage, show a real furniture business owner doing a **short onboarding** (WhatsApp + the web form) and then, from WhatsApp, **sending photos and asking for a post in their own words**. The bot asks at most one question, AI-generated variations of the image arrive ([ADR 0018](../decisions/0018-ai-image-generation-service.md)), the owner picks one and approves it by tapping or writing "subilo", and it is **really published** on Instagram with the link sent back. The Owner can also ask for a carousel in the same chat ([ADR 0022](../decisions/0022-carousels-in-mvp.md)). Every Must below is on stage; everything else waits ([ADR 0016](../decisions/0016-demo-scope-one-post.md)).
 
 ## Success criteria (demo day)
 
@@ -13,7 +13,8 @@ In ~4 minutes on stage, show a real furniture business owner doing a **short onb
 3. After the owner confirms the brand, the bot opens the chat ("¿En qué te puedo ayudar hoy?") instead of pushing a plan.
 4. The owner sends photos and a request in their own words ("me llegó esta mesa ratona nueva, armame algo para subir") and, after at most one question, gets generated image variations that still show the real product, picks one, and gets it with its caption and **Aprobar / Cambiar / Descartar** buttons.
 5. Approving by button or by writing ("subilo") **really publishes** the post on the business's Instagram, and the bot replies with the permalink.
-6. If WhatsApp, the image service or the publisher fails on stage, the same flow runs from the **web chat simulator**, the **fallback image provider** (or the mock) and the **mock publisher** (see fallbacks).
+6. Asking for a carousel ("armame un carrusel con estas fotos") returns 3 to 5 numbered slides whose text comes from the copy, then the preview; "cambiá la 3" redoes only that slide, and approving publishes the carousel ([ADR 0022](../decisions/0022-carousels-in-mvp.md)).
+7. If WhatsApp, the image service or the publisher fails on stage, the same flow runs from the **web chat simulator**, the **fallback image provider** (or the mock) and the **mock publisher** (see fallbacks).
 
 The weekly plan, revisions, scheduling, the dashboard and Reels are no longer demo criteria; they are Should or Could below.
 
@@ -27,7 +28,7 @@ Priority uses MoSCoW for the 24h build: **Must** = the demo fails without it; **
 |---|---|---|
 | F1.1 | Receive text messages via the WhatsApp webhook (Kapso, [ADR 0020](../decisions/0020-whatsapp-via-kapso.md)); reply with text | Must |
 | F1.2 | Interactive reply buttons (approve / change / discard, plan approval) | Must |
-| F1.3 | Send images (Post variations and previews) with caption; video previews belong to F4.8 | Must |
+| F1.3 | Send images (Post variations, carousel slides and previews) with caption; video previews belong to F4.8 | Must |
 | F1.4 | Orchestrator (LLM with tools) answers free text and routes to agents in Rioplatense Spanish | Must |
 | F1.5 | Receive photos sent in the chat and store them as Brand assets (videos in the chat: Could) | Must |
 | F1.6 | "Typing"/progress messages for long jobs ("Lo estoy armando, dame un minuto ⏳") | Must |
@@ -64,14 +65,15 @@ Priority uses MoSCoW for the 24h build: **Must** = the demo fails without it; **
 
 | ID | Feature | Priority |
 |---|---|---|
-| F4.1 | Copywriter writes caption, hashtags and CTA (no text goes on the image) | Must |
+| F4.1 | Copywriter writes caption, hashtags and CTA (no text goes on an image Post; a carousel's slide text comes from the Copywriter, F4.9) | Must |
 | F4.2 | Art Director picks reference photos and writes the image prompt; a third-party image service generates several variations, resized to 1080×1350 JPEG ([ADR 0018](../decisions/0018-ai-image-generation-service.md), [ADR 0019](../decisions/0019-image-provider-gemini.md)); the owner picks one | Must |
 | F4.3 | ~~At least 3 templates~~: dropped, there are no templates since [ADR 0018](../decisions/0018-ai-image-generation-service.md) | — |
 | F4.4 | Revision loop from natural-language feedback | Should |
 | F4.5 | Ad-hoc post from text and/or photos sent in the chat; the bot asks **at most one** short question first when it helps (angle, price, what to highlight). The demo's core | Must |
 | F4.6 | ~~AI-generated images behind an interface~~: now the main path, see F4.2 | — |
-| F4.7 | Carousels, stories, edited video (cuts, overlays, music) | Won't |
+| F4.7 | Stories, edited video (cuts, overlays, music). Carousels moved to F4.9 ([ADR 0022](../decisions/0022-carousels-in-mvp.md)) | Won't |
 | F4.8 | Reels from the owner's own video, unedited, with a Copywriter caption and a cover frame ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)) | Could |
+| F4.9 | Carousels on request: 3–5 designed slides (or the Owner's number, up to 10) with text from the Copywriter, generated by the image service anchored on the cover, text-checked; one carousel per request, redo of specific slides ("cambiá la 3"), published as one Instagram carousel ([ADR 0022](../decisions/0022-carousels-in-mvp.md)) | Must |
 
 ### F5 — Approval & publishing
 

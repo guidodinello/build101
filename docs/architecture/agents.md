@@ -2,7 +2,7 @@
 
 The "agency" is one **orchestrator** (the account manager the owner talks to) plus a **fixed catalog of specialist agents** that become personal to each business through its **Brand Brain**. We don't generate agents per business. Every business gets the same team, and the Brand Brain plus the business's Catalog (Products), Offers, Brand assets (photos and videos) and history make their work specific. See [ADR 0006](../decisions/0006-fixed-agent-catalog-brand-brain.md) and [ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md).
 
-**Build priority** ([ADR 0016](../decisions/0016-demo-scope-one-post.md), full list in [../product/mvp.md](../product/mvp.md)): the Must scope is one post the Owner asks for in the chat, from request to published. It needs the Orchestrator, the Asset Analyst (photos and logo), the Brand Strategist (create mode), the Copywriter and the Art Director (image mode). The Content Strategist (weekly plan, ideas) and the Feedback Classifier (revisions) are Should. Video mode, Reels, the Catalog and Offers are Could; they stay documented here so the code leaves room for them.
+**Build priority** ([ADR 0016](../decisions/0016-demo-scope-one-post.md), full list in [../product/mvp.md](../product/mvp.md)): the Must scope is one post the Owner asks for in the chat, from request to published. It needs the Orchestrator, the Asset Analyst (photos and logo), the Brand Strategist (create mode), the Copywriter and the Art Director (image mode). Carousels are Must too ([ADR 0022](../decisions/0022-carousels-in-mvp.md)): the Copywriter and Art Director carousel modes and the Text Checker. The Content Strategist (weekly plan, ideas) and the Feedback Classifier (revisions) are Should. Video mode, Reels, the Catalog and Offers are Could; they stay documented here so the code leaves room for them.
 
 ## Agent roster
 
@@ -12,11 +12,12 @@ The "agency" is one **orchestrator** (the account manager the owner talks to) pl
 | **Asset Analyst** | Single call, vision, structured | `analyze_asset` job | Image, or video keyframes + metadata → description, tags, suggested Products, usable-for (+ Reel suitability) | `low` |
 | **Brand Strategist** | Single call, structured | `generate_brand` job | Onboarding data + Catalog + asset descriptions (+ correction) → Brand Brain | `high` |
 | **Content Strategist** | Single call, structured | `generate_plan` job; `suggest_ideas` tool | Brand Brain + Catalog + active Offers + assets + recent posts + date + notes → weekly plan (images and Reels), or 3 ideas | `medium` |
-| **Copywriter** | Single call, structured | `generate_post` job | Brand Brain + brief + the Owner's own words (+ feedback, previous version) → copy | `medium` |
-| **Art Director** | Single call, vision, structured | `generate_post` job | Brand Brain + brief + copy + candidate photos (the ones the Owner sent with the request, if any) + trend notes → image brief (reference photos + image prompt); for a Reel: candidate videos (keyframes) → video + cover frame | `medium` |
+| **Copywriter** | Single call, structured | `generate_post` job | Brand Brain + brief + the Owner's own words (+ feedback, previous version) → copy; for a carousel: + slide count → caption + the text of each slide | `medium` |
+| **Art Director** | Single call, vision, structured | `generate_post` job | Brand Brain + brief + copy + candidate photos (the ones the Owner sent with the request, if any) + trend notes → image brief (reference photos + image prompt); for a Reel: candidate videos (keyframes) → video + cover frame; for a carousel: → reference photos + shared style + one scene per slide | `medium` |
 | **Feedback Classifier** | Single call, structured | `revise_post` job | Feedback text → `copy` / `image` / `both` (Reel: `copy` / `cover` / `video`) + normalized instruction | `low` |
+| **Text Checker** | Single call, vision, structured | `CarouselGenerator` (carousel slides) | Slide image + expected `SlideCopy` → `TextCheck` | `low` |
 
-Not agents (deterministic services): **Image generator** (`ImageGenPort`: image brief → variations from the third-party image service, resized to 1080×1350 JPEG, [ADR 0018](../decisions/0018-ai-image-generation-service.md); not used for Reels), **Frame Extractor** (Could; ffmpeg/ffprobe in the backend: video → metadata + keyframes JPEGs), **Publisher** (approved post → provider API, image or Reel), **Scheduler** (delegated to the provider).
+Not agents (deterministic services): **Image generator** (`ImageGenPort`: image brief → variations from the third-party image service, resized to 1080×1350 JPEG, [ADR 0018](../decisions/0018-ai-image-generation-service.md); not used for Reels), **Carousel generator** (`app/carousel/generator.py`: `CarouselCopy` + `CarouselBrief` → slides through the same port, [ADR 0022](../decisions/0022-carousels-in-mvp.md)), **Frame Extractor** (Could; ffmpeg/ffprobe in the backend: video → metadata + keyframes JPEGs), **Publisher** (approved post → provider API, image, carousel or Reel), **Scheduler** (delegated to the provider).
 
 ## LLM client conventions
 
@@ -204,9 +205,9 @@ Prompts are written in English (instructions) and require output content in Riop
 
 ### Copywriter
 
-**Purpose:** write the caption. Post images carry no text ([ADR 0018](../decisions/0018-ai-image-generation-service.md)), so there is no on-image copy.
+**Purpose:** write the caption. Image Posts carry no text ([ADR 0018](../decisions/0018-ai-image-generation-service.md)), so there is no on-image copy; on a carousel the Copywriter also writes the text of each slide, the only text allowed on it ([ADR 0022](../decisions/0022-carousels-in-mvp.md)).
 
-- Input: Brand Brain, brief (plan item or ad-hoc request text), `owner_words` (the Owner's own messages about this post, verbatim: the request, the answer to the bot's question), `format` (`image` | `reel`), the Products and Offer the brief references (from `<catalog>` / `<offers>`), the analyses of the photos the Owner sent with the request (if any), platform (`instagram`), optional `previous` copy + `feedback` (revise mode). For a Reel, also the video's `VideoAnalysis.description` so the caption matches what is on screen.
+- Input: Brand Brain, brief (plan item or ad-hoc request text), `owner_words` (the Owner's own messages about this post, verbatim: the request, the answer to the bot's question), `format` (`image` | `reel` | `carousel`), `slide_count` (carousel: the Owner's number, or none), the Products and Offer the brief references (from `<catalog>` / `<offers>`), the analyses of the photos the Owner sent with the request (if any), platform (`instagram`), optional `previous` copy + `feedback` (revise mode). For a Reel, also the video's `VideoAnalysis.description` so the caption matches what is on screen.
 - Output:
 
   ```python
@@ -219,6 +220,21 @@ Prompts are written in English (instructions) and require output content in Riop
 
 - Rules: voice from the Brand Brain; first line must hook (≤ 80 chars); no invented facts (prices, discounts, dates only if in a referenced Product or Offer, or in an ad-hoc brief from the Owner); respect emoji policy; Rioplatense *vos*; never mention AI. Keep the angle and the concrete details the Owner asked for in `owner_words` ("que se luzca la madera", "que se note que es a medida", "sin nombrar al cliente"); the caption's voice still comes from the Brand Brain, not from how the Owner writes in the chat. In revise mode, apply the feedback literally and change as little else as possible.
 - Reel variant (Could): same `PostCopy` model, but the caption is shorter (80–400 chars) and its first line is the hook, because Instagram truncates Reel captions early.
+- **Carousel mode (Must, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)):** output `CarouselCopy` (`app/carousel/schemas.py`):
+
+  ```python
+  SlideRole = Literal["cover", "content", "cta"]
+  class SlideCopy(BaseModel):
+      role: SlideRole
+      headline: str            # ≤ 6 words
+      body: str | None = None  # ≤ 20 words
+  class CarouselCopy(BaseModel):          # Copywriter, carousel mode
+      caption: str
+      hashtags: list[str]
+      slides: list[SlideCopy]  # 3–5 by default, the Owner's number up to 10; slides[0].role == "cover"
+  ```
+
+  Same voice and fact rules as the caption: a price, discount or date goes on a slide only when it comes from a referenced Product, an Offer or `owner_words`. The slide text is what the image model renders, so it is short and spelled exactly as it should appear.
 
 ### Art Director
 
@@ -237,12 +253,26 @@ Prompts are written in English (instructions) and require output content in Riop
 
 - **Prompt rules** (in the system prompt, and appended in code to every `prompt` so they can't be dropped):
   - Show the real product from the reference photos; keep its shape, color, material and proportions. Change the scene, light and styling, never the product.
-  - **No text of any kind** in the image: no headlines, prices, discounts, offers, dates, slogans or watermarks. Prices and offers only appear in the caption, and only when they come from a Product, an Offer or the Owner's words.
+  - **No text of any kind** in the image (image Posts): no headlines, prices, discounts, offers, dates, slogans or watermarks. Prices and offers only appear in the caption, and only when they come from a Product, an Offer or the Owner's words. Carousel slides are the exception: they carry the copy's text and nothing else (see carousel mode below, [ADR 0022](../decisions/0022-carousels-in-mvp.md)).
   - **No logos:** don't draw, invent or alter a logo. Whether the Owner's real logo appears on the image is not decided ([open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)).
   - Use the Brand Brain palette and `photo_style`; respect `constraints` (e.g. "sin mostrar caras").
   - Trend notes may change the scene or styling, never the facts.
 - **Post-validation (code):** reference ids belong to the business and are not archived; when the Owner sent photos, they are among the references (interim default: only those photos, until the open question on the library is settled); 1–10 references; the fixed rules are present. On violation, retry once with the error list appended; if it fails again, fall back to the candidate photos with a plain prompt built from the brief and `photo_style`.
-- The generated variations are not checked by an LLM before the Owner sees them: the Owner picks one and approves it ([ADR 0007](../decisions/0007-approve-every-post.md)), and nothing is published without that Approval.
+- The generated variations are not checked by an LLM before the Owner sees them: the Owner picks one and approves it ([ADR 0007](../decisions/0007-approve-every-post.md)), and nothing is published without that Approval. The one exception is carousel slides, whose rendered text the [Text Checker](#text-checker) compares with the copy ([ADR 0022](../decisions/0022-carousels-in-mvp.md)).
+- **Carousel mode (Must, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)):** input adds the `CarouselCopy`. The Art Director writes the look and the scene of each slide, never its text. Output `CarouselBrief` (`app/carousel/schemas.py`):
+
+  ```python
+  class SlideScene(BaseModel):
+      index: int               # 1-based
+      scene_prompt: str        # English: what this slide shows (scene, composition); no text
+  class CarouselBrief(BaseModel):         # Art Director, carousel mode
+      reference_asset_ids: list[str]   # 1–10
+      style_prompt: str                # English: shared visual system (palette hex, typography, layout grid, text safe area)
+      slides: list[SlideScene]         # one per CarouselCopy slide, same order
+      style_notes: str                 # short Spanish summary for the Owner
+  ```
+
+  Code builds each slide's prompt with `app/carousel/prompts.py:build_slide_prompt(brief, copy, index, *, anchored: bool)`: the shared style, the slide's scene, "render exactly this text and no other text" with that slide's `SlideCopy`, and the fixed rules (keep the product unchanged, no logos, no prices or numbers unless they are in the given text, text inside the central 90%). `anchored` adds that the attached style image (the cover) sets the look. Post-validation adds: one scene per slide, indexes 1..n in order.
 - **Reel mode (Could):** input is the copy plus up to 3 candidate videos (each as metadata + its keyframes with offsets + `VideoAnalysis`). No image generation: the video is published as the Owner shot it. Output:
 
   ```python
@@ -261,6 +291,22 @@ Should (revisions, F4.4).
 - Output: `{"target": ..., "instruction": str}` (instruction = normalized, explicit version of the feedback, e.g. "Acortar el caption a 2 líneas y mencionar envío gratis en Montevideo").
   - Image Post: `target` is `copy` | `image` | `both` (`image` regenerates the variations from a revised image brief).
   - Reel (Could): `target` is `copy` | `cover` (pick another frame of the same video) | `video` (swap to another reel-suitable video). We don't edit video, so "cortalo más corto" or "ponele música" maps to `copy` with an instruction that the Orchestrator turns into a short "eso todavía no lo puedo hacer" reply plus an offer to swap the video.
+
+### Text Checker
+
+Must (carousels, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)). The only LLM check of a generated image.
+
+- Input: one generated slide (1080×1350 JPEG) + the expected `SlideCopy`.
+- Output:
+
+  ```python
+  class TextCheck(BaseModel):             # Text Checker
+      matches: bool
+      found: str
+      issues: list[str]
+  ```
+
+- One structured `claude-opus-5-5` call with effort `low` ([LLM client conventions](#llm-client-conventions)), in `app/agents/text_checker.py`. `matches` is false when a word is missing, misspelled or added, or when other text (a price, a number, a logo) appears. Called by `CarouselGenerator`: a mismatch regenerates that slide once; if it still fails, the slide is kept with its `TextCheck` saved and flagged.
 
 ## Orchestrator
 
@@ -298,13 +344,15 @@ From the second design pass ([../design/mockups/](../design/mockups/README.md), 
 - **At most one question (Must).** Before `create_post`, ask **one** short question only when the answer changes the result: the angle (novedad, promo, detrás de escena), a price or condition the Owner hasn't given, or what to highlight. Otherwise create right away and say so ("Dale, lo armo con la foto del detalle de la veta ⏳"). Never a second question for the same post; missing details become a neutral choice.
 - **Approve and publish by writing (Must, F5.6).** While a post is `pending_approval`, an explicit approval in text maps to the same handlers as the buttons: "subilo", "publicalo", "dale, subila" → `approve_post(next = "publish_now")`. Praise without an instruction ("me encanta", "está lindo") is not approval: the bot asks "¿Lo subo?". An approval with a time ("subilo mañana a la tarde") → `approve_post(next = "schedule", when = ...)` (Should, F5.3); until scheduling exists the bot publishes only on an explicit "ahora". If more than one post is pending, the bot asks which one.
 - **Match the Owner's style (Should, F1.9).** Replies mirror how the Owner writes: short and casual when they write two words ("subila" → "arriba ✅"), fuller when they write long messages. `<owner_style>` in the context block gives the hint. Post captions keep the Brand Brain voice regardless.
+- **Carousels (Must, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)).** "Armame un carrusel con estas fotos" → `create_post(format = "carousel", slide_count)`, with `slide_count` only when the Owner gave a number (up to 10). One carousel per request, no Variations. While its preview is pending, "cambiá la 3" or "la portada más clara" → `redo_slides(post_id, slides, feedback)`; approval works as for image Posts.
 - **Ideas on request (Should, F3.5).** "¿Se te ocurre algo?" → `suggest_ideas`; the bot lists the 3 ideas as a short numbered message. When the Owner picks one ("la del taller, pero sin mostrar caras"), the model calls `create_post` with that idea as the brief and the Owner's extra instructions in it.
 
 ### Tools
 
 | Tool | Priority | Input | Does | Returns |
 |---|---|---|---|---|
-| `create_post` | Must | `brief: str`, `asset_ids?: list[str]`, `format?: "image" \| "reel"`, `scheduled_for?: datetime`, `offer_id?: str` | Create post row (`origin = "adhoc"`, `candidate_asset_ids = asset_ids`) + enqueue `generate_post`. `asset_ids` are photos the Owner sent (from `<recent_photos>`); they must belong to the business. `format = "reel"` (Could) requires a reel-suitable video, else returns `{"error": "no_reel_video"}`; `offer_id` is Could | `{post_id, job_id}` |
+| `create_post` | Must | `brief: str`, `asset_ids?: list[str]`, `format: "image" \| "carousel" = "image"` (`"reel"` Could), `slide_count: int \| None`, `scheduled_for?: datetime`, `offer_id?: str` | Create post row (`origin = "adhoc"`, `candidate_asset_ids = asset_ids`) + enqueue `generate_post`. `asset_ids` are photos the Owner sent (from `<recent_photos>`); they must belong to the business. `slide_count` only with `format = "carousel"`, at most 10, null lets the agents choose 3–5 ([ADR 0022](../decisions/0022-carousels-in-mvp.md)). `format = "reel"` (Could) requires a reel-suitable video, else returns `{"error": "no_reel_video"}`; `offer_id` is Could | `{post_id, job_id}` |
+| `redo_slides` | Must | `post_id`, `slides: list[int]`, `feedback` | Carousel only, while `pending_approval`: enqueue `redo_slides` for those 1-based slides ([ADR 0022](../decisions/0022-carousels-in-mvp.md)) | `{job_id}` |
 | `pick_variation` | Must | `post_id`, `n: int` | Choose variation `n` of the current revision: copy its image to the Post, clear `awaiting`, send `post_preview`. Only while the post is `pending_approval` with no variation picked | `{status}` |
 | `approve_post` | Must | `post_id`, `next?: "ask" \| "publish_now" \| "schedule"`, `when?: datetime` | Same handler as the `[Aprobar]` button. `next = "ask"` (default) sends `publish_when`; `"publish_now"` approves and enqueues `publish_post(now)` in one step ("subilo"); `"schedule"` (Should) approves and schedules at `when` | `{status, job_id?}` |
 | `publish_post` | Must (`now`), Should (datetime) | `post_id`, `when: "now" \| ISO datetime` | Guard: status must be `approved`; enqueue `publish_post` | `{job_id}` or error |
@@ -366,8 +414,9 @@ Guards are in the tool implementations, not in the prompt: `publish_post` return
 |---|---|---|---|
 | `analyze_asset(asset_id)` | Must (photo, logo), Could (video) | Photo/logo: Asset Analyst → save analysis (+ Pillow palette for logos) → (Could) write analyst `asset_products`. Video: Frame Extractor (ffprobe + keyframes) → Asset Analyst (video mode) → save `VideoAnalysis`, `duration_ms`, `width`, `height` → write analyst `asset_products` → save best frames as derived photo assets and enqueue `analyze_asset` for each | nothing (WhatsApp photos without a request: `photo_saved`, sent by the inbound handler after the debounce) |
 | `generate_brand(business_id, correction?)` | Must (create), Could (correction) | wait for pending `analyze_asset` → Brand Strategist → save new version | `brand_summary` (onboarding/correction) |
-| `generate_post(post_id)` | Must (image), Could (Reel) | Image: wait for the candidate photos' analyses (≤ 30 s) → Copywriter → Art Director → validate → Image generator (the variations in parallel) → resize to 1080×1350 → upload → save `post_variations`. Reel: Copywriter (Reel variant) → Art Director (Reel mode) → validate → save `video_asset_id` + `cover_offset_ms` + cover JPEG (the keyframe at that offset) | several variations: `post_variations` (each image, numbered), then `post_preview` once the Owner picks; one variation: `post_preview` directly; Reel: `reel_preview` (video header when the preview transcode fits WhatsApp's 16 MB) or `reel_preview_link` (cover + dashboard link), see [integrations.md](integrations.md) |
-| `publish_post(post_id, when)` | Must (now), Should (scheduled) | guard → Publisher (now / schedule; image or Reel by `posts.format`) → save external id + permalink | `published` / `scheduled` / `publish_failed` |
+| `generate_post(post_id)` | Must (image, carousel), Could (Reel) | Image: wait for the candidate photos' analyses (≤ 30 s) → Copywriter → Art Director → validate → Image generator (the variations in parallel) → resize to 1080×1350 → upload → save `post_variations`. Carousel (`posts.format = 'carousel'`): wait for the photo analyses → Copywriter (carousel mode) → Art Director (carousel mode) → validate → `CarouselGenerator.generate` (cover first, the rest in parallel anchored on it, each text-checked) → upload → save `post_slides`. Reel: Copywriter (Reel variant) → Art Director (Reel mode) → validate → save `video_asset_id` + `cover_offset_ms` + cover JPEG (the keyframe at that offset) | several variations: `post_variations` (each image, numbered), then `post_preview` once the Owner picks; one variation: `post_preview` directly; Reel: `reel_preview` (video header when the preview transcode fits WhatsApp's 16 MB) or `reel_preview_link` (cover + dashboard link), see [integrations.md](integrations.md); carousel: the slides in order, captioned "1/5", "2/5"…, then `carousel_preview` |
+| `publish_post(post_id, when)` | Must (now), Should (scheduled) | guard → Publisher (now / schedule; image, carousel or Reel by `posts.format`) → save external id + permalink | `published` / `scheduled` / `publish_failed` |
+| `redo_slides(post_id, slides, feedback)` | Must (carousel) | (Copywriter, when the feedback changes the words of those slides) → Art Director (carousel mode, new scenes for those slides) → `CarouselGenerator.redo` (a redone slide anchors on the current cover; a redone cover anchors on slide 2) → upload → bump `posts.revision`, save the new rows and copy the unchanged ones to the new revision | the redone slides, numbered, then `carousel_preview` |
 | `generate_plan(business_id, notes?, plan_id?)` | Should | Content Strategist → save plan + items | `plan_preview` |
 | `revise_post(post_id, feedback)` | Should | Feedback Classifier → (Copywriter) → (Art Director → Image generator, image only) → save revision | `post_preview`, or `post_variations` first when the image was regenerated |
 | `import_instagram_media(business_id)` | Could (F2.8) | List the connected account's recent media ([integrations.md](integrations.md#reading-the-owners-existing-instagram-media-could)) → download the images the Owner kept → store as Brand assets (`source = 'instagram'`) → enqueue `analyze_asset` for each | nothing (the wizard shows progress) |
@@ -379,6 +428,7 @@ Posts from an approved plan are generated **sequentially** in plan order, so pre
 Run after every agent call, before saving:
 
 - Caption length 150–900 chars for images, 80–400 for Reels; hashtags 5–10, no duplicates.
+- Carousels: 3–10 slides (the Owner's number when given), `slides[0].role == "cover"`, headline ≤ 6 words, body ≤ 20 words; the price/discount rule below applies to slide text too.
 - No phrase from `constraints` appears in the caption (case-insensitive substring).
 - No price/discount numbers in copy unless they appear in a referenced Product or active Offer, or in the Owner's own ad-hoc brief (regex for `%`, `$`, `USD`, `UYU`).
 - Referenced asset, Product and Offer IDs belong to the business and are not archived; a Reel's video is `reel_suitable`.

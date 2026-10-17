@@ -2,6 +2,7 @@
 
 - Date: 2026-10-17
 - Status: proposed
+- Revised by: [0022](0022-carousels-in-mvp.md) (the no-text rule applies to image Posts only; carousel slides carry text from the copy, checked by a Text Checker)
 
 ## Context
 

@@ -33,6 +33,8 @@
 | `GEMINI_IMAGE_MODEL` | `gemini-nano-banana-2.1` | |
 | `TRANSCRIBE_FALLBACK` | `gemini` \| `none` \| `mock` | Voice notes without Kapso's transcript ([ADR 0021](../decisions/0021-voice-notes-kapso-transcript-gemini-fallback.md)) |
 | `TRANSCRIBE_MODEL` | `gemini-3.8-flash` | A Gemini Flash model that takes audio; confirm on the first real call |
+| `GEMINI_THINKING_LEVEL` | `medium` | `minimal` \| `medium` \| `high`; thinking can't be turned off. Default `medium` until the first real calls measure `minimal` ([integrations.md](../architecture/integrations.md#image-generation)) |
+| `IMAGE_GEN_MAX_CONCURRENCY` | `4` | Process-wide limit on image-service calls (variations and carousel slides) |
 | `OPENAI_API_KEY` | `sk-...` | Fallback only; the OpenAI org may need Organization Verification |
 | `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst` | Fallback only |
 | `PUBLISHER` | `zernio` \| `mock` | Demo fallback switch |

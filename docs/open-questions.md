@@ -40,6 +40,19 @@ From [ADR 0018](decisions/0018-ai-image-generation-service.md). Hands-on checks 
 - [ ] **Photos in the live request:** [ADR 0016](decisions/0016-demo-scope-one-post.md) words the demo as "a photo" → one preview, while ADR 0018 assumes a set of photos (around 10) → several variations → a pick. The stage now follows ADR 0018 ([mvp.md](product/mvp.md#demo-goal)); how many photos the live request uses is open.
 - [ ] **Time per post:** the old < 45 s target was for rendered templates; set a new one after measuring generation latency.
 
+## Carousels (ADR 0022)
+
+From [ADR 0022](decisions/0022-carousels-in-mvp.md).
+
+- [x] **Carousels in the MVP:** Must, one per request, designed slides with text from the Copywriter, consistency by anchoring on the cover, slide redo instead of Variations.
+- [x] **Gemini call shape:** `generateContent` (`client.aio.models.generate_content`), not the Beta Interactions API ([integrations.md](architecture/integrations.md#image-generation)).
+- [ ] **Text check accuracy:** does a `low`-effort Claude vision call catch a misspelled or extra word reliably, and does it flag correct slides as wrong? Measure on the first real carousels.
+- [ ] **Misspelling fallback:** a slide that still fails after its one regeneration is kept and flagged. Is it sent to the Owner as is, sent with a warning, or held back? And what if the cover fails, since the other slides anchor on it?
+- [ ] **Real latency and cost per carousel:** the ADR estimates $0.30 to $0.40 and 40 to 70 s for 5 slides at 2K; log `usage` and timings on the first calls, with `GEMINI_THINKING_LEVEL` at `minimal` and `medium`.
+- [ ] **Zernio carousel publish:** does a `POST /v1/posts` with several image `mediaItems` publish an Instagram carousel from our public `renders` URLs? Not verified ([integrations.md](architecture/integrations.md#calls)); test once on the demo IG.
+- [ ] **Redo feedback that changes the words** ("que la 3 diga envío gratis"): does `redo_slides` rewrite that slide's text with the Copywriter, or only its scene?
+- [ ] **On stage:** does the demo script show a carousel? Carousels are Must, but [product/demo-script.md](product/demo-script.md) shows one image Post.
+
 ## Publishing
 
 - [ ] Confirm the exact query params Zernio appends to the connect redirect (log them in the pre-hackathon test).

@@ -26,11 +26,11 @@ flowchart LR
 | **Web app** | Next.js (App Router, TypeScript), Tailwind, shadcn/ui, on Vercel | Onboarding wizard, IG connect hand-off, **dashboard** where the Owner manages their Catalog, Brand assets (photos and videos) and Offers, **chat simulator** (`/dev/chat`) |
 | **Backend API** | Python 3.13, FastAPI, uvicorn, one container on Railway ([ADR 0017](../decisions/0017-backend-host-railway.md)) | Webhooks, REST for the web app, orchestrator, agents, jobs, image generation calls, publishing |
 | **Database** | Supabase Postgres | All state. Schema in [data-model.md](data-model.md) |
-| **File storage** | Supabase Storage (Free plan for the Must scope; Pro with a 300 MB file limit only once the Could video work starts, [ADR 0016](../decisions/0016-demo-scope-one-post.md)), two buckets: `assets` (private uploads), `renders` (public JPEGs) | Logos and photos (uploaded straight from the browser or received in the chat), generated post images (variations); videos, frames and Reel previews only with the Could video work |
+| **File storage** | Supabase Storage (Free plan for the Must scope; Pro with a 300 MB file limit only once the Could video work starts, [ADR 0016](../decisions/0016-demo-scope-one-post.md)), two buckets: `assets` (private uploads), `renders` (public JPEGs) | Logos and photos (uploaded straight from the browser or received in the chat), generated post images (variations and carousel slides); videos, frames and Reel previews only with the Could video work |
 | **LLM** | Claude API (`claude-opus-5-5`) via the official `anthropic` Python SDK | Orchestrator + specialist agents. See [agents.md](agents.md) |
 | **WhatsApp** | Kapso, on top of Meta's WhatsApp Cloud API ([ADR 0020](../decisions/0020-whatsapp-via-kapso.md)); Meta direct is plan B | Inbound/outbound messages, buttons, media |
 | **Publishing** | Zernio, unified social publishing API (see [integrations.md](integrations.md#publishing-provider-zernio)) | Instagram connect + publish + schedule |
-| **Image generation** | Third-party image service behind `ImageGenPort`: Google Gemini `gemini-nano-banana-2.1`, OpenAI `gpt-image-2.5-sunburst` as fallback ([ADR 0018](../decisions/0018-ai-image-generation-service.md), [ADR 0019](../decisions/0019-image-provider-gemini.md)); Pillow resize to 1080×1350 | Post image variations from the Owner's photos ([integrations.md](integrations.md#image-generation)) |
+| **Image generation** | Third-party image service behind `ImageGenPort`: Google Gemini `gemini-nano-banana-2.1`, OpenAI `gpt-image-2.5-sunburst` as fallback ([ADR 0018](../decisions/0018-ai-image-generation-service.md), [ADR 0019](../decisions/0019-image-provider-gemini.md)); Pillow resize to 1080×1350 | Post image variations and carousel slides ([ADR 0022](../decisions/0022-carousels-in-mvp.md)) from the Owner's photos ([integrations.md](integrations.md#image-generation)) |
 | **Video tools** (Could) | ffmpeg / ffprobe in the backend container, only once the video work starts | Video metadata, keyframes for the Asset Analyst, WhatsApp previews of Reels. Claude reads no video ([integrations.md](integrations.md#video-processing-ffmpeg)) |
 
 ## Backend internal architecture
@@ -226,13 +226,14 @@ build101/
 │   │   ├── conversation/     # inbound.py, onboarding_router.py, button_router.py, state.py
 │   │   ├── orchestrator/     # orchestrator.py, tools.py, prompts/system.md
 │   │   ├── agents/           # asset_analyst.py, brand_strategist.py, content_strategist.py,
-│   │   │                     # copywriter.py, art_director.py, schemas.py, prompts/*.md
+│   │   │                     # copywriter.py, art_director.py, text_checker.py, schemas.py, prompts/*.md
+│   │   ├── carousel/         # schemas.py (CarouselCopy, CarouselBrief, TextCheck), prompts.py (build_slide_prompt), generator.py (CarouselGenerator)
 │   │   ├── jobs/             # runner.py, brand.py, plan.py, post.py, publish.py, asset.py
 │   │   ├── channels/         # base.py (ChannelPort), whatsapp.py (Kapso; Meta direct on plan B), simulator.py
 │   │   ├── publishing/       # base.py (PublisherPort), zernio.py, mock.py
 │   │   ├── imagegen/         # base.py (ImageGenPort), gemini.py, openai.py, mock.py
 │   │   ├── transcription/    # base.py (TranscriberPort), gemini.py, mock.py (voice notes)
-│   │   ├── media/            # video.py (ffprobe, keyframes, WhatsApp preview), images.py (HEIC, palette, resize to 1080×1350)
+│   │   ├── media/            # video.py (ffprobe, keyframes, WhatsApp preview), images.py (HEIC, palette, prepare_reference, resize to 1080×1350)
 │   │   ├── llm/              # client.py (wrapper + agent_runs logging)
 │   │   ├── storage.py
 │   │   ├── copy/messages_es.py

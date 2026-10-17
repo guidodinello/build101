@@ -188,8 +188,8 @@ Free-text approvals ("subilo", "publicalo") reach the same handlers through the 
 | `plan_approve:{plan_id}` | plan `pending_approval` (Should) | plan → `approved`, create posts, enqueue `generate_post` sequentially, send `plan_approved` |
 | `plan_change:{plan_id}` | plan `pending_approval` (Could, F3.3) | `awaiting = plan_feedback` |
 | `variation_pick:{post_id}:{n}` | post `pending_approval`, no variation picked yet | Draft: only if the Owner picks with buttons (max 3, so up to 3 variations; [open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)). Same handler as the `pick_variation` tool: copy variation `n` to the Post, send `post_preview` |
-| `post_approve:{post_id}` | post `pending_approval` with a picked variation (image Posts) | post → `approved`, `approved_at = now()`, send `publish_when` / `publish_when_adhoc` |
-| `post_change:{post_id}` | post `pending_approval` (revision is Should; until then reply that changes come later and offer `[Descartar]`) | `awaiting = post_feedback`, send `post_change_prompt` |
+| `post_approve:{post_id}` | post `pending_approval` with a picked variation (image Posts), or with its slides sent (carousels) | post → `approved`, `approved_at = now()`, send `publish_when` / `publish_when_adhoc` |
+| `post_change:{post_id}` | post `pending_approval` (revision is Should; until then reply that changes come later and offer `[Descartar]`) | `awaiting = post_feedback`, send `post_change_prompt`. Carousel (Must, [ADR 0022](../decisions/0022-carousels-in-mvp.md)): send `carousel_redo_ask`; the answer goes to the orchestrator, which calls `redo_slides` |
 | `post_discard:{post_id}` | post `pending_approval` | post → `discarded`, send `post_discarded` |
 | `post_replace:{post_id}` | post `discarded` | new post with the same brief (origin same) → `generate_post` |
 | `post_publish:{post_id}` | post `approved` | enqueue `publish_post(now)` |
@@ -250,8 +250,9 @@ class PublisherPort(Protocol):
                       when: datetime | None) -> PublishResult: ...
 
 class PublishMedia(BaseModel):
-    format: Literal["image", "reel"]
-    url: str                           # public or long-lived signed URL: the picked variation (image) or the Owner's video (reel)
+    format: Literal["image", "reel", "carousel"]
+    url: str | None                    # image/reel: public or long-lived signed URL of the picked variation or the Owner's video
+    urls: list[str] = []               # carousel, in slide order, ≤ 10 JPEGs (ADR 0022)
     cover_offset_ms: int | None = None # reel only
 
 # app/imagegen/base.py  (ADR 0018, 0019; IMAGE_GEN = gemini | openai | mock)
@@ -261,12 +262,64 @@ class GeneratedImage(BaseModel):
     provider: str                      # gemini | openai | mock
     model: str | None
     usage: dict                        # provider usage, logged to agent_runs (agent = "image_gen")
+    finish_reason: str | None = None
 
 class ImageGenPort(Protocol):
-    async def generate(self, prompt: str, reference_images: list[bytes]) -> GeneratedImage: ...   # one image per call
+    async def generate(self, prompt: str, reference_images: list[bytes],
+                       style_image: bytes | None = None) -> GeneratedImage: ...   # one image per call; style_image = carousel anchor
+# errors: ImageGenError (base), ImageGenBlocked(reason), ImageGenNoImage, ImageGenUnavailable
 
 # app/media/images.py
 def to_post_image(data: bytes) -> bytes: ...       # center-crop to 4:5 and resize to 1080x1350 JPEG
+def prepare_reference(data: bytes) -> bytes: ...   # reference photo for the image service: HEIC ok, ≤ 1536 px long side, JPEG
+
+# app/carousel/schemas.py  (ADR 0022; field docs in agents.md)
+SlideRole = Literal["cover", "content", "cta"]
+class SlideCopy(BaseModel):
+    role: SlideRole
+    headline: str            # ≤ 6 words
+    body: str | None = None  # ≤ 20 words
+class CarouselCopy(BaseModel):          # Copywriter, carousel mode
+    caption: str
+    hashtags: list[str]
+    slides: list[SlideCopy]  # 3–5 by default, the Owner's number up to 10; slides[0].role == "cover"
+class SlideScene(BaseModel):
+    index: int               # 1-based
+    scene_prompt: str        # English: what this slide shows (scene, composition); no text
+class CarouselBrief(BaseModel):         # Art Director, carousel mode
+    reference_asset_ids: list[str]   # 1–10
+    style_prompt: str                # English: shared visual system (palette hex, typography, layout grid, text safe area)
+    slides: list[SlideScene]         # one per CarouselCopy slide, same order
+    style_notes: str                 # short Spanish summary for the Owner
+class TextCheck(BaseModel):             # Text Checker
+    matches: bool
+    found: str
+    issues: list[str]
+
+# app/carousel/prompts.py
+def build_slide_prompt(brief: CarouselBrief, copy: CarouselCopy, index: int, *, anchored: bool) -> str: ...
+    # style + scene + "render exactly this text and no other text" + fixed rules (keep the product unchanged,
+    # no logos, no prices/numbers unless in the given text, text inside the central 90%)
+
+# app/carousel/generator.py
+class GeneratedSlide:
+    index: int
+    image: bytes                       # 1080x1350 JPEG
+    prompt: str
+    provider: str
+    model: str | None
+    usage: dict
+    text_check: TextCheck | None
+
+class CarouselGenerator:
+    def __init__(self, image_gen: ImageGenPort, text_checker=None): ...   # text_checker: app/agents/text_checker.py
+    async def generate(self, copy: CarouselCopy, brief: CarouselBrief,
+                       references: list[bytes]) -> list[GeneratedSlide]: ...
+        # cover first, the others in parallel anchored on it; each resized with to_post_image,
+        # text-checked, regenerated once on mismatch (kept and flagged if it still fails)
+    async def redo(self, copy: CarouselCopy, brief: CarouselBrief, references: list[bytes],
+                   slides: list[GeneratedSlide], indexes: list[int]) -> list[GeneratedSlide]: ...
+        # anchored on the current cover; a redo of the cover anchors on slide 2
 
 # app/media/video.py (ffmpeg / ffprobe; Could)
 async def probe(path: Path) -> VideoInfo: ...                                     # duration_ms, width, height, codecs

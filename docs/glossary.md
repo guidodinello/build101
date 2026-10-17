@@ -76,13 +76,23 @@ _Avoid_: Calendar, schedule
 _Status_: draft
 
 **Post**:
-One piece of content for a social network that goes through creation, Approval and publishing: either an image (the Variation the Owner picked) with its caption, or a Reel.
+One piece of content for a social network that goes through creation, Approval and publishing: an image (the Variation the Owner picked) with its caption, a Carousel, or a Reel.
 _Avoid_: Publication, piece
 _Status_: draft
 
 **Variation**:
 One of the candidate images an AI image service generates for an image Post from the Owner's photos; the Owner picks one, and Approval covers only that one.
 _Avoid_: Version, render (in owner-facing Spanish, "opción" is fine)
+_Status_: draft
+
+**Carousel**:
+A Post made of several Slides, in order, that read as one piece; the Owner gets one per request and approves it as a whole.
+_Avoid_: Album, gallery, slideshow (in owner-facing Spanish, "carrusel" is fine)
+_Status_: draft
+
+**Slide**:
+One image of a Carousel, showing the Owner's real product with a short text written by the Agency; the Owner can ask to redo a single Slide.
+_Avoid_: Page, card, Variation
 _Status_: draft
 
 **Reel**:

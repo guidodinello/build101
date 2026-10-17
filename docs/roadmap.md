@@ -2,7 +2,7 @@
 
 ## Phase 0: Hackathon demo (now)
 
-One live loop, scoped by [ADR 0016](decisions/0016-demo-scope-one-post.md): a short onboarding (WhatsApp + the web form), then the owner sends a photo and asks for a post on WhatsApp, approves the branded preview by tapping or writing "subilo", and it is published on Instagram. The owner can also talk in voice notes, which the bot reads as their transcript ([ADR 0021](decisions/0021-voice-notes-kapso-transcript-gemini-fallback.md)). Script: [product/demo-script.md](product/demo-script.md); scope and priorities: [product/mvp.md](product/mvp.md). The earlier plan is kept in [demo-plan.md](demo-plan.md) (superseded).
+One live loop, scoped by [ADR 0016](decisions/0016-demo-scope-one-post.md): a short onboarding (WhatsApp + the web form), then the owner sends a photo and asks for a post (or a carousel, [ADR 0022](decisions/0022-carousels-in-mvp.md)) on WhatsApp, approves the branded preview by tapping or writing "subilo", and it is published on Instagram. The owner can also talk in voice notes, which the bot reads as their transcript ([ADR 0021](decisions/0021-voice-notes-kapso-transcript-gemini-fallback.md)). Script: [product/demo-script.md](product/demo-script.md); scope and priorities: [product/mvp.md](product/mvp.md). The earlier plan is kept in [demo-plan.md](demo-plan.md) (superseded).
 
 ## Phase 1: Pilot with one owner (2–4 weeks)
 
@@ -15,7 +15,7 @@ One live loop, scoped by [ADR 0016](decisions/0016-demo-scope-one-post.md): a sh
   - Import the photos and videos of the owner's Instagram feed after connecting, so the Agency starts with real material (Wizard 6b; F2.8, read access to verify)
   - Build colors, and optionally a simple logo, in the chat when the owner has none (WA-Sin-marca; F2.9)
   - Instagram stories from a request ("el sábado abrimos el taller de 10 a 14, hacé una historia"): a vertical 1080×1920 generated image ([ADR 0018](decisions/0018-ai-image-generation-service.md)); publishing support through Zernio to verify (Chat 6; F4.7, Won't in the MVP)
-- Designer agent: before/after layouts and carousels from real photos, through the same image service ([ADR 0018](decisions/0018-ai-image-generation-service.md)), never altering the product
+- Designer agent: before/after layouts from real photos, through the same image service ([ADR 0018](decisions/0018-ai-image-generation-service.md)), never altering the product. Carousels with text slides are already in the MVP ([ADR 0022](decisions/0022-carousels-in-mvp.md))
 - Reels v2: before/after video built from the photos (with royalty-free audio; Instagram's music library isn't available through the API)
 - Basic metrics: weekly WhatsApp summary from Instagram Insights
 - **Success metric**: hours per week the owner spends on social media, before vs. after; plus DMs answered and sales closed by the bot
