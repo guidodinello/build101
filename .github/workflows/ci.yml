@@ -3,9 +3,8 @@
 # `changes` job, least-privilege token, and one aggregate `CI` gate that a
 # branch ruleset can require instead of every job name.
 #
-# Today the repo is docs-first, so the jobs check docs and workflows. Add the
-# backend (ruff + pytest, working-directory: backend) and frontend jobs in the
-# PR that scaffolds each project, and list them in the `CI` gate's `needs:`.
+# Jobs check docs, workflows and the backend (ruff + pytest). Add the frontend
+# job in its own PR and list it in the `CI` gate's `needs:`.
 name: CI
 
 on:
@@ -34,6 +33,7 @@ jobs:
     outputs:
       markdown: ${{ steps.filter.outputs.markdown }}
       workflows: ${{ steps.filter.outputs.workflows }}
+      backend: ${{ steps.filter.outputs.backend }}
     steps:
       - uses: actions/checkout@v7
 
@@ -49,6 +49,9 @@ jobs:
               - '.github/workflows/ci.yml'
             workflows:
               - '.github/workflows/**'
+            backend:
+              - 'backend/**'
+              - '.github/workflows/ci.yml'
 
   lint-markdown:
     name: Lint Markdown
@@ -95,6 +98,30 @@ jobs:
         with:
           args: -color
 
+  backend:
+    name: Backend
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: ruff
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: pytest
+        run: uv run pytest tests/ -v
+
   # Single stable check name for the branch ruleset. if: always() so it still
   # runs (and fails) when a needed job fails; a skipped required check would
   # count as passing. Skipped jobs (path filter said no) pass.
@@ -105,6 +132,7 @@ jobs:
       - lint-markdown
       - docs-index
       - lint-workflows
+      - backend
     if: always()
     runs-on: ubuntu-latest
     steps:
