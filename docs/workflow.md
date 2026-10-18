@@ -25,6 +25,13 @@ claude --model opusplan --permission-mode plan
 - Plan mode means Claude investigates and proposes, but writes nothing until you approve.
 - A good first prompt names the task and asks for open questions, e.g. "Implement T20 from docs/implementation/tasks.md. Read the docs it links, then write a plan with an explicit Open questions section."
 
+## Working in a worktree
+
+To run several tasks at once, give each its own git worktree. [`scripts/orca-setup-worktree.sh`](../scripts/orca-setup-worktree.sh) bootstraps a new worktree: it copies the gitignored `.env` files from the main checkout (never overwriting existing ones) and runs `uv sync` and `npm ci`.
+
+- **With Orca**: set the repo's **Settings → Git & Source Control → Worktree Hooks → Setup Script** to `bash /path/to/build101/scripts/orca-setup-worktree.sh` (the main checkout's copy, so it also works on older branches), and set agents to wait for setup so they don't start before dependencies are installed.
+- **Without Orca**: after `git worktree add`, run `bash scripts/orca-setup-worktree.sh` from inside the new worktree.
+
 ## Reviewing the plan (step 3)
 
 The plan review is where most mistakes are caught; approving a plan you did not read is how drift starts.
