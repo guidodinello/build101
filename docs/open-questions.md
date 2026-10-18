@@ -2,7 +2,7 @@
 
 ## To decide before the hackathon
 
-- [ ] **Product name and assistant name.** Needed for the welcome message, the wizard header and the pitch (`ASSISTANT_NAME`).
+- [x] **Product name and assistant name:** the product is **Neitor AI** and the assistant introduces itself as Neitor (`ASSISTANT_NAME=Neitor`), decided 2026-10-18.
 - [ ] **Hackathon rules:** is pre-written code allowed? If not, only accounts, materials and these docs are prepared in advance (see [implementation/plan.md](implementation/plan.md#before-the-hackathon-checklist)).
 - [x] **Backend host:** Railway, Trial first and Hobby if needed ([ADR 0017](decisions/0017-backend-host-railway.md)). Tenki is only the PR reviewer. Deployed 2026-10-18 in `us-east4-eqdc4a` (Railway has no South America region, so each Supabase round trip crosses continents) on the full Trial.
 - [x] **Kapso repoint to Railway:** done 2026-10-18. The tunnel webhooks on the Sandbox number are paused and a new "Message received" webhook points at the Railway domain; a message went through end to end ([integrations.md](architecture/integrations.md#kapso-setup-hour-1)). Each Kapso webhook has its own secret, so `KAPSO_WEBHOOK_SECRET` had to be updated on Railway.

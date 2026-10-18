@@ -25,7 +25,7 @@
 | `SUPABASE_SERVICE_ROLE_KEY` | `eyJ...` | Backend only |
 | `INBOUND_HANDLER` | `chat` \| `echo` | Default `chat`: answers with Gemini ([ADR 0023](../decisions/0023-gemini-text-llm.md)); `echo` repeats what arrived (channel tests, no LLM) |
 | `GEMINI_CHAT_MODEL` | `gemini-3.8-flash` | Text model; uses `GEMINI_API_KEY` |
-| `ASSISTANT_NAME` | `Mora` | Placeholder until the product name is chosen; shown in the welcome |
+| `ASSISTANT_NAME` | `Neitor` | The assistant introduces itself by this name in the welcome (product: Neitor AI) |
 | `MAX_POSTS_PER_DAY` | `5` | Designs (posts with AI-generated images: image Posts and carousels) a Business can start per day; posts of the Owner's photos as they are don't count. `create_post` answers `daily_limit` past it ([agents.md](../architecture/agents.md#when-image-generation-runs)) |
 | `WHATSAPP_CHANNEL` | `kapso` \| `simulator` | Default `kapso`. `simulator` arrives with T21 |
 | `KAPSO_API_KEY` | `...` | WhatsApp through Kapso ([ADR 0020](../decisions/0020-whatsapp-via-kapso.md)). Sent as the `X-API-Key` header ([API introduction](https://docs.kapso.ai/api/introduction.md)) |

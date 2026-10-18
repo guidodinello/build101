@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # Replies to the Owner (ADR 0023). INBOUND_HANDLER = chat (Gemini) | echo (no LLM)
     inbound_handler: Literal["chat", "echo"] = "chat"
     gemini_chat_model: str = "gemini-3.8-flash"
-    assistant_name: str = "Mora"  # placeholder until the product name is chosen
+    assistant_name: str = "Neitor"
     # Post images are served from here until Supabase Storage (T17); in local dev, the tunnel URL
     public_backend_url: str | None = None
     max_posts_per_day: int = 5
