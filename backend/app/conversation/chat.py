@@ -296,14 +296,14 @@ class ChatHandler:
             )
             turn.extend(reply.steps)
             if not reply.function_calls:
-                break
+                return reply.text, turn
             turn.extend(
                 function_result_step(
                     call, self._run_tool(call, sender, channel, approval, owner_request)
                 )
                 for call in reply.function_calls
             )
-        return reply.text, turn
+        return "", turn
 
     async def _keep_owner_posted(
         self, sender: str, message_id: str, looking_at_photos: bool, channel: ChannelPort

@@ -1,5 +1,6 @@
 import asyncio
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -600,3 +601,13 @@ async def test_a_failing_follow_up_sends_nothing_and_keeps_the_post(
     assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
     texts = [step_text(step) for step in chat._history.get(SENDER)]
     assert any(text.startswith(f"[post {POST_ID} sent") for text in texts)
+
+
+async def test_text_next_to_tool_calls_on_the_last_step_is_not_a_reply() -> None:
+    with_text = replace(call_reply("unknown_tool"), text="Un momento")
+    model, channel = ScriptedModel(replies=[with_text]), FakeChannel()
+
+    await handler(model).handle(message("text"), channel)
+
+    assert len(model.calls) == MAX_STEPS
+    assert channel.sent == [(SENDER, messages_es.REPLY_FAILED)]
