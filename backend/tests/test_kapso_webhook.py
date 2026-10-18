@@ -94,3 +94,15 @@ def test_verify_signature() -> None:
     assert not verify_signature(raw + b" ", sign(raw, SECRET), SECRET)
     assert not verify_signature(raw, None, SECRET)
     assert not verify_signature(raw, sign(raw, ""), "")
+
+
+def test_an_album_header_is_its_own_kind() -> None:
+    payload = body("text")
+    payload["message"] = {
+        "id": "wamid.ALBUM",
+        "from": "59899000001",
+        "type": "unsupported",
+        "unsupported": {"type": "album", "raw_type": "album"},
+    }
+
+    assert parse_message(payload).kind == "album"

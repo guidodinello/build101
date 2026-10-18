@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 
 from app.config import Settings, get_settings
 from app.conversation.factory import build_inbound_handler
+from app.media.public import get_public_images
 
 from .base import ChannelPort, InboundMessage
 from .factory import build_channel
@@ -30,7 +31,7 @@ def get_dedupe_store() -> DedupeStore:
 
 @cache
 def get_inbound_handler() -> InboundHandler:
-    return build_inbound_handler(get_settings())
+    return build_inbound_handler(get_settings(), get_public_images())
 
 
 @asynccontextmanager

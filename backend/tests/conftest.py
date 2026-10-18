@@ -8,8 +8,17 @@ import pytest
 from PIL import Image
 
 from app.carousel.schemas import CarouselBrief, CarouselCopy
+from app.config import Settings, get_settings
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(autouse=True)
+def ignore_local_env_file(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unit tests see only the settings they pass; live tests read backend/.env for the keys."""
+    if request.node.get_closest_marker("live") is None:
+        monkeypatch.setitem(Settings.model_config, "env_file", None)
+    get_settings.cache_clear()
 
 
 def make_image(size: tuple[int, int], color: str = "sienna", format: str = "JPEG") -> bytes:

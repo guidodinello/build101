@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     inbound_handler: Literal["chat", "echo"] = "chat"
     gemini_chat_model: str = "gemini-3.8-flash"
     assistant_name: str = "Mora"  # placeholder until the product name is chosen
+    # Post images are served from here until Supabase Storage (T17); in local dev, the tunnel URL
+    public_backend_url: str | None = None
+    max_posts_per_day: int = 5
+    max_photo_mb: int = 10
 
     whatsapp_channel: Literal["kapso", "simulator"] = "kapso"
     kapso_api_key: str | None = None
