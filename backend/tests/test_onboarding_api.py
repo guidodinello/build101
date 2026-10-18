@@ -541,3 +541,104 @@ async def test_complete_starts_the_brand_and_tells_the_owner_once(
         kinds = (await db.scalars(select(Job.kind).order_by(Job.created_at))).all()
     assert business and business.onboarding_state == "generating_brand"
     assert kinds.count("generate_brand") == 1
+
+
+async def test_products_link_their_own_photos(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    mesa_photos = [(await upload(client, storage, token))["id"] for _ in range(2)]
+    general = await upload(client, storage, token)
+
+    saved = await client.put(
+        f"/api/o/{token}/products",
+        json={
+            "products": [
+                {"name": "Mesa", "description": "", "asset_ids": mesa_photos},
+                {"name": "Silla", "description": "", "asset_ids": []},
+            ]
+        },
+    )
+
+    state = saved.json()
+    mesa, silla = state["products"]
+    assert (mesa["asset_count"], silla["asset_count"]) == (2, 0)
+    product_ids = {asset["id"]: asset["product_ids"] for asset in state["assets"]}
+    assert all(product_ids[photo] == [mesa["id"]] for photo in mesa_photos)
+    assert product_ids[general["id"]] == []
+
+
+async def test_saving_products_again_replaces_their_photos(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    first, second = [(await upload(client, storage, token))["id"] for _ in range(2)]
+    saved = await client.put(
+        f"/api/o/{token}/products",
+        json={"products": [{"name": "Mesa", "description": "", "asset_ids": [first]}]},
+    )
+    mesa = saved.json()["products"][0]
+
+    moved = await client.put(
+        f"/api/o/{token}/products",
+        json={"products": [{**mesa, "asset_ids": [second]}]},
+    )
+    unchanged = await client.put(
+        f"/api/o/{token}/products", json={"products": [{**mesa, "asset_ids": None}]}
+    )
+
+    def links(response: httpx.Response) -> dict[str, list[str]]:
+        return {asset["id"]: asset["product_ids"] for asset in response.json()["assets"]}
+
+    assert links(moved) == {first: [], second: [mesa["id"]]}
+    assert links(unchanged) == links(moved)
+
+
+async def test_photos_of_a_removed_product_are_no_longer_linked(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    photo = (await upload(client, storage, token))["id"]
+    await client.put(
+        f"/api/o/{token}/products",
+        json={"products": [{"name": "Mesa", "description": "", "asset_ids": [photo]}]},
+    )
+
+    response = await client.put(
+        f"/api/o/{token}/products", json={"products": [{"name": "Banco", "description": ""}]}
+    )
+
+    assert response.json()["assets"][0]["product_ids"] == []
+
+
+async def test_more_than_five_photos_for_a_product_is_rejected(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    photos = [(await upload(client, storage, token))["id"] for _ in range(6)]
+
+    response = await client.put(
+        f"/api/o/{token}/products",
+        json={"products": [{"name": "Mesa", "description": "", "asset_ids": photos}]},
+    )
+
+    assert response.status_code == 422
+    assert error_code(response) == "too_many_product_photos"
+
+
+async def test_a_product_photo_must_be_a_ready_photo_of_the_business(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    logo = await upload(client, storage, token, kind="logo")
+    archived = await upload(client, storage, token)
+    await client.delete(f"/api/o/{token}/assets/{archived['id']}")
+
+    for asset_id in [logo["id"], archived["id"], str(uuid.uuid4())]:
+        response = await client.put(
+            f"/api/o/{token}/products",
+            json={"products": [{"name": "Mesa", "description": "", "asset_ids": [asset_id]}]},
+        )
+
+        assert response.status_code == 422
+        assert error_code(response) == "unknown_asset"

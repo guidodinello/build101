@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Response
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.base import ChannelError, ChannelPort
@@ -51,6 +51,8 @@ LINK_EXPIRED = 'Este link venció. Escribí "link" en WhatsApp y te mandamos uno
 ALREADY_COMPLETED = "Ya completaste el formulario 🙌 Seguimos por WhatsApp."
 TOO_MANY_PRODUCTS = f"Hasta {schemas.MAX_PRODUCTS} productos."
 UNKNOWN_PRODUCT = "No encontramos uno de los productos. Recargá la página y probá de nuevo."
+TOO_MANY_PRODUCT_PHOTOS = f"Hasta {schemas.MAX_PRODUCT_PHOTOS} fotos por producto."
+UNKNOWN_ASSET = "No encontramos una de las fotos. Recargá la página y probá de nuevo."
 MISSING_COLORS = 'Sumá al menos un color, o elegí "Todavía no tengo logo ni colores".'
 UNSUPPORTED_FILE = "Este archivo no lo podemos usar. Subí fotos."
 UNREADABLE_FILE = "No pudimos abrir esta foto. Probá con otra."
@@ -143,7 +145,10 @@ async def save_products(
 ) -> schemas.OnboardingState:
     if len(body.products) > schemas.MAX_PRODUCTS:
         raise ApiError(422, "too_many_products", TOO_MANY_PRODUCTS)
+    if any(len(item.asset_ids or []) > schemas.MAX_PRODUCT_PHOTOS for item in body.products):
+        raise ApiError(422, "too_many_product_photos", TOO_MANY_PRODUCT_PHOTOS)
     business_id = onboarding.business.id
+    photos = await _ready_photos(session, business_id)
     existing = {
         str(product.id): product
         for product in await session.scalars(
@@ -151,6 +156,7 @@ async def save_products(
         )
     }
     kept: set[str] = set()
+    linked: list[tuple[Product, list[str]]] = []
     for position, item in enumerate(body.products):
         if item.id is None:
             product = Product(business_id=business_id, name=item.name)
@@ -166,12 +172,44 @@ async def save_products(
         product.category = item.category or None
         product.position = position
         product.archived_at = None
+        if item.asset_ids is not None:
+            if not set(item.asset_ids) <= photos:
+                raise ApiError(422, "unknown_asset", UNKNOWN_ASSET)
+            linked.append((product, item.asset_ids))
     now = datetime.now(UTC)
     for product_id, product in existing.items():
         if product_id not in kept and product.archived_at is None:
             product.archived_at = now
+    await session.flush()
+    for product, asset_ids in linked:
+        await _link_owner_photos(session, product, asset_ids)
     await session.commit()
     return await _state(onboarding, session, storage, settings)
+
+
+async def _link_owner_photos(session: AsyncSession, product: Product, asset_ids: list[str]) -> None:
+    """Replace the Owner's links of a Product; the Asset Analyst's own links stay."""
+    await session.execute(
+        delete(AssetProduct).where(
+            AssetProduct.product_id == product.id, AssetProduct.source == "owner"
+        )
+    )
+    session.add_all(
+        AssetProduct(asset_id=uuid.UUID(asset_id), product_id=product.id, source="owner")
+        for asset_id in dict.fromkeys(asset_ids)
+    )
+
+
+async def _ready_photos(session: AsyncSession, business_id: uuid.UUID) -> set[str]:
+    ids = await session.scalars(
+        select(BrandAsset.id).where(
+            BrandAsset.business_id == business_id,
+            BrandAsset.kind == "photo",
+            BrandAsset.status == "ready",
+            BrandAsset.archived_at.is_(None),
+        )
+    )
+    return {str(asset_id) for asset_id in ids}
 
 
 @router.put("/brand")
@@ -415,10 +453,11 @@ async def _state(
         )
     ).all()
     asset_ids = [asset.id for asset in assets]
+    product_ids = [product.id for product in products]
     pairs = (
         await session.execute(
             select(AssetProduct.asset_id, AssetProduct.product_id).where(
-                AssetProduct.asset_id.in_(asset_ids)
+                AssetProduct.asset_id.in_(asset_ids), AssetProduct.product_id.in_(product_ids)
             )
         )
     ).all()

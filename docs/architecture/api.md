@@ -42,7 +42,7 @@ All under `/api/o/{token}`. The token is the onboarding magic link. Must, except
 |---|---|---|---|
 | GET | `/api/o/{token}` | — | `OnboardingState` (below) |
 | PUT | `/api/o/{token}/business` | `{name, category, one_liner, description?, location, website?, instagram_handle?}` | `OnboardingState` |
-| PUT | `/api/o/{token}/products` | `{products: [{id?, name, description, price?, category?}]}` (1–5) | `OnboardingState`: upserts `products` rows in the given order; rows left out are archived. More than 5 → `422 too_many_products` |
+| PUT | `/api/o/{token}/products` | `{products: [{id?, name, description, price?, category?, asset_ids?}]}` (1–5) | `OnboardingState`: upserts `products` rows in the given order; rows left out are archived. `asset_ids` (≤ 5, ready photos of this Business) replaces the Owner's links of that Product in `asset_products` (`source = 'owner'`; the Asset Analyst's links stay); left out, the links don't change. More than 5 Products → `422 too_many_products`; more than 5 photos → `422 too_many_product_photos`; an id that isn't a ready photo of the Business → `422 unknown_asset` |
 | PUT | `/api/o/{token}/brand` | `{three_words: [str, str, str], colors: [hex...], no_brand_yet?: bool}` | `OnboardingState`. `no_brand_yet = true` ("Todavía no tengo logo ni colores") allows an empty `colors` list; the Brand Strategist uses the neutral default palette, and the colors are chosen later in the chat (F2.9, Could) |
 | POST | `/api/o/{token}/uploads` | `UploadRequest` (below) | `UploadTicket`: see [Uploads](#uploads). The wizard accepts `logo` and `photo` only, at most 15 photos (`422 too_many_photos`) |
 | POST | `/api/o/{token}/assets/{asset_id}/complete` | — | `Asset` (logo includes `palette`) |

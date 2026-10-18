@@ -1,15 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { PlusIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { ProductPhotos } from "@/components/onboarding/product-photos";
 import { WizardStep } from "@/components/onboarding/wizard-step";
 import { useWizard } from "@/components/onboarding/wizard-context";
-import { messageOf, onboardingApi, type Product } from "@/lib/api";
-import { MAX_PRODUCTS } from "@/lib/onboarding";
+import { messageOf, onboardingApi, type OnboardingState, type Product } from "@/lib/api";
+import { MAX_PHOTOS, MAX_PRODUCTS, readyPhotos } from "@/lib/onboarding";
 
 type ProductDraft = {
   key: number;
@@ -17,34 +18,49 @@ type ProductDraft = {
   name: string;
   description: string;
   price: string;
+  assetIds: string[];
 };
 
 let nextKey = 0;
 
-function draftOf(product?: Product): ProductDraft {
+function draftOf(state: OnboardingState, product?: Product): ProductDraft {
   return {
     key: nextKey++,
     id: product?.id,
     name: product?.name ?? "",
     description: product?.description ?? "",
     price: product?.price ?? "",
+    assetIds: product
+      ? readyPhotos(state)
+          .filter((asset) => asset.product_ids.includes(product.id))
+          .map((asset) => asset.id)
+      : [],
   };
 }
 
 const isBlank = (draft: ProductDraft) =>
-  !draft.name.trim() && !draft.description.trim() && !draft.price.trim();
+  !draft.name.trim() && !draft.description.trim() && !draft.price.trim() && draft.assetIds.length === 0;
 
 export function ProductsStep() {
-  const { token, state, setState, goTo } = useWizard();
+  const { token, state, setState, goTo, photoUploads } = useWizard();
   const [drafts, setDrafts] = useState<ProductDraft[]>(() => {
     const saved = state.products
       .filter((product) => !product.archived)
       .sort((a, b) => a.position - b.position)
-      .map(draftOf);
-    return saved.length > 0 ? saved : [draftOf()];
+      .map((product) => draftOf(state, product));
+    return saved.length > 0 ? saved : [draftOf(state)];
   });
   const [submitted, setSubmitted] = useState(false);
   const [pending, setPending] = useState(false);
+  const [uploading, setUploading] = useState<Record<number, number>>({});
+
+  const uploadingCount = Object.values(uploading).reduce((sum, count) => sum + count, 0);
+  const photoRoom =
+    MAX_PHOTOS - readyPhotos(state).length - uploadingCount - photoUploads.inFlight;
+
+  const setUploadingOf = useCallback((key: number, count: number) => {
+    setUploading((current) => (current[key] === count ? current : { ...current, [key]: count }));
+  }, []);
 
   const filled = drafts.filter((draft) => !isBlank(draft));
   const errorsOf = (draft: ProductDraft) => {
@@ -59,11 +75,37 @@ export function ProductsStep() {
     setDrafts((list) => list.map((draft) => (draft.key === key ? { ...draft, ...changes } : draft)));
   }
 
+  function updateAssetIds(key: number, change: (current: string[]) => string[]) {
+    setDrafts((list) =>
+      list.map((draft) => (draft.key === key ? { ...draft, assetIds: change(draft.assetIds) } : draft)),
+    );
+  }
+
+  function removeDraft(draft: ProductDraft) {
+    setDrafts((list) => list.filter((item) => item.key !== draft.key));
+    setUploading((current) => {
+      const next = { ...current };
+      delete next[draft.key];
+      return next;
+    });
+    if (draft.assetIds.length === 0) return;
+    const removed = new Set(draft.assetIds);
+    setState((current) => ({
+      ...current,
+      assets: current.assets.filter((asset) => !removed.has(asset.id)),
+    }));
+    for (const id of removed) onboardingApi.deleteAsset(token, id).catch(() => undefined);
+  }
+
   async function submit() {
     setSubmitted(true);
     const invalid =
       filled.length === 0 || filled.some((draft) => !draft.name.trim() || !draft.description.trim());
     if (invalid) return;
+    if (uploadingCount > 0) {
+      toast("Esperá un toque que terminen de subir las fotos.");
+      return;
+    }
 
     setPending(true);
     try {
@@ -74,6 +116,7 @@ export function ProductsStep() {
           name: draft.name.trim(),
           description: draft.description.trim(),
           price: draft.price.trim() || undefined,
+          asset_ids: draft.assetIds,
         })),
       );
       setState(next);
@@ -116,7 +159,7 @@ export function ProductsStep() {
                   size="icon-lg"
                   className="-mr-2.5 text-muted-foreground"
                   aria-label={`Quitar producto ${number}`}
-                  onClick={() => setDrafts((list) => list.filter((item) => item.key !== draft.key))}
+                  onClick={() => removeDraft(draft)}
                 >
                   <XIcon />
                 </Button>
@@ -158,6 +201,13 @@ export function ProductsStep() {
                 />
               </Field>
             </FieldGroup>
+            <ProductPhotos
+              productLabel={draft.name.trim() || `producto ${number}`}
+              assetIds={draft.assetIds}
+              room={photoRoom}
+              onChange={(change) => updateAssetIds(draft.key, change)}
+              onUploadingChange={(count) => setUploadingOf(draft.key, count)}
+            />
           </section>
         );
       })}
@@ -168,7 +218,7 @@ export function ProductsStep() {
           variant="ghost"
           size="lg"
           className="h-13 border-[1.5px] border-dashed border-input text-primary hover:bg-card hover:text-primary"
-          onClick={() => setDrafts((list) => [...list, draftOf()])}
+          onClick={() => setDrafts((list) => [...list, draftOf(state)])}
         >
           <PlusIcon data-icon="inline-start" />
           Agregar otro

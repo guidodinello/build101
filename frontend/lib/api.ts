@@ -86,6 +86,7 @@ export type ProductInput = {
   description: string;
   price?: string;
   category?: string;
+  asset_ids?: string[];
 };
 
 export type BrandInput = {

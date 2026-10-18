@@ -14,6 +14,7 @@ export type Step = (typeof STEPS)[number] | "done";
 export const MIN_PHOTOS = 3;
 export const MAX_PHOTOS = 15;
 export const MAX_PRODUCTS = 5;
+export const MAX_PRODUCT_PHOTOS = 5;
 
 export function isStep(value: unknown): value is Step {
   return value === "done" || STEPS.includes(value as (typeof STEPS)[number]);

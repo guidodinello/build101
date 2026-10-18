@@ -13,6 +13,7 @@ HexColor = Annotated[str, StringConstraints(pattern=r"^#[0-9a-fA-F]{6}$")]
 Scale = Literal[1, 2, 3, 4, 5]
 
 MAX_PRODUCTS = 5
+MAX_PRODUCT_PHOTOS = 5
 MAX_COLORS = 5
 
 
@@ -53,10 +54,12 @@ class ProductInput(BaseModel):
     description: Text = ""
     price: OptionalText = None
     category: OptionalText = None
+    # The Product's own photos, linked by the Owner; left out, the links don't change.
+    asset_ids: list[str] | None = None
 
 
 class ProductsInput(BaseModel):
-    # The 5-product cap is checked in the route, so it gets its own error code.
+    # The 5-product and 5-photo caps are checked in the route, so they get their own error codes.
     products: list[ProductInput] = Field(min_length=1)
 
 
