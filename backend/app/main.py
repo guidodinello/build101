@@ -8,10 +8,13 @@ from app.api.errors import install_error_handlers
 from app.api.onboarding import router as onboarding_router
 from app.channels.router import router as whatsapp_router
 from app.config import get_settings
+from app.log_redaction import RedactQueryTokens
 from app.media.public import router as media_router
 
 # uvicorn configures only its own loggers; without this, `app.*` INFO lines are dropped.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(name)s — %(message)s")
+# httpx stays at INFO (its lines show Gemini/Kapso status codes) but must not log signed tokens.
+logging.getLogger("httpx").addFilter(RedactQueryTokens())
 
 app = FastAPI(title="build101")
 app.add_middleware(
