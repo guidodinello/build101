@@ -107,7 +107,8 @@ From [ADR 0012](decisions/0012-catalog-content-dashboard-reels.md), moved to Cou
 
 ## Product (post-hackathon)
 
-- [ ] Pricing: posts per month per plan? Free trial length?
+- [x] Pricing tiers: Free (up to 3 posts or carousels a month), Basic US$29 and Pro US$49 a month ([ADR 0031](decisions/0031-pricing-free-basic-pro.md)).
+- [ ] Pricing: posts per month on Basic and Pro? Annual billing or launch discounts?
 - [ ] Should owners be able to switch to "auto mode" (approve the plan once, auto-publish)? See [ADR 0007](decisions/0007-approve-every-post.md).
 - [ ] Which network after Instagram: Facebook (cheap, same provider) or TikTok (needs video)?
 - [x] Voice notes: owners in the region send many. Make transcription a Must for v1? Yes, Must in the MVP ([ADR 0021](decisions/0021-voice-notes-kapso-transcript-gemini-fallback.md)).

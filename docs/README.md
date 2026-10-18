@@ -38,7 +38,7 @@ Every folder here has a `README.md` index; start from this page and follow the l
 |---|---|
 | [competitors.md](competitors.md) | Landscape summary and where the gap is (deep dives go in research/) |
 | [open-questions.md](open-questions.md) | Risks and unknowns to resolve |
-| [roadmap.md](roadmap.md) | Phases from hackathon demo to product, pricing draft |
+| [roadmap.md](roadmap.md) | Phases from hackathon demo to product, launch pricing |
 | [demo-plan.md](demo-plan.md) | Early demo plan (superseded by product/demo-script.md) |
 | [glossary.md](glossary.md) | Shared domain language (draft) |
 | [workflow.md](workflow.md) | How we take a task to merged: Claude Code plan mode, auto mode, PR, Tenki review, merge |

@@ -3,12 +3,11 @@ import { Bubble, DayChip, Label } from "@/components/landing/chat";
 import { CtaLink } from "@/components/landing/cta-link";
 import { cn } from "@/lib/utils";
 
-function Plan({ name, badge, price, dark, faded, children, action }: {
+function Plan({ name, badge, price, dark, children, action }: {
   name: string;
   badge?: string;
   price: ReactNode;
   dark?: boolean;
-  faded?: boolean;
   children: ReactNode;
   action?: ReactNode;
 }) {
@@ -17,8 +16,7 @@ function Plan({ name, badge, price, dark, faded, children, action }: {
       className={cn(
         "flex flex-col gap-4 rounded-[30px] p-7",
         dark && "bg-ld-forest text-ld-on-dark shadow-panel",
-        faded && "bg-white/55 shadow-[inset_0_0_0_1.5px_#d3ded6]",
-        !dark && !faded && "bg-white shadow-[0_0_0_1px_rgb(14_42_32/0.06),0_18px_40px_-26px_rgb(14_42_32/0.35)]",
+        !dark && "bg-white shadow-[0_0_0_1px_rgb(14_42_32/0.06),0_18px_40px_-26px_rgb(14_42_32/0.35)]",
       )}
     >
       <div className="flex items-center justify-between">
@@ -30,7 +28,7 @@ function Plan({ name, badge, price, dark, faded, children, action }: {
         ) : null}
       </div>
       <p>{price}</p>
-      <ul className={cn("flex grow list-disc flex-col gap-2 pl-5 text-base", dark ? "text-[#d6e4dc]" : faded ? "text-[#2d4a3e]" : "")}>
+      <ul className={cn("flex grow list-disc flex-col gap-2 pl-5 text-base", dark && "text-[#d6e4dc]")}>
         {children}
       </ul>
       {action}
@@ -53,17 +51,27 @@ export function PricingSection() {
   return (
     <section aria-labelledby="pricing-title">
       <DayChip id="pricing" headingId="pricing-title">
-        Launch pricing · draft
+        Launch pricing
       </DayChip>
       <Bubble from="neitor" time="6:40 PM" rowClassName="motion-safe:reveal-on-scroll">
-        Simple plans, billed monthly. Prices may change before launch.
+        Try me free. When you want more, pick a plan, billed monthly.
       </Bubble>
       <ul className="mt-3 grid gap-3.5 motion-safe:reveal-on-scroll md:grid-cols-3">
         <Plan
+          name="Free"
+          price={<Amount value="US$0" muted="text-ld-muted" />}
+          action={<CtaLink variant="soft">Try it free</CtaLink>}
+        >
+          <li>Up to 3 posts or carousels a month</li>
+          <li>Made from your photos</li>
+          <li>Published to your Instagram</li>
+          <li>No card needed</li>
+        </Plan>
+        <Plan
           name="Basic"
-          badge="Start here"
+          badge="Recommended"
           dark
-          price={<Amount value="US$8" muted="text-ld-sage" />}
+          price={<Amount value="US$29" muted="text-ld-sage" />}
           action={<CtaLink>Get started</CtaLink>}
         >
           <li>Posts and carousels from your photos</li>
@@ -73,22 +81,13 @@ export function PricingSection() {
         </Plan>
         <Plan
           name="Pro"
-          price={<Amount value="US$20" muted="text-ld-muted" />}
+          price={<Amount value="US$49" muted="text-ld-muted" />}
           action={<CtaLink variant="soft">Join the Pro list</CtaLink>}
         >
           <li>Everything in Basic</li>
           <li>Replies to comments and DMs <Label>soon</Label></li>
           <li>Sale alerts on WhatsApp <Label>soon</Label></li>
           <li>A weekly results summary <Label>soon</Label></li>
-        </Plan>
-        <Plan
-          name="Plus"
-          faded
-          price={<span className="font-heading text-[42px] leading-none font-extrabold tracking-[-0.045em]">Coming later</span>}
-        >
-          <li>Reels from your videos</li>
-          <li>More posts every week</li>
-          <li>More than one account</li>
         </Plan>
       </ul>
     </section>

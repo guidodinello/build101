@@ -32,7 +32,7 @@ Every competitor makes the owner operate software (Sintra, Predis, Canva, Meta B
 - MVP: image posts and carousels from the owner's real photos (AI-generated branded images, product never altered), captions in the brand voice, publish now or schedule on Instagram, voice notes understood, weekly content plan on request.
 - Roadmap, not shipped: replies to comments and DMs, sales flow, weekly Insights summary, Reels from the owner's videos, Facebook/TikTok.
 - Not in scope: paid ads, email marketing, SEO, websites.
-- Pricing is a draft (roadmap): Basic ~US$8/month (content from photos, scheduled publishing, weekly plan), Pro ~US$20/month (+ comment and DM replies, sales notifications, metrics), Plus TBD. Must be labeled as launch/draft pricing.
+- Launch pricing ([ADR 0031](docs/decisions/0031-pricing-free-basic-pro.md)): Free (up to 3 posts or carousels a month, no card), Basic US$29/month (content from photos, scheduled publishing, weekly plan), Pro US$49/month (+ comment and DM replies, sales notifications, metrics; waitlist until those ship). Billed monthly.
 - Primary CTA: start the conversation on WhatsApp (`https://wa.me/56920403095`, the shared Kapso sandbox number, which only answers phones with an active sandbox session).
 
 ## Brand Commitments

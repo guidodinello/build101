@@ -7,7 +7,7 @@ const ROWS = [
   { label: "Where it happens", values: ["Calls, email, meetings", "At a computer", "In a web dashboard"], neitor: "In your WhatsApp" },
   { label: "Learning curve", values: ["None", "High", "Medium"], neitor: "None" },
   { label: "Language", values: ["Yours", "Mostly English-first", "English-first"], neitor: "Your Spanish" },
-  { label: "Cost", values: ["A monthly retainer", "Low, plus your hours", "Monthly subscription"], neitor: "From US$8 a month" },
+  { label: "Cost", values: ["A monthly retainer", "Low, plus your hours", "Monthly subscription"], neitor: "Free to try, then US$29 a month" },
 ];
 
 export function ComparisonSection() {

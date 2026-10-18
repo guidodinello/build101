@@ -35,12 +35,16 @@ One live loop, scoped by [ADR 0016](decisions/0016-demo-scope-one-post.md): a sh
 - Paid ads suggestions based on what performs
 - Back-office operations (the original "chief of staff" idea)
 
-## Pricing (draft)
+## Pricing
 
-| Tier | ~USD/month | Includes |
+Launch pricing, billed monthly ([ADR 0031](decisions/0031-pricing-free-basic-pro.md)):
+
+| Tier | USD/month | Includes |
 |---|---|---|
-| Basic | 8 | Content from photos + scheduled publishing + weekly plan |
-| Pro | 20 | + replies to comments and DMs, sales + owner notifications, metrics |
-| Plus | TBD | + reels, more posts, multiple accounts |
+| Free | 0 | Up to 3 posts or carousels a month, approved on WhatsApp and published to Instagram; no card |
+| Basic | 29 | Content from photos + scheduled publishing + weekly plan |
+| Pro | 49 | + replies to comments and DMs, sales + owner notifications, metrics |
 
-To validate: WhatsApp and LLM costs per active business must fit well under the Basic price.
+Later tiers (reels, more posts, multiple accounts) are not priced yet.
+
+To validate: WhatsApp and LLM costs per active business must fit well under the Basic price, and the Free tier's cost per owner must stay small enough to give away.
