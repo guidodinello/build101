@@ -1,6 +1,6 @@
 """Fixed owner-facing text, from docs/product/conversation-design.md (copy deck).
 
-The orchestrator writes what the Owner reads (ADR 0025): code emits an event
+The orchestrator writes what the Owner reads (ADR 0026): code emits an event
 (`app/conversation/events.py`) and the model answers it with the conversation in view. So this
 module holds only:
 

@@ -1,4 +1,4 @@
-"""Typed events the code raises for the Owner (ADR 0025).
+"""Typed events the code raises for the Owner (ADR 0026).
 
 Code never writes the Owner's message: it emits one of these, the orchestrator reads its `note()`
 in the conversation history and answers. Primitives only, so `posts/` can import this module.

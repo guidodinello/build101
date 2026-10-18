@@ -48,6 +48,11 @@ Everything the Agency knows about one Business's brand (voice, audience, content
 _Avoid_: Brand profile, brand kit, context
 _Status_: draft
 
+**Niche Report**:
+A weekly summary of what is working on social media in the Business's niche (themes, formats, hooks), with sources; it shapes the angle and look of Posts, never their facts. See [ADR 0025](decisions/0025-weekly-niche-report.md).
+_Avoid_: Trend report, market research, insights
+_Status_: draft
+
 **Brand asset**:
 A logo, photo or video the Owner provided, sent through the Channel or the web, that the Agency learns from and can use in Posts.
 _Avoid_: Media, upload, content

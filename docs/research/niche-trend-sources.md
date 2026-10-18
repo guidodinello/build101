@@ -1,0 +1,44 @@
+# Niche trend sources: where a weekly niche analysis can get its data
+
+Idea under research: a weekly job that analyses what works in the Owner's niche (viral posts, formats, angles) and hands the result to the post generation that already exists (Content Strategist, Copywriter, Art Director in [agents.md](../architecture/agents.md)). It would also answer the open question **Source of "current trends"** for the Art Director's trend notes ([open-questions.md](../open-questions.md#post-images-generated-by-ai-adr-0018)). General Instagram trends and benchmarks are in [instagram-content-trends.md](instagram-content-trends.md); this doc compares the data sources. All sources read 2026-10-18 unless noted.
+
+**Outcome**: [ADR 0025](../decisions/0025-weekly-niche-report.md) brings a weekly Niche Report into the MVP as Should, from **Gemini with URL context and Google Search** over the niche's reference websites, so the backend keeps one LLM provider. Instagram sources are not needed. First niche studied: [furniture-decor-uruguay.md](furniture-decor-uruguay.md).
+
+## Sources compared
+
+| Source | What it gives | Access and cost | Fit |
+|---|---|---|---|
+| **Claude with web search and web fetch** | Claude searches the web and reads the pages it is given (reference store websites), then writes the analysis with source links | Web search US$10 per 1,000 searches plus tokens; web fetch no extra charge beyond tokens, and only for URLs already in the conversation. Tool types `web_search_20260209`, `web_fetch_20260209` on current models. [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing) | Considered; dropped to keep one LLM provider ([ADR 0023](../decisions/0023-gemini-text-llm.md)) |
+| **Gemini with URL context** (chosen, with Google Search) | Gemini reads up to 20 public URLs given in the prompt (the reference store websites), with URL citations in the answer; combinable with Google Search in one interaction | Retrieved content billed as input tokens; no paywalled, private or video URLs. [URL context docs, updated 2026-10-13](https://ai.google.dev/gemini-api/docs/url-context) | Chosen in [ADR 0025](../decisions/0025-weekly-niche-report.md) |
+| **Gemini with Grounding with Google Search** | LLM summary of what the web says about the niche this week (trend roundups, blogs, news), with source links | Gemini 3+: 5,000 free search requests per month shared across models, then US$14 per 1,000; not on the free tier. Gemini 2.5: US$35 per 1,000 grounded prompts after the free daily allowance. One request can run several billed queries. [Gemini pricing, updated 2026-10-16](https://ai.google.dev/gemini-api/docs/pricing) | Best first step: no new vendor (we already use Gemini, [ADR 0023](../decisions/0023-gemini-text-llm.md)), cheap at one run per Business per week. No real engagement numbers; the web is English- and US-centric |
+| **Instagram Business Discovery** | Public data of other **Business or Creator** accounts by username: `followers_count`, `media_count`, and per post `comments_count`, `like_count`, `view_count` (paid + organic) | Needs our own Meta app with **Instagram API with Facebook Login**, our own professional account, permissions `instagram_basic`, `instagram_manage_insights`, `pages_read_engagement`. Free. [Business Discovery guide](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login/business-discovery), [reference](https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/business_discovery) | Real numbers for a list of reference accounts the Owner names. See limits below |
+| **Instagram Hashtag Search** | `top_media` / `recent_media` for a hashtag | App Review for *Instagram Public Content Access*; at most **30 unique hashtags per account per rolling 7 days**. [Hashtag Search](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login/hashtag-search) | Weak: hashtags lost weight as a discovery signal ([instagram-content-trends.md](instagram-content-trends.md#what-drives-performance-metricool-244m-posts)) and the endpoint omits most counts (below) |
+| **Scrapers (e.g. Apify Instagram Scraper)** | Posts by profile or hashtag, with counts | About US$1.50–2.70 per 1,000 results depending on plan (third-party figures, not checked on Apify). [SocialCrawl](https://www.socialcrawl.dev/blog/best-instagram-data-apis-2026), [ScrapeCreators](https://scrapecreators.com/blog/apify-instagram-posts-scraper-benchmark) | **Rejected**: Instagram's Terms forbid collecting information "de manera automatizada sin nuestro permiso explícito". [Instagram Terms of Use](https://www.facebook.com/help/instagram/581066165581870) |
+| **Meta Ad Library API** | Ads and their creatives | Commercial ads are archived only when they reached the EU or UK; elsewhere only political and social-issue ads (third-party summary, Meta docs not read). [metapi.io](https://metapi.io/compare/facebook-ad-library-api), [PPC Land](https://ppc.land/ads-library/) | Not useful for Uruguayan businesses |
+| **Google Trends API** | Search interest for terms | Alpha since July 2025, access by application only, no pricing or GA date found. [PPC Land](https://ppc.land/google-opens-alpha-testing-for-new-trends-api-targeting-developers-and-journalists/), [ScrapeBadger](https://scrapebadger.com/blog/does-google-trends-have-an-api-what-to-use-in-2026) | Not available to us now |
+| **TikTok Creative Center** | Trending hashtags, songs and videos by country | Free web UI; no official API. [instagram-content-trends.md](instagram-content-trends.md#reading-trends-live) | Only through grounded search or by hand |
+
+## Business Discovery: what we would and would not get
+
+From the [IG Media reference](https://developers.facebook.com/docs/instagram-platform/reference/instagram-media):
+
+- Public fields include `caption`, `media_type`, `media_product_type`, `media_url`, `permalink`, `timestamp`, `comments_count`, `view_count` (Business Discovery only). Enough to rank a reference account's posts by engagement per follower and pass the top ones (image + caption) to Gemini to explain *why* they worked.
+- **Not available**: `saved_count` and `shares_count` are not accessible through Business Discovery or hashtag endpoints. Those are the signals Instagram ranks on most (sends per reach, see [instagram-content-trends.md](instagram-content-trends.md#how-instagram-ranks-content)), so "viral" can only be estimated from likes, comments and views.
+- Gaps: `like_count` is omitted when the owner hides like counts; owners can hide likes, comments and views; `media_url` is omitted for copyrighted media; only professional accounts are returned, and age-gated ones are not.
+- Only on **Facebook Login**: [ADR 0015](../decisions/0015-instagram-login.md) (proposed) picks *Instagram Login* for our own Meta app. Business Discovery and Hashtag Search are documented only under Instagram API with Facebook Login, so using them reopens that choice.
+- Demo vs. real use: a demo can run in dev mode on the team's own account; serving other Businesses means App Review (ADR 0015 estimates weeks).
+
+## A possible shape (to challenge, not decided)
+
+1. **Inputs**: the Brand Brain (niche, products, audience) plus optional reference accounts the Owner names (competitors or accounts they admire).
+2. **Weekly job** (fits the in-process job runner of [ADR 0005](../decisions/0005-single-instance-in-process-jobs.md)): grounded Gemini search for the niche this week; later, Business Discovery on the reference accounts.
+3. **Output**: a short structured report per Business (themes, formats and hooks that worked, with source links), stored and passed as the existing **trend notes** input to the Content Strategist, Copywriter and Art Director.
+4. **Guardrails** already in the docs apply: trend notes change angle, format and styling, never facts ([agents.md](../architecture/agents.md), Art Director rules; "agents never invent facts" in [AGENTS.md](../../AGENTS.md#building-the-mvp)); never copy a reference account's images or captions, since Instagram's originality rule cuts reach for unoriginal content ([instagram-content-trends.md](instagram-content-trends.md#how-instagram-ranks-content)).
+
+## Open questions
+
+- Does a weekly niche analysis enter the MVP (and as Must, Should or Could), or the roadmap? Needs an ADR.
+- Does the Owner see the report (a WhatsApp summary, or answers in the chat like "¿qué está funcionando en mi rubro?"), or is it only an input to post generation?
+- Start with grounded search only, or also Business Discovery (which reopens [ADR 0015](../decisions/0015-instagram-login.md))?
+- Glossary term for the job and its output (e.g. *Niche Report*), per [glossary.md](../glossary.md).
+- How good is grounded search for a Uruguayan niche in Spanish? Needs a hands-on run with a real niche before deciding.

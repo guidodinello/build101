@@ -71,7 +71,7 @@ class ChatHandler:
 
     Orchestrator v0 (T56, T57): only `create_post` and `approve_post` are registered, and no
     onboarding or button routing yet (T23, T18), so buttons and other kinds are answered as
-    events (`notify`, ADR 0025). Photos wait `PHOTO_DEBOUNCE_S` after the last one and are
+    events (`notify`, ADR 0026). Photos wait `PHOTO_DEBOUNCE_S` after the last one and are
     answered together, with any text that arrives meanwhile.
     """
 
@@ -246,7 +246,7 @@ class ChatHandler:
         return text
 
     async def notify(self, sender: str, event: Event, channel: ChannelPort) -> None:
-        """The model's own message about `event` (ADR 0025), under the sender's history lock.
+        """The model's own message about `event` (ADR 0026), under the sender's history lock.
 
         Runs after any Owner turn in progress, never interleaved with it. Failures are logged:
         nobody awaits the producers that call this.

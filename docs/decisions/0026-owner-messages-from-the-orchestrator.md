@@ -1,4 +1,4 @@
-# 0025: Owner messages are written by the orchestrator, from typed events
+# 0026: Owner messages are written by the orchestrator, from typed events
 
 - Date: 2026-10-18
 - Status: proposed

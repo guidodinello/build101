@@ -27,7 +27,7 @@ How the bot talks. This is the source for the orchestrator's system prompt and f
 
 ## Fixed messages (copy deck)
 
-Messages for the Owner. Since [ADR 0025](../decisions/0025-owner-messages-from-the-orchestrator.md) the orchestrator writes most of them: code emits a typed event (`backend/app/conversation/events.py`) and the model answers it with the conversation history in view. Rows tagged **(event)** are rendered that way: their text is an example of tone, not a literal string, and it is sent verbatim only as the fallback when the LLM call for that event fails. Rows tagged **(fallback)** are sent when the LLM is unavailable or slow. Untagged rows are still fixed text. Variables in `{braces}`; fixed text and fallbacks are loaded from `backend/app/copy/messages_es.py`.
+Messages for the Owner. Since [ADR 0026](../decisions/0026-owner-messages-from-the-orchestrator.md) the orchestrator writes most of them: code emits a typed event (`backend/app/conversation/events.py`) and the model answers it with the conversation history in view. Rows tagged **(event)** are rendered that way: their text is an example of tone, not a literal string, and it is sent verbatim only as the fallback when the LLM call for that event fails. Rows tagged **(fallback)** are sent when the LLM is unavailable or slow. Untagged rows are still fixed text. Variables in `{braces}`; fixed text and fallbacks are loaded from `backend/app/copy/messages_es.py`.
 
 | ID | When | Text | Buttons |
 |---|---|---|---|

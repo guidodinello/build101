@@ -11,9 +11,10 @@ The "agency" is one **orchestrator** (the account manager the owner talks to) pl
 | **Orchestrator** | Tool-use loop | Inbound handler | Conversation + context → reply text + tool calls | `low` |
 | **Asset Analyst** | Single call, vision, structured | `analyze_asset` job | Image, or video keyframes + metadata → description, tags, suggested Products, usable-for (+ Reel suitability) | `low` |
 | **Brand Strategist** | Single call, structured | `generate_brand` job | Onboarding data + Catalog + asset descriptions (+ correction) → Brand Brain | `high` |
-| **Content Strategist** | Single call, structured | `generate_plan` job; `suggest_ideas` tool | Brand Brain + Catalog + active Offers + assets + recent posts + date + notes → weekly plan (images and Reels), or 3 ideas | `medium` |
-| **Copywriter** | Single call, structured | `generate_post` job | Brand Brain + brief + the Owner's own words (+ feedback, previous version) → copy; for a carousel: + slide count → caption + the text of each slide | `medium` |
+| **Content Strategist** | Single call, structured | `generate_plan` job; `suggest_ideas` tool | Brand Brain + Catalog + active Offers + assets + recent posts + date + notes + trend notes → weekly plan (images and Reels), or 3 ideas | `medium` |
+| **Copywriter** | Single call, structured | `generate_post` job | Brand Brain + brief + the Owner's own words + trend notes (+ feedback, previous version) → copy; for a carousel: + slide count → caption + the text of each slide | `medium` |
 | **Art Director** | Single call, vision, structured | `generate_post` job | Brand Brain + brief + copy + candidate photos (the ones the Owner sent with the request, if any) + trend notes → image brief (reference photos + image prompt); for a Reel: candidate videos (keyframes) → video + cover frame; for a carousel: → reference photos + shared style + one scene per slide | `medium` |
+| **Niche Analyst** | Single call, URL context + Google Search, structured | `generate_niche_report` job; `niche_report` tool | Business category + location + Brand Brain + reference websites + niche search themes → Niche Report with source links ([ADR 0026](../decisions/0025-weekly-niche-report.md)) | `medium` |
 | **Feedback Classifier** | Single call, structured | `revise_post` job | Feedback text → `copy` / `image` / `both` (Reel: `copy` / `cover` / `video`) + normalized instruction | `low` |
 | **Text Checker** | Single call, vision, structured | `CarouselGenerator` (carousel slides) | Slide image + expected `SlideCopy` → `TextCheck` | `low` |
 
@@ -31,7 +32,7 @@ All text LLM calls go through `app/llm/client.py` ([ADR 0023](../decisions/0023-
 - **Caching**: order the prompt stable → volatile (system instruction → Brand Brain → dynamic context) so implicit context caching can hit. Never put timestamps in the system instruction.
 - **Images**: send as image content (signed Supabase URL, or base64 for small files). Resize to max 1568 px on the long side before upload to save tokens.
 - **Video** (Could): Gemini reads video natively, but agents still get ffprobe metadata plus keyframes from the Frame Extractor until the team decides otherwise ([ADR 0023](../decisions/0023-gemini-text-llm.md)).
-- **Timeouts**: 90 s for specialists, 60 s per orchestrator step. On the free tier, `gemini-3.8-flash` took 5–26 s per chat turn with ~400 thought tokens, and some turns went over 30 s (measured over WhatsApp on 2026-10-17); the typing indicator stays on while it runs.
+- **Timeouts**: 90 s for specialists, 60 s per orchestrator step. On the free tier, `gemini-3.8-flash` took 5–26 s per chat turn with ~400 thought tokens, and some turns went over 30 s (measured over WhatsApp on 2026-10-17); the typing indicator stays on while it runs. The timeout bounds the whole call, SDK retries included. **429 is not retried**: the SDK sleeps for the response's `Retry-After` as-is, and a free-tier daily-quota 429 asked for about 19 h (2026-10-18), so the call fails at once and the Owner gets the fixed error message.
 - **Logging**: each call writes `agent_runs` (business_id, agent, model, thinking level, input JSON, output JSON, input/output/thought/cached tokens, latency_ms, status, error). Until T02 the client logs those fields.
 
 Before changing any of this, check the current Gemini API docs (<https://ai.google.dev/gemini-api/docs>). Model IDs and parameters change.
@@ -242,7 +243,7 @@ A prompt can be composed from several files: a line that is only `{{include <pat
 
 **Purpose:** decide what the image shows and how it looks. It doesn't draw and doesn't compose: it picks the reference photos and writes the prompt; a third-party image service generates the variations ([ADR 0018](../decisions/0018-ai-image-generation-service.md), provider in [ADR 0019](../decisions/0019-image-provider-gemini.md)).
 
-- Input: Brand Brain (visual identity: palette, `photo_style`; voice; `constraints`), the brief and `owner_words`, `PostCopy` (for the angle; none of it goes on the image), candidate photos (IDs + analyses + **the images themselves**, as URLs), trend notes (optional; their source is not decided, see [open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)), optional feedback + previous brief (revise mode), optional `force_asset_id`.
+- Input: Brand Brain (visual identity: palette, `photo_style`; voice; `constraints`), the brief and `owner_words`, `PostCopy` (for the angle; none of it goes on the image), candidate photos (IDs + analyses + **the images themselves**, as URLs), trend notes (optional; from the latest [Niche Report](#niche-analyst), [ADR 0026](../decisions/0025-weekly-niche-report.md)), optional feedback + previous brief (revise mode), optional `force_asset_id`.
 - Candidates: when the Owner sent photos with the request (`posts.candidate_asset_ids`), those photos are the preferred references; whether the Business's photo library also complements them is not decided ([open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)). With no photos in the request, the best matches from the library (by the brief, `best_for` and `quality`).
 - Output (`ImageBrief`):
 
@@ -284,6 +285,30 @@ A prompt can be composed from several files: a line that is only `{{include <pat
   ```
 
   Post-validation (code): the video belongs to the business, is not archived, is `reel_suitable`, and `0 ≤ cover_offset_ms ≤ duration_ms`. On violation, retry once; then fall back to the first suggested video and its analyzed cover.
+
+### Niche Analyst
+
+**Purpose:** tell the Agency what is working in the Business's niche this week (Should, F3.6, [ADR 0026](../decisions/0025-weekly-niche-report.md)). Sources compared in [research/niche-trend-sources.md](../research/niche-trend-sources.md); first niche: [research/furniture-decor-uruguay.md](../research/furniture-decor-uruguay.md).
+
+- Input: `businesses.category`, `location`, the Brand Brain (products, audience, pillars), the niche's reference websites and search themes (a static list per niche in `app/agents/data/`), reference websites the Owner named, today's date.
+- Call: one Gemini interaction through `app/llm/client.py` with the built-in `url_context` (reads the reference websites named in the prompt, up to 20 URLs) and `google_search` tools ([URL context docs](https://ai.google.dev/gemini-api/docs/url-context)). Source links come from the response's URL citations, not from the model's text.
+- Output (`NicheReport`):
+
+  ```python
+  class NicheInsight(BaseModel):
+      kind: Literal["theme", "format", "hook", "visual"]
+      insight: str                 # Spanish, one or two sentences
+      post_idea: str | None        # how this Business could use it
+      source_urls: list[str]       # at least one, from the response's URL citations
+
+  class NicheReport(BaseModel):
+      week_start: date
+      summary: str                 # Spanish, 3–5 lines, for the chat (F3.7)
+      insights: list[NicheInsight] # 3–8
+  ```
+
+- Rules: describe what works, never copy a reference store's photos, product names or copy; no prices, discounts or dates in `post_idea` (commercial dates come from the Content Strategist's static list); drop an insight with no source.
+- Downstream: the latest report's insights are the **trend notes** of the Content Strategist, Copywriter and Art Director (`visual` insights shape the Art Director's image and carousel prompts). Trend notes change angle, format and styling, never facts.
 
 ### Feedback Classifier
 
@@ -332,7 +357,7 @@ run_turn(business, inbound_text):
 ```
 
 - **The context block** ([below](#context-block-dynamic-after-the-cache-breakpoint)) rides on the current user step only and is not stored with it, so the system instruction and the stored history stay identical from turn to turn and Gemini's implicit caching can hit (T56).
-- **Events for the Owner ([ADR 0025](../decisions/0025-owner-messages-from-the-orchestrator.md)).** Code never writes what the Owner reads: it emits a typed event from `app/conversation/events.py` (`PostSent`, `PostFailed`, `Published`, `PublishPending`, `PublishFailed`, `PhotosReceived`, `AudioUnclear`, `UnsupportedMedia`, `PhotoUnreadable`, `PhotoTooBig`, `StaleButton`). Each has a `note()`, a `user_input` step in the existing `[...]` style (`[post <id> sent to the Owner]`, `[photos f1 f2 received, no text]`, ...) that carries what the model needs (ids, counts, max MB, the permalink). `PostMaker` and `PostPublisher` get the entry point through `on_event(...)` (wired in `conversation/factory.py`; `posts/` doesn't import the chat handler) and raise if it was never wired.
+- **Events for the Owner ([ADR 0026](../decisions/0026-owner-messages-from-the-orchestrator.md)).** Code never writes what the Owner reads: it emits a typed event from `app/conversation/events.py` (`PostSent`, `PostFailed`, `Published`, `PublishPending`, `PublishFailed`, `PhotosReceived`, `AudioUnclear`, `UnsupportedMedia`, `PhotoUnreadable`, `PhotoTooBig`, `StaleButton`). Each has a `note()`, a `user_input` step in the existing `[...]` style (`[post <id> sent to the Owner]`, `[photos f1 f2 received, no text]`, ...) that carries what the model needs (ids, counts, max MB, the permalink). `PostMaker` and `PostPublisher` get the entry point through `on_event(...)` (wired in `conversation/factory.py`; `posts/` doesn't import the chat handler) and raise if it was never wired.
   - **One entry point**, `ChatHandler.notify(sender, event, channel)`: it takes the sender's history lock, so it never interleaves with an Owner turn (if the Owner wrote meanwhile, their turn is answered first), then runs one orchestrator turn on the note. Callers that already hold the lock (the handler's own media cases, the photo batch) use the same turn without taking it again. The note and the reply go into the history, so the Owner's answer is read against both.
   - **No Owner words.** The turn's `Approval` is built empty in code (`approve_post` always returns `approval_not_explicit`, ADR 0007) and `create_post` returns `not_owner_request`. `TOOLS` are still passed, and the guards are the enforcement. The one exception is `PhotosReceived`: the Owner may have asked for a post before sending the photos, so `create_post` is allowed, the photo context (`<recent_photos>` and the unseen images) rides on the current step only, the keep-alive runs, and photos are marked seen only when the turn succeeds. Other events carry no photo context and no keep-alive. `PostSent` is skipped (note only) if the post is no longer `pending_approval` when the lock is acquired.
   - **Prompt.** `prompts/events.md` (included from `orchestrator.md` as "System events") lists which bracket prefixes are events (and that `[audio]`, `[foto ...]` are the Owner's words) and how to react to each.
@@ -385,6 +410,7 @@ From the second design pass ([../design/mockups/](../design/mockups/README.md), 
 | `revise_post` | Should | `post_id`, `feedback` | Enqueue `revise_post` | `{job_id}` |
 | `plan_week` | Should | `notes?: str`, `week_start?: date` | Enqueue `generate_plan`, only when the Owner asks for a plan | `{job_id, status: "started"}` |
 | `suggest_ideas` | Should | `request: str` | Content Strategist ideas mode (synchronous); stores the 3 ideas in `conversation_state.ideas` so "la 2" or "la del taller" can be resolved | `{ideas: [{n, title, idea, suggested_asset_ids}]}` |
+| `niche_report` | Should | — | Return the latest Niche Report, or enqueue `generate_niche_report` when there is none from this week ([ADR 0026](../decisions/0025-weekly-niche-report.md)) | `{summary, insights}` or `{job_id, status: "started"}` |
 | `send_dashboard_link` | Should | — | Create a `dashboard` magic link (7 days) and send it as a CTA URL button ("Abrí tu panel") | `{sent: true}` |
 | `revise_plan` | Could | `plan_id`, `feedback` | Enqueue `generate_plan` (revise mode) | `{job_id}` |
 | `update_brand_brain` | Could | `change: str` | Enqueue `generate_brand` revise mode (silent: no summary message unless asked) | `{job_id}` |
@@ -440,6 +466,7 @@ Guards are in the tool implementations, not in the prompt. `create_post` returns
 | `publish_post(post_id, when)` | Must (now), Should (scheduled) | guard → Publisher (now / schedule; image, carousel or Reel by `posts.format`) → save external id + permalink | `published` / `scheduled` / `publish_failed` |
 | `redo_slides(post_id, slides, feedback)` | Must (carousel) | (Copywriter, when the feedback changes the words of those slides) → Art Director (carousel mode, new scenes for those slides) → `CarouselGenerator.redo` (a redone slide anchors on the current cover; a redone cover anchors on slide 2) → upload → bump `posts.revision`, save the new rows and copy the unchanged ones to the new revision | the redone slides, numbered, then `carousel_preview` |
 | `generate_plan(business_id, notes?, plan_id?)` | Should | Content Strategist → save plan + items | `plan_preview` |
+| `generate_niche_report(business_id)` | Should | Niche Analyst (grounded search) → save `niche_reports` row. Runs every Monday for each onboarded Business, and from the `niche_report` tool | weekly run: nothing; on request: the report's `summary` (LLM text, Rioplatense Spanish) |
 | `revise_post(post_id, feedback)` | Should | Feedback Classifier → (Copywriter) → (Art Director → Image generator, image only) → save revision | `post_preview`, or `post_variations` first when the image was regenerated |
 | `import_instagram_media(business_id)` | Could (F2.8) | List the connected account's recent media ([integrations.md](integrations.md#reading-the-owners-existing-instagram-media-could)) → download the images the Owner kept → store as Brand assets (`source = 'instagram'`) → enqueue `analyze_asset` for each | nothing (the wizard shows progress) |
 
