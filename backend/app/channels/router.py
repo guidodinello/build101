@@ -35,7 +35,10 @@ def get_inbound_handler() -> InboundHandler:
 
 
 @asynccontextmanager
-async def lifespan(_: Any) -> AsyncIterator[None]:
+async def lifespan(app: Any) -> AsyncIterator[None]:
+    # Built at boot so a missing GEMINI_API_KEY or PUBLIC_BACKEND_URL stops the app, instead of
+    # turning every webhook into a 500. Tests swap the handler through dependency_overrides.
+    app.dependency_overrides.get(get_inbound_handler, get_inbound_handler)()
     yield
     # Close the HTTP clients only if a request ever built the channel.
     if get_channel.cache_info().currsize:

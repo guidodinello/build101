@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.channels.router import get_inbound_handler
 from app.main import app
 from app.media.public import PublicImages, get_public_images
 
@@ -8,6 +9,7 @@ def test_a_stored_image_is_served_by_its_path_and_others_are_not() -> None:
     images = PublicImages()
     path = images.add(b"jpeg bytes")
     app.dependency_overrides[get_public_images] = lambda: images
+    app.dependency_overrides[get_inbound_handler] = lambda: None
     try:
         with TestClient(app) as client:
             found = client.get(path)

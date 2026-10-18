@@ -142,8 +142,19 @@ def test_no_configured_secret_rejects_everything() -> None:
 
 def test_health_boots_without_any_kapso_config() -> None:
     get_channel.cache_clear()
-    with TestClient(app) as test_client:
-        assert test_client.get("/health").status_code == 200
+    app.dependency_overrides[get_inbound_handler] = RecordingHandler
+    try:
+        with TestClient(app) as test_client:
+            assert test_client.get("/health").status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_the_app_does_not_boot_without_a_gemini_key() -> None:
+    get_inbound_handler.cache_clear()
+
+    with pytest.raises(ValueError, match="GEMINI_API_KEY"), TestClient(app):
+        pass
 
 
 def test_oversized_declared_body_is_rejected_before_the_signature_check(
