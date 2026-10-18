@@ -48,7 +48,7 @@
 | `ZERNIO_PROFILE_ID`, `ZERNIO_ACCOUNT_ID` | `...` | The single demo Instagram account's Zernio profile and account ids. Temporary: they stand in for `social_accounts` until T02 exists ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). With `PUBLISHER=zernio`, publishing from the chat (T57) needs `ZERNIO_ACCOUNT_ID` and an HTTPS `PUBLIC_BACKEND_URL` (a `cloudflared` tunnel or Railway, not free ngrok) that Zernio can fetch the post images from; without the account id the bot says publishing isn't connected |
 | `ZERNIO_TEST_IMAGE_URL` | `https://raw.githubusercontent.com/guidodinello/build101/main/backend/tests/fixtures/zernio-live-test.jpg` | Only for `uv run pytest -m live`: a public HTTPS URL serving the fixture JPEG with no redirect. Before the PR merges, put the branch name in place of `main` (the branch is deleted after the squash merge). The live publish posts to the real demo Instagram: delete the post by hand |
 | `ZERNIO_WEBHOOK_SECRET` | random | |
-| `WHATSAPP_BOT_NUMBER` | `15551234567` | Digits only. The `wa.me` link on the wizard's last screen (`OnboardingState.whatsapp_url`) |
+| `WHATSAPP_BOT_NUMBER` | `56920403095` | Digits only: the shared Kapso sandbox number. The `wa.me` link on the wizard's last screen (`OnboardingState.whatsapp_url`) |
 | `ENABLE_DEV_ENDPOINTS` | `true` | `/dev/*` |
 | `DEV_TOKEN` | random | Header `X-Dev-Token` |
 | `MAX_CONCURRENT_JOBS` | `4` | |
@@ -73,7 +73,7 @@ Plan B only (Meta Cloud API direct, if Kapso fails its first-hour test; [integra
 |---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` / prod backend URL |
 | `NEXT_PUBLIC_DEV_TOKEN` | same as `DEV_TOKEN` (simulator only; acceptable for a demo, remove for production) |
-| `NEXT_PUBLIC_WHATSAPP_URL` | `https://wa.me/15551234567` (same number as `WHATSAPP_BOT_NUMBER`; used by the expired-link screen, which has no onboarding state) |
+| `NEXT_PUBLIC_WHATSAPP_URL` | `https://wa.me/56920403095` (same number as `WHATSAPP_BOT_NUMBER`; used by the landing CTAs and the expired-link screen, which has no onboarding state) |
 | `ENABLE_MOCK_API` | `true` locally to serve an in-memory mock of the onboarding API at `/mock-api` (then `NEXT_PUBLIC_API_URL=http://localhost:3000/mock-api`); never set in production |
 
 ## Supabase Storage

@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await runner.stop()
 
 
-app = FastAPI(title="build101", lifespan=lifespan)
+app = FastAPI(title="Neitor AI", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

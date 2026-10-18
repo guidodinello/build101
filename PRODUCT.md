@@ -33,7 +33,7 @@ Every competitor makes the owner operate software (Sintra, Predis, Canva, Meta B
 - Roadmap, not shipped: replies to comments and DMs, sales flow, weekly Insights summary, Reels from the owner's videos, Facebook/TikTok.
 - Not in scope: paid ads, email marketing, SEO, websites.
 - Pricing is a draft (roadmap): Basic ~US$8/month (content from photos, scheduled publishing, weekly plan), Pro ~US$20/month (+ comment and DM replies, sales notifications, metrics), Plus TBD. Must be labeled as launch/draft pricing.
-- Primary CTA: start the conversation on WhatsApp (wa.me link; the number is not decided yet).
+- Primary CTA: start the conversation on WhatsApp (`https://wa.me/56920403095`, the shared Kapso sandbox number, which only answers phones with an active sandbox session).
 
 ## Brand Commitments
 

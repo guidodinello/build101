@@ -2,7 +2,7 @@
 
 > Draft. Terms are still being refined with [idea.md](idea.md); challenge them in an issue or PR.
 
-The shared language for build101: an owner-facing AI assistant for small businesses, living in the chat app the Owner already uses. Its first vertical is marketing: an AI marketing agency in WhatsApp. Format: [GLOSSARY-FORMAT.md](../.claude/skills/domain-modeling/GLOSSARY-FORMAT.md).
+The shared language for Neitor AI (repository: build101): an owner-facing AI assistant for small businesses, living in the chat app the Owner already uses. Its first vertical is marketing: an AI marketing agency in WhatsApp. Format: [GLOSSARY-FORMAT.md](../.claude/skills/domain-modeling/GLOSSARY-FORMAT.md).
 
 ## Language
 
