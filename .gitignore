@@ -36,3 +36,6 @@ backend/out/
 
 # Supabase CLI local state
 supabase/.temp/
+
+# Vercel CLI link state (vercel link)
+.vercel/
