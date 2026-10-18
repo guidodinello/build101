@@ -164,7 +164,7 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 - Build: `app/publishing/zernio.py` (ensure_profile, connect_url, publish now, 207 handling; scheduling comes with T30's Should part), `mock.py`, `/api/o/{token}/instagram/connect` + `/callback`, `PUBLISHER` env switch.
 - Done when: a test publish to the demo IG succeeds (then delete the IG post by hand: Zernio can't delete a published Instagram post).
 - MVP scope: one demo Instagram account from env (`ZERNIO_PROFILE_ID`, `ZERNIO_ACCOUNT_ID`); the connect endpoints, callback and wizard step 6 are out of the MVP ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)).
-- Started (PR #N): `app/publishing/` with `PublisherPort`, `ZernioPublisher` (`ensure_profile`, `connect_url`, publish now with 207 handling), `MockPublisher`, the `PUBLISHER` switch and the demo account env. Left: the live publish run on the demo IG, and wiring the publisher into `jobs/publish.py` (T30). The connect endpoints and callback are deferred by ADR 0024.
+- Started (PR #22): `app/publishing/` with `PublisherPort`, `ZernioPublisher` (`ensure_profile`, `connect_url`, publish now with 207 handling), `MockPublisher`, the `PUBLISHER` switch and the demo account env. Left: the live publish run on the demo IG, and wiring the publisher into `jobs/publish.py` (T30). The connect endpoints and callback are deferred by ADR 0024.
 
 ## H13–16
 
