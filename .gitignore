@@ -27,3 +27,9 @@ coverage/
 # Local carousel CLI input photos and output
 backend/samples/
 backend/out/
+
+# Kapso skills: installed locally (unlicensed upstream), see .claude/skills/README.md
+.claude/skills/automate-whatsapp/
+.claude/skills/integrate-whatsapp/
+.claude/skills/integrate-whatsapp-calling/
+.claude/skills/observe-whatsapp/
