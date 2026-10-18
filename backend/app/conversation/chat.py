@@ -277,10 +277,10 @@ class ChatHandler:
                 self._history.extend(sender, [step])
                 return
         with_photos = isinstance(event, PhotosReceived)
-        unseen = [photo for photo in self._photos.recent(sender) if not photo.seen]
-        current = (
-            step_with_photos(note, self._photos.recent(sender), unseen) if with_photos else step
-        )
+        # Only these turns attach the photos, so only they may mark them seen.
+        recent = self._photos.recent(sender) if with_photos else []
+        unseen = [photo for photo in recent if not photo.seen]
+        current = step_with_photos(note, recent, unseen) if with_photos else step
         keep_alive = (
             self._start(self._keep_owner_posted(sender, message_id, bool(unseen), channel))
             if with_photos

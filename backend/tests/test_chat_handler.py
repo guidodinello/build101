@@ -851,3 +851,20 @@ async def test_a_sent_post_event_with_the_model_down_sends_nothing_but_keeps_the
 
     assert channel.sent == []
     assert [step_text(step) for step in chat._history.get(SENDER)] == [SENT.note()]
+
+
+async def test_another_event_turn_does_not_mark_pending_photos_seen() -> None:
+    model = ScriptedModel(replies=[text_reply("Ok"), text_reply(EVENT_REPLY)])
+    channel = FakeChannel()
+    chat = handler(model)
+
+    await chat.handle(message("image", text=None), channel)  # the batch waits out its debounce
+    await chat.notify(SENDER, StaleButton(), channel)  # a successful turn that shows no photos
+    assert not chat._photos.recent(SENDER)[0].seen
+    await chat.join()
+
+    current = model.calls[1][-1]
+    assert step_text(current) == PhotosReceived(("f1",)).note()
+    assert "Attached below, in this order: f1" in current["content"][1]["text"]
+    assert [part["type"] for part in current["content"][2:]] == ["image"]
+    assert chat._photos.recent(SENDER)[0].seen
