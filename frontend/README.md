@@ -25,7 +25,7 @@ Until the backend serves the onboarding endpoints (T24), set `ENABLE_MOCK_API=tr
 - `components/onboarding/`: wizard shell, one file per step under `steps/`, the photo upload queue.
 - `lib/api.ts`: REST client and types, written by hand from `api.md`. `lib/upload.ts`: signed-URL uploads.
 - `components/ui/`: shadcn/ui components, restyled to the tokens in [web-app.md](../docs/design/web-app.md#visual-language).
-- `app/api/render/` + `lib/post-render/`: the post slide renderer ([ADR 0028](../docs/decisions/0028-designed-slides-ai-scene-code-layout.md)). The backend POSTs one slide's spec and gets a 1080×1350 JPEG, rendered by Takumi without a browser. Template families are in `lib/post-render/families/`, fonts (OFL) in `lib/post-render/fonts/`. Contract: [integrations.md § Slide renderer](../docs/architecture/integrations.md#slide-renderer-takumi-on-vercel). With `ENABLE_TEMPLATE_PREVIEW=true`, `/dev/post-templates` shows every family over sample copy.
+- `app/api/render/` + `lib/post-render/`: the post slide renderer ([ADR 0029](../docs/decisions/0029-designed-slides-ai-scene-code-layout.md)). The backend POSTs one slide's spec and gets a 1080×1350 JPEG, rendered by Takumi without a browser. Template families are in `lib/post-render/families/`, fonts (OFL) in `lib/post-render/fonts/`. Contract: [integrations.md § Slide renderer](../docs/architecture/integrations.md#slide-renderer-takumi-on-vercel). With `ENABLE_TEMPLATE_PREVIEW=true`, `/dev/post-templates` shows every family over sample copy.
 
 ## Deploy
 

@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     gemini_thinking_level: Literal["minimal", "medium", "high"] = "medium"
     gemini_image_size: Literal["1K", "2K", "4K"] = "2K"
     image_gen_max_concurrency: int = 4
-    # Designed slides are rendered by the frontend's Takumi route (ADR 0028); RENDERER_SECRET is
+    # Designed slides are rendered by the frontend's Takumi route (ADR 0029); RENDERER_SECRET is
     # the frontend's RENDER_SECRET
     renderer: Literal["takumi", "mock"] = "mock"
     renderer_url: str | None = None

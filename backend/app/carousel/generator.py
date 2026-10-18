@@ -14,12 +14,12 @@ from .schemas import CarouselBrief, CarouselCopy
 logger = logging.getLogger(__name__)
 
 COVER = 1
-# A panorama spans several slides, so it is generated at 4K to keep each slice sharp (ADR 0028)
+# A panorama spans several slides, so it is generated at 4K to keep each slice sharp (ADR 0029)
 PANORAMA_IMAGE_SIZE = "4K"
 
 
 class GeneratedSlide(BaseModel):
-    """One slide's text-free scene; the renderer sets the design over it (ADR 0028)."""
+    """One slide's text-free scene; the renderer sets the design over it (ADR 0029)."""
 
     index: int
     image: bytes

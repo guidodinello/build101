@@ -7,7 +7,7 @@ color, material and proportions. Change only the scene, light and styling around
 prices, logos or watermarks. The design's text is added afterwards.
 - A photograph, not a graphic design: no frames, borders, collages or overlays."""
 
-# Where each template puts the scene, and so what the scene must leave calm (ADR 0028)
+# Where each template puts the scene, and so what the scene must leave calm (ADR 0029)
 FRAMING: dict[tuple[TemplateFamily, SlideRole], str] = {
     ("editorial", "cover"): (
         "Full-bleed vertical 4:5 photo. The headline is set over the lower 40% of the frame, "

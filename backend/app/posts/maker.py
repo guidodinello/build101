@@ -222,7 +222,7 @@ class PostMaker:
         """The post's images in order (one per photo, unless a design asks for a slide count).
 
         Photos as they are get the logo stamped in a corner (ADR 0027); a design's slides are
-        rendered from templates over text-free scenes, logo included (ADR 0028).
+        rendered from templates over text-free scenes, logo included (ADR 0029).
         """
         references = [photo.data for photo in photos]
         if args.style == "photos":

@@ -47,4 +47,4 @@ When an ADR is superseded, set its Status to `superseded`, add `- Superseded by:
 | [0026](0026-owner-messages-from-the-orchestrator.md) | Owner messages are written by the orchestrator, from typed events | proposed | 2026-10-18 |
 | [0027](0027-owner-logo-stamped-in-code.md) | The Owner's logo is stamped on post images in code | proposed | 2026-10-18 |
 | [0028](0028-read-instagram-with-our-meta-app.md) | Read the Owner's Instagram through our own Meta app to build the Brand Brain | proposed | 2026-10-18 |
-| [0028](0028-designed-slides-ai-scene-code-layout.md) | Designed slides: the AI makes the scene, code templates make the layout | proposed | 2026-10-18 |
+| [0029](0029-designed-slides-ai-scene-code-layout.md) | Designed slides: the AI makes the scene, code templates make the layout | proposed | 2026-10-18 |

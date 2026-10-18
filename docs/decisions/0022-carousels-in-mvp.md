@@ -2,7 +2,7 @@
 
 - Date: 2026-10-17
 - Status: proposed
-- Revised by: [0028](0028-designed-slides-ai-scene-code-layout.md) (slide text set by code templates, not the image model; the Text Checker is dropped)
+- Revised by: [0029](0029-designed-slides-ai-scene-code-layout.md) (slide text set by code templates, not the image model; the Text Checker is dropped)
 
 ## Context
 

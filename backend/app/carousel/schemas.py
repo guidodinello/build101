@@ -6,7 +6,7 @@ MAX_SLIDES = 10
 MAX_REFERENCES = 10
 
 SlideRole = Literal["cover", "content", "cta"]
-# The renderer's template families (ADR 0028); frontend/lib/post-render/spec.ts lists the same
+# The renderer's template families (ADR 0029); frontend/lib/post-render/spec.ts lists the same
 TemplateFamily = Literal["editorial", "numbers", "panorama"]
 
 

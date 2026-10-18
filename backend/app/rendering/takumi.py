@@ -11,7 +11,7 @@ ERROR_BODY_CHARS = 300
 
 
 class TakumiRenderer:
-    """RendererPort over the frontend's Takumi route on Vercel (ADR 0028)."""
+    """RendererPort over the frontend's Takumi route on Vercel (ADR 0029)."""
 
     def __init__(self, client: httpx.AsyncClient) -> None:
         self._client = client

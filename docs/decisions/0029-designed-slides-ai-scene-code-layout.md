@@ -1,4 +1,4 @@
-# 0028: Designed slides: the AI makes the scene, code templates make the layout
+# 0029: Designed slides: the AI makes the scene, code templates make the layout
 
 - Date: 2026-10-18
 - Status: proposed

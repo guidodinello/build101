@@ -17,7 +17,7 @@ The "agency" is one **orchestrator** (the account manager the owner talks to) pl
 | **Niche Analyst** | Single call, URL context + Google Search, structured | `generate_niche_report` job; `niche_report` tool | Business category + location + Brand Brain + reference websites + niche search themes → Niche Report with source links ([ADR 0025](../decisions/0025-weekly-niche-report.md)) | `medium` |
 | **Feedback Classifier** | Single call, structured | `revise_post` job | Feedback text → `copy` / `image` / `both` (Reel: `copy` / `cover` / `video`) + normalized instruction | `low` |
 
-Not agents (deterministic services): **Image generator** (`ImageGenPort`: image brief → variations from the third-party image service, resized to 1080×1350 JPEG, [ADR 0018](../decisions/0018-ai-image-generation-service.md); not used for Reels), **Carousel generator** (`app/carousel/generator.py`: `CarouselCopy` + `CarouselBrief` → text-free scenes through the same port, one wide scene sliced for a panorama, [ADR 0022](../decisions/0022-carousels-in-mvp.md), [ADR 0028](../decisions/0028-designed-slides-ai-scene-code-layout.md)), **Slide renderer** (`RendererPort`, `app/rendering/`: a slide's copy + scene + brand colors + logo → the designed 1080×1350 JPEG from the frontend's Takumi templates, [ADR 0028](../decisions/0028-designed-slides-ai-scene-code-layout.md)), **Frame Extractor** (Could; ffmpeg/ffprobe in the backend: video → metadata + keyframes JPEGs), **Publisher** (approved post → provider API, image, carousel or Reel), **Scheduler** (delegated to the provider).
+Not agents (deterministic services): **Image generator** (`ImageGenPort`: image brief → variations from the third-party image service, resized to 1080×1350 JPEG, [ADR 0018](../decisions/0018-ai-image-generation-service.md); not used for Reels), **Carousel generator** (`app/carousel/generator.py`: `CarouselCopy` + `CarouselBrief` → text-free scenes through the same port, one wide scene sliced for a panorama, [ADR 0022](../decisions/0022-carousels-in-mvp.md), [ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)), **Slide renderer** (`RendererPort`, `app/rendering/`: a slide's copy + scene + brand colors + logo → the designed 1080×1350 JPEG from the frontend's Takumi templates, [ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)), **Frame Extractor** (Could; ffmpeg/ffprobe in the backend: video → metadata + keyframes JPEGs), **Publisher** (approved post → provider API, image, carousel or Reel), **Scheduler** (delegated to the provider).
 
 ## LLM client conventions
 
@@ -233,14 +233,14 @@ A prompt can be composed from several files: a line that is only `{{include <pat
       role: SlideRole
       headline: str            # ≤ 6 words
       body: str | None = None  # ≤ 20 words
-      kicker: str | None = None  # 1–2 word label above the headline (ADR 0028)
+      kicker: str | None = None  # 1–2 word label above the headline (ADR 0029)
   class CarouselCopy(BaseModel):          # Copywriter, carousel mode
       caption: str
       hashtags: list[str]
       slides: list[SlideCopy]  # 3–5 by default, the Owner's number up to 10; slides[0].role == "cover"
   ```
 
-  Same voice and fact rules as the caption: a price, discount or date goes on a slide only when it comes from a referenced Product, an Offer or `owner_words`. The slide text is set by the renderer's templates over the photo ([ADR 0028](../decisions/0028-designed-slides-ai-scene-code-layout.md)), so it is exact, but it must stay short to fit the layout.
+  Same voice and fact rules as the caption: a price, discount or date goes on a slide only when it comes from a referenced Product, an Offer or `owner_words`. The slide text is set by the renderer's templates over the photo ([ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)), so it is exact, but it must stay short to fit the layout.
 
 ### Art Director
 
@@ -259,13 +259,13 @@ A prompt can be composed from several files: a line that is only `{{include <pat
 
 - **Prompt rules** (in the system prompt, and appended in code to every `prompt` so they can't be dropped):
   - Show the real product from the reference photos; keep its shape, color, material and proportions. Change the scene, light and styling, never the product.
-  - **No text of any kind** in the image (image Posts): no headlines, prices, discounts, offers, dates, slogans or watermarks. Prices and offers only appear in the caption, and only when they come from a Product, an Offer or the Owner's words. This holds for carousel slides too: their text is set by the templates, not drawn by the model ([ADR 0028](../decisions/0028-designed-slides-ai-scene-code-layout.md)).
-  - **No logos:** don't draw, invent or alter a logo. When the Owner asks for their real logo, code adds the uploaded file: stamped in the corner of photos posted as they are ([ADR 0027](../decisions/0027-owner-logo-stamped-in-code.md)), or placed in the template's brand mark on designed slides ([ADR 0028](../decisions/0028-designed-slides-ai-scene-code-layout.md)).
+  - **No text of any kind** in the image (image Posts): no headlines, prices, discounts, offers, dates, slogans or watermarks. Prices and offers only appear in the caption, and only when they come from a Product, an Offer or the Owner's words. This holds for carousel slides too: their text is set by the templates, not drawn by the model ([ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)).
+  - **No logos:** don't draw, invent or alter a logo. When the Owner asks for their real logo, code adds the uploaded file: stamped in the corner of photos posted as they are ([ADR 0027](../decisions/0027-owner-logo-stamped-in-code.md)), or placed in the template's brand mark on designed slides ([ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)).
   - Use the Brand Brain palette and `photo_style`; respect `constraints` (e.g. "sin mostrar caras").
   - Trend notes may change the scene or styling, never the facts.
 - **Post-validation (code):** reference ids belong to the business and are not archived; when the Owner sent photos, they are among the references (interim default: only those photos, until the open question on the library is settled); 1–10 references; the fixed rules are present. On violation, retry once with the error list appended; if it fails again, fall back to the candidate photos with a plain prompt built from the brief and `photo_style`.
 - The generated variations are not checked by an LLM before the Owner sees them: the Owner picks one and approves it ([ADR 0007](../decisions/0007-approve-every-post.md)), and nothing is published without that Approval.
-- **Carousel mode (Must, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)):** input adds the `CarouselCopy`. The Art Director picks the template family and writes the photographic style and the scene of each slide, never its text or layout ([ADR 0028](../decisions/0028-designed-slides-ai-scene-code-layout.md)). Output `CarouselBrief` (`app/carousel/schemas.py`):
+- **Carousel mode (Must, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)):** input adds the `CarouselCopy`. The Art Director picks the template family and writes the photographic style and the scene of each slide, never its text or layout ([ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)). Output `CarouselBrief` (`app/carousel/schemas.py`):
 
   ```python
   class SlideScene(BaseModel):
@@ -273,7 +273,7 @@ A prompt can be composed from several files: a line that is only `{{include <pat
       scene_prompt: str        # English: what this slide shows (scene, composition); no text
   class CarouselBrief(BaseModel):         # Art Director, carousel mode
       reference_asset_ids: list[str]   # 1–10
-      family: TemplateFamily           # editorial | numbers | panorama: the renderer's template family (ADR 0028)
+      family: TemplateFamily           # editorial | numbers | panorama: the renderer's template family (ADR 0029)
       style_prompt: str                # English: shared photographic style (light, palette hex, props); no typography
       slides: list[SlideScene]         # one per CarouselCopy slide, same order
       style_notes: str                 # short Spanish summary for the Owner

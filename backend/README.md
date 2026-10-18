@@ -17,7 +17,7 @@ Commands run from this folder (`uv run ruff check .`, `uv run pytest tests/ -v`)
 - `app/imagegen/`: `ImageGenPort` with the Gemini and mock adapters, selected by `IMAGE_GEN`.
 - `app/media/images.py`: reference photo normalization, the 1080×1350 resize, panorama slicing and logo prep.
 - `app/carousel/`: carousel schemas, scene prompts and `CarouselGenerator` (text-free scenes: cover first, other slides anchored on it, or one wide panorama sliced).
-- `app/rendering/`: `RendererPort` with the Takumi (the frontend's `/api/render`) and mock adapters, selected by `RENDERER`; `render_slides` designs every slide of a post ([ADR 0028](../docs/decisions/0028-designed-slides-ai-scene-code-layout.md)).
+- `app/rendering/`: `RendererPort` with the Takumi (the frontend's `/api/render`) and mock adapters, selected by `RENDERER`; `render_slides` designs every slide of a post ([ADR 0029](../docs/decisions/0029-designed-slides-ai-scene-code-layout.md)).
 - `app/channels/`: `ChannelPort` with the Kapso adapter, `POST /webhooks/whatsapp` (signature check, dedupe, background handling) and an echo handler until the conversation router (T23) exists.
 
 Generate a carousel from a copy + brief spec without the database or the agents:

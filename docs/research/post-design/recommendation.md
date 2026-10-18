@@ -72,7 +72,7 @@ Spec-sheet, shop-the-look and colorway families put the product on a solid backg
 
 ## What it changes
 
-Recorded in [ADR 0028](../../decisions/0028-designed-slides-ai-scene-code-layout.md) (proposed). It revises:
+Recorded in [ADR 0029](../../decisions/0029-designed-slides-ai-scene-code-layout.md) (proposed). It revises:
 
 - [ADR 0018](../../decisions/0018-ai-image-generation-service.md): "the backend never composes images" becomes "a renderer composes the final slide over the AI visual". It doesn't bring back ADR 0009's Chromium: Takumi runs on Vercel, and the Railway container stays small.
 - [ADR 0022](../../decisions/0022-carousels-in-mvp.md): text moves from the image model to the templates; anchoring on the cover and the Text Checker are replaced by a shared template family (and the panorama mode); slide redo regenerates the scene and re-renders.

@@ -31,7 +31,7 @@ class RenderLogo(BaseModel):
 
 
 class SlideRender(BaseModel):
-    """One slide for POST /api/render (frontend/lib/post-render/spec.ts, ADR 0028)."""
+    """One slide for POST /api/render (frontend/lib/post-render/spec.ts, ADR 0029)."""
 
     family: TemplateFamily
     index: int

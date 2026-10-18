@@ -322,7 +322,7 @@ class SlideCopy(BaseModel):
     role: SlideRole
     headline: str            # ≤ 6 words
     body: str | None = None  # ≤ 20 words
-    kicker: str | None = None  # 1–2 word label above the headline (ADR 0028)
+    kicker: str | None = None  # 1–2 word label above the headline (ADR 0029)
 class CarouselCopy(BaseModel):          # Copywriter, carousel mode
     caption: str
     hashtags: list[str]
@@ -332,7 +332,7 @@ class SlideScene(BaseModel):
     scene_prompt: str        # English: what this slide shows (scene, composition); no text
 class CarouselBrief(BaseModel):         # Art Director, carousel mode
     reference_asset_ids: list[str]   # 1–10
-    family: TemplateFamily           # editorial | numbers | panorama: the renderer's template family (ADR 0028)
+    family: TemplateFamily           # editorial | numbers | panorama: the renderer's template family (ADR 0029)
     style_prompt: str                # English: shared photographic style (light, palette hex, props); no typography
     slides: list[SlideScene]         # one per CarouselCopy slide, same order
     style_notes: str                 # short Spanish summary for the Owner

@@ -180,7 +180,7 @@ Target time per post: **< 45 s** from start to preview was set for rendered temp
 
 1. *Copywriter* (carousel mode) writes the caption, hashtags and the text of each slide: a cover, content slides and usually a closing call to action; 3–5 slides, or the Owner's number up to 10.
 2. *Art Director* (carousel mode) picks the reference photos and writes one shared style plus one scene per slide. It writes no text.
-3. *Carousel generator* generates text-free scenes: the cover first, then the other slides in parallel with the cover as a reference for light and palette, or one wide scene sliced into the slides for a `panorama`. The *Slide renderer* then sets each slide's text, numbering, brand mark and layout from the chosen template family ([ADR 0028](../decisions/0028-designed-slides-ai-scene-code-layout.md)).
+3. *Carousel generator* generates text-free scenes: the cover first, then the other slides in parallel with the cover as a reference for light and palette, or one wide scene sliced into the slides for a `panorama`. The *Slide renderer* then sets each slide's text, numbering, brand mark and layout from the chosen template family ([ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)).
 4. The bot sends the slides in order as numbered images ("1/5", "2/5"…), then `carousel_preview`:
 
    ```text

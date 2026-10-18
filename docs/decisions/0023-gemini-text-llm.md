@@ -9,7 +9,7 @@
 
 ## Decision
 
-- Text calls (orchestrator, specialists; the carousel Text Checker until [ADR 0028](0028-designed-slides-ai-scene-code-layout.md) removed it) use the **Gemini API** through `google-genai`'s async client and the **Interactions API**, model **`gemini-3.8-flash`** (`GEMINI_CHAT_MODEL`), with per-agent **thinking level** (`low` / `medium` / `high`) instead of per-agent models.
+- Text calls (orchestrator, specialists; the carousel Text Checker until [ADR 0029](0029-designed-slides-ai-scene-code-layout.md) removed it) use the **Gemini API** through `google-genai`'s async client and the **Interactions API**, model **`gemini-3.8-flash`** (`GEMINI_CHAT_MODEL`), with per-agent **thinking level** (`low` / `medium` / `high`) instead of per-agent models.
 - ADR 0010's orchestration choice stands: our own small loop, no LangGraph. History is ours: `store=False`, and the model's steps are stored and resent unchanged, thought steps included.
 - All text calls go through `backend/app/llm/client.py` (`ChatModel` port, `GeminiChat` adapter).
 - First slice: `ChatHandler` replaces the echo handler behind Kapso's webhook ([ADR 0020](0020-whatsapp-via-kapso.md)); it answers text and voice-note transcripts. `INBOUND_HANDLER=echo` keeps the old echo for channel tests.
