@@ -25,7 +25,7 @@
 | `INBOUND_HANDLER` | `chat` \| `echo` | Default `chat`: answers with Gemini ([ADR 0023](../decisions/0023-gemini-text-llm.md)); `echo` repeats what arrived (channel tests, no LLM) |
 | `GEMINI_CHAT_MODEL` | `gemini-3.8-flash` | Text model; uses `GEMINI_API_KEY` |
 | `ASSISTANT_NAME` | `Mora` | Placeholder until the product name is chosen |
-| `MAX_POSTS_PER_DAY` | `5` | Post and carousel generations a Business can start per day; `create_post` answers `daily_limit` past it ([agents.md](../architecture/agents.md#when-image-generation-runs)) |
+| `MAX_POSTS_PER_DAY` | `5` | Designs (posts with AI-generated images: image Posts and carousels) a Business can start per day; posts of the Owner's photos as they are don't count. `create_post` answers `daily_limit` past it ([agents.md](../architecture/agents.md#when-image-generation-runs)) |
 | `WHATSAPP_CHANNEL` | `kapso` \| `simulator` | Default `kapso`. `simulator` arrives with T21 |
 | `KAPSO_API_KEY` | `...` | WhatsApp through Kapso ([ADR 0020](../decisions/0020-whatsapp-via-kapso.md)). Sent as the `X-API-Key` header ([API introduction](https://docs.kapso.ai/api/introduction.md)) |
 | `KAPSO_WEBHOOK_SECRET` | random | Webhook signing secret: `X-Webhook-Signature` is the hex HMAC-SHA256 of the raw body ([security](https://docs.kapso.ai/docs/platform/webhooks/security.md)). Without it every webhook gets `401` |
@@ -49,7 +49,7 @@
 | `ENABLE_DEV_ENDPOINTS` | `true` | `/dev/*` |
 | `DEV_TOKEN` | random | Header `X-Dev-Token` |
 | `MAX_CONCURRENT_JOBS` | `4` | |
-| `MAX_PHOTO_MB` | `10` | Rejected before the signed upload URL is issued |
+| `MAX_PHOTO_MB` | `10` | Rejected before the signed upload URL is issued; a WhatsApp photo over it gets `photo_too_big` without being downloaded (or after, when Kapso doesn't say its size) |
 | `MAX_AUDIO_MB` | `3` | Voice notes over it get `audio_too_long` (~25 min of WhatsApp Opus) |
 | `MAX_VIDEO_MB` | `300` | Could (video work). Must not exceed the Supabase Storage global file size limit |
 | `DASHBOARD_LINK_TTL_DAYS` | `7` | Should (read-only dashboard). Dashboard magic links expire after this |

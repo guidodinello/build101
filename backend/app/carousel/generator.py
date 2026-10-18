@@ -40,13 +40,24 @@ class CarouselGenerator:
         self._text_checker = text_checker
 
     async def generate(
-        self, copy: CarouselCopy, brief: CarouselBrief, references: list[bytes]
+        self,
+        copy: CarouselCopy,
+        brief: CarouselBrief,
+        references: list[bytes],
+        slide_references: dict[int, list[bytes]] | None = None,
     ) -> list[GeneratedSlide]:
+        """`slide_references` overrides `references` for the slides it lists (1-based)."""
         check_slides_match(copy, brief)
         prepared = await prepare_references(references)
-        cover = await self._slide(copy, brief, COVER, prepared, style_image=None)
+        per_slide = {
+            index: await prepare_references(slide_refs)
+            for index, slide_refs in (slide_references or {}).items()
+        }
+        cover = await self._slide(
+            copy, brief, COVER, per_slide.get(COVER, prepared), style_image=None
+        )
         rest = await gather_slides(
-            self._slide(copy, brief, index, prepared, style_image=cover.image)
+            self._slide(copy, brief, index, per_slide.get(index, prepared), style_image=cover.image)
             for index in range(COVER + 1, len(copy.slides) + 1)
         )
         return [cover, *rest]

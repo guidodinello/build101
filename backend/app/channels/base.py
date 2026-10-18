@@ -43,7 +43,7 @@ class InboundAudio(BaseModel):
 
 
 class InboundMessage(BaseModel):
-    kind: Literal["text", "button", "image", "audio", "other"]
+    kind: Literal["text", "button", "image", "audio", "album", "other"]
     message_id: str
     sender: str
     phone_number_id: str

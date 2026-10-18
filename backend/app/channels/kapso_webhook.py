@@ -57,6 +57,9 @@ def parse_message(payload: dict[str, Any], fallback_id: str | None = None) -> In
                 media=_media(audio, kapso, audio["id"]),
                 **common,
             )
+        # WhatsApp announces an album with this message, then sends each photo on its own.
+        case "unsupported" if (message.get("unsupported") or {}).get("type") == "album":
+            return InboundMessage(kind="album", **common)
         case _:
             return InboundMessage(kind="other", **common)
 
