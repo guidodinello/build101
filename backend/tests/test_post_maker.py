@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from app.agents.schemas import BrandBrain
 from app.conversation.events import Event, PostFailed, PostSent
@@ -41,6 +42,7 @@ def maker(
     store: InMemoryPosts | None = None,
     events: list[Event] | None = None,
     brand: BrandBrain | None = None,
+    brand_fails: bool = False,
 ) -> PostMaker:
     """A maker whose events go to `events` (a throwaway list when the test doesn't look)."""
     recorded = events if events is not None else []
@@ -49,6 +51,8 @@ def maker(
         recorded.append(event)
 
     async def brand_of(sender: str) -> BrandBrain | None:
+        if brand_fails:
+            raise OperationalError("select", {}, ConnectionError("database down"))
         return brand if sender == SENDER else None
 
     posts = PostMaker(
@@ -155,6 +159,24 @@ async def test_without_a_brand_brain_the_post_gets_the_plain_instructions(
     await posts.join()
 
     assert model.structured_systems == [SYSTEM_PROMPT]
+
+
+async def test_a_post_goes_without_the_brand_brain_when_the_database_fails(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(
+        drafts={PostCopy: PostCopy(caption="Mesa de roble a medida", hashtags=["#muebles"])}
+    )
+    events: list[Event] = []
+    posts = maker(model, CountingImageGen(), photos, events=events, brand_fails=True)
+
+    posts.create_post(
+        SENDER, {"brief": "muebles", "asset_ids": ["f1"], "style": "photos"}, FakeChannel()
+    )
+    await posts.join()
+
+    assert model.structured_systems == [SYSTEM_PROMPT]
+    assert [type(event) for event in events] == [PostSent]
 
 
 async def test_one_photo_is_a_single_image_post_without_numbering(photos: InMemoryPhotos) -> None:

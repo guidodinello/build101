@@ -8,6 +8,7 @@ from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.agents.schemas import BrandBrain
 from app.carousel.generator import CarouselGenerator
@@ -149,7 +150,7 @@ class PostMaker:
         started = time.monotonic()
         event: Event
         try:
-            brand = await self._brand_of(sender) if self._brand_of else None
+            brand = await self._brand(sender, post_id)
             post = await self._render(args, photos, brand)
             paths = await self._send(sender, post.images, post.text, channel)
             self._keep(sender, post_id, args, photos, paths, post)
@@ -178,6 +179,18 @@ class PostMaker:
         # After the guard is released, and outside the try: a failing notify must not report a
         # failed post that the Owner already has.
         await self._announce(sender, post_id, event, channel)
+
+    async def _brand(self, sender: str, post_id: str) -> BrandBrain | None:
+        """The sender's Brand Brain; without it when the database fails, rather than no post."""
+        if self._brand_of is None:
+            return None
+        try:
+            return await self._brand_of(sender)
+        except SQLAlchemyError:
+            logger.warning(
+                "post %s for %s goes without the Brand Brain", post_id, mask(sender), exc_info=True
+            )
+            return None
 
     async def _announce(
         self, sender: str, post_id: str, event: Event, channel: ChannelPort
