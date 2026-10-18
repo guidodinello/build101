@@ -7,16 +7,14 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+RUN uv sync --frozen --no-install-project --no-dev
 
 # app/ includes the prompt .md files read at runtime; migrations/ and alembic.ini
 # are needed by the pre-deploy `alembic upgrade head`.
 COPY app/ ./app/
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev
 
 
 # Stage 2 — final: no uv, no build tools, just the venv and source
