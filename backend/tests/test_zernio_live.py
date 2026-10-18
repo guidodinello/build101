@@ -13,17 +13,23 @@ Before the PR is merged, put the branch name in place of `main` (the branch is d
 after the squash merge, so `main` only works once the file has landed there).
 """
 
+import asyncio
 import os
+import uuid
 import warnings
 from datetime import UTC, datetime
 
 import pytest
 
 from app.config import get_settings
-from app.publishing.base import PublishMedia
+from app.posts.publish import MAX_RETRY_AFTER_S
+from app.publishing.base import PublishInProgress, PublishMedia, PublishRetryable
 from app.publishing.zernio import ZernioPublisher
 
 pytestmark = pytest.mark.live
+
+# The first attempt plus retries with the same idempotency key
+LIVE_PUBLISH_ATTEMPTS = 3
 
 
 def live_publisher() -> ZernioPublisher:
@@ -43,11 +49,25 @@ async def test_publish_one_image_to_the_demo_account() -> None:
     # Zernio rejects identical content to the same account within 24 h, so stamp the caption
     stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     caption = f"[test] build101 Zernio live publish {stamp}. Delete me."
+    media = PublishMedia(format="image", url=image_url)
+    # Zernio's create call can time out even when the post goes live; the same key makes the
+    # retry replay that post instead of publishing a second one (integrations.md § Zernio)
+    idempotency_key = f"live-test-{uuid.uuid4()}"
     publisher = live_publisher()
     try:
-        result = await publisher.publish(
-            settings.zernio_account_id, caption, PublishMedia(format="image", url=image_url)
-        )
+        for attempt in range(1, LIVE_PUBLISH_ATTEMPTS + 1):
+            try:
+                result = await publisher.publish(
+                    settings.zernio_account_id, caption, media, idempotency_key=idempotency_key
+                )
+                break
+            except PublishInProgress as exc:
+                if attempt == LIVE_PUBLISH_ATTEMPTS:
+                    raise
+                await asyncio.sleep(min(exc.retry_after_s or 5.0, MAX_RETRY_AFTER_S))
+            except PublishRetryable:
+                if attempt == LIVE_PUBLISH_ATTEMPTS:
+                    raise
     finally:
         await publisher.aclose()
 
