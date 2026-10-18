@@ -11,9 +11,10 @@ The "agency" is one **orchestrator** (the account manager the owner talks to) pl
 | **Orchestrator** | Tool-use loop | Inbound handler | Conversation + context → reply text + tool calls | `low` |
 | **Asset Analyst** | Single call, vision, structured | `analyze_asset` job | Image, or video keyframes + metadata → description, tags, suggested Products, usable-for (+ Reel suitability) | `low` |
 | **Brand Strategist** | Single call, structured | `generate_brand` job | Onboarding data + Catalog + asset descriptions (+ correction) → Brand Brain | `high` |
-| **Content Strategist** | Single call, structured | `generate_plan` job; `suggest_ideas` tool | Brand Brain + Catalog + active Offers + assets + recent posts + date + notes → weekly plan (images and Reels), or 3 ideas | `medium` |
-| **Copywriter** | Single call, structured | `generate_post` job | Brand Brain + brief + the Owner's own words (+ feedback, previous version) → copy; for a carousel: + slide count → caption + the text of each slide | `medium` |
+| **Content Strategist** | Single call, structured | `generate_plan` job; `suggest_ideas` tool | Brand Brain + Catalog + active Offers + assets + recent posts + date + notes + trend notes → weekly plan (images and Reels), or 3 ideas | `medium` |
+| **Copywriter** | Single call, structured | `generate_post` job | Brand Brain + brief + the Owner's own words + trend notes (+ feedback, previous version) → copy; for a carousel: + slide count → caption + the text of each slide | `medium` |
 | **Art Director** | Single call, vision, structured | `generate_post` job | Brand Brain + brief + copy + candidate photos (the ones the Owner sent with the request, if any) + trend notes → image brief (reference photos + image prompt); for a Reel: candidate videos (keyframes) → video + cover frame; for a carousel: → reference photos + shared style + one scene per slide | `medium` |
+| **Niche Analyst** | Single call, grounded search, structured | `generate_niche_report` job; `niche_report` tool | Business category + location + Brand Brain + niche search themes → Niche Report with source links ([ADR 0025](../decisions/0025-weekly-niche-report.md)) | `medium` |
 | **Feedback Classifier** | Single call, structured | `revise_post` job | Feedback text → `copy` / `image` / `both` (Reel: `copy` / `cover` / `video`) + normalized instruction | `low` |
 | **Text Checker** | Single call, vision, structured | `CarouselGenerator` (carousel slides) | Slide image + expected `SlideCopy` → `TextCheck` | `low` |
 
@@ -240,7 +241,7 @@ Prompts are written in English (instructions) and require output content in Riop
 
 **Purpose:** decide what the image shows and how it looks. It doesn't draw and doesn't compose: it picks the reference photos and writes the prompt; a third-party image service generates the variations ([ADR 0018](../decisions/0018-ai-image-generation-service.md), provider in [ADR 0019](../decisions/0019-image-provider-gemini.md)).
 
-- Input: Brand Brain (visual identity: palette, `photo_style`; voice; `constraints`), the brief and `owner_words`, `PostCopy` (for the angle; none of it goes on the image), candidate photos (IDs + analyses + **the images themselves**, as URLs), trend notes (optional; their source is not decided, see [open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)), optional feedback + previous brief (revise mode), optional `force_asset_id`.
+- Input: Brand Brain (visual identity: palette, `photo_style`; voice; `constraints`), the brief and `owner_words`, `PostCopy` (for the angle; none of it goes on the image), candidate photos (IDs + analyses + **the images themselves**, as URLs), trend notes (optional; from the latest [Niche Report](#niche-analyst), [ADR 0025](../decisions/0025-weekly-niche-report.md)), optional feedback + previous brief (revise mode), optional `force_asset_id`.
 - Candidates: when the Owner sent photos with the request (`posts.candidate_asset_ids`), those photos are the preferred references; whether the Business's photo library also complements them is not decided ([open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)). With no photos in the request, the best matches from the library (by the brief, `best_for` and `quality`).
 - Output (`ImageBrief`):
 
@@ -282,6 +283,30 @@ Prompts are written in English (instructions) and require output content in Riop
   ```
 
   Post-validation (code): the video belongs to the business, is not archived, is `reel_suitable`, and `0 ≤ cover_offset_ms ≤ duration_ms`. On violation, retry once; then fall back to the first suggested video and its analyzed cover.
+
+### Niche Analyst
+
+**Purpose:** tell the Agency what is working in the Business's niche this week (Should, F3.6, [ADR 0025](../decisions/0025-weekly-niche-report.md)). Sources compared in [research/niche-trend-sources.md](../research/niche-trend-sources.md); first niche: [research/furniture-decor-uruguay.md](../research/furniture-decor-uruguay.md).
+
+- Input: `businesses.category`, `location`, the Brand Brain (products, audience, pillars), the niche's search themes (a static list per niche in `app/agents/data/`), today's date.
+- Call: one Gemini call with the Google Search tool (grounding), through `app/llm/client.py`; the source links come from the response's grounding metadata, not from the model's text.
+- Output (`NicheReport`):
+
+  ```python
+  class NicheInsight(BaseModel):
+      kind: Literal["theme", "format", "hook", "visual"]
+      insight: str                 # Spanish, one or two sentences
+      post_idea: str | None        # how this Business could use it
+      source_urls: list[str]       # at least one, from the grounding metadata
+
+  class NicheReport(BaseModel):
+      week_start: date
+      summary: str                 # Spanish, 3–5 lines, for the chat (F3.7)
+      insights: list[NicheInsight] # 3–8
+  ```
+
+- Rules: describe what works, never copy a reference post's image or caption; no prices, discounts or dates in `post_idea` (commercial dates come from the Content Strategist's static list); drop an insight with no source.
+- Downstream: the latest report's insights are the **trend notes** of the Content Strategist, Copywriter and Art Director. Trend notes change angle, format and styling, never facts.
 
 ### Feedback Classifier
 
@@ -378,6 +403,7 @@ From the second design pass ([../design/mockups/](../design/mockups/README.md), 
 | `revise_post` | Should | `post_id`, `feedback` | Enqueue `revise_post` | `{job_id}` |
 | `plan_week` | Should | `notes?: str`, `week_start?: date` | Enqueue `generate_plan`, only when the Owner asks for a plan | `{job_id, status: "started"}` |
 | `suggest_ideas` | Should | `request: str` | Content Strategist ideas mode (synchronous); stores the 3 ideas in `conversation_state.ideas` so "la 2" or "la del taller" can be resolved | `{ideas: [{n, title, idea, suggested_asset_ids}]}` |
+| `niche_report` | Should | — | Return the latest Niche Report, or enqueue `generate_niche_report` when there is none from this week ([ADR 0025](../decisions/0025-weekly-niche-report.md)) | `{summary, insights}` or `{job_id, status: "started"}` |
 | `send_dashboard_link` | Should | — | Create a `dashboard` magic link (7 days) and send it as a CTA URL button ("Abrí tu panel") | `{sent: true}` |
 | `revise_plan` | Could | `plan_id`, `feedback` | Enqueue `generate_plan` (revise mode) | `{job_id}` |
 | `update_brand_brain` | Could | `change: str` | Enqueue `generate_brand` revise mode (silent: no summary message unless asked) | `{job_id}` |
@@ -433,6 +459,7 @@ Guards are in the tool implementations, not in the prompt. `create_post` returns
 | `publish_post(post_id, when)` | Must (now), Should (scheduled) | guard → Publisher (now / schedule; image, carousel or Reel by `posts.format`) → save external id + permalink | `published` / `scheduled` / `publish_failed` |
 | `redo_slides(post_id, slides, feedback)` | Must (carousel) | (Copywriter, when the feedback changes the words of those slides) → Art Director (carousel mode, new scenes for those slides) → `CarouselGenerator.redo` (a redone slide anchors on the current cover; a redone cover anchors on slide 2) → upload → bump `posts.revision`, save the new rows and copy the unchanged ones to the new revision | the redone slides, numbered, then `carousel_preview` |
 | `generate_plan(business_id, notes?, plan_id?)` | Should | Content Strategist → save plan + items | `plan_preview` |
+| `generate_niche_report(business_id)` | Should | Niche Analyst (grounded search) → save `niche_reports` row. Runs every Monday for each onboarded Business, and from the `niche_report` tool | weekly run: nothing; on request: the report's `summary` (LLM text, Rioplatense Spanish) |
 | `revise_post(post_id, feedback)` | Should | Feedback Classifier → (Copywriter) → (Art Director → Image generator, image only) → save revision | `post_preview`, or `post_variations` first when the image was regenerated |
 | `import_instagram_media(business_id)` | Could (F2.8) | List the connected account's recent media ([integrations.md](integrations.md#reading-the-owners-existing-instagram-media-could)) → download the images the Owner kept → store as Brand assets (`source = 'instagram'`) → enqueue `analyze_asset` for each | nothing (the wizard shows progress) |
 

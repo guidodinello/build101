@@ -15,6 +15,7 @@ erDiagram
     businesses ||--o{ brand_brains : "versions"
     businesses ||--o{ social_accounts : connects
     businesses ||--o{ content_plans : has
+    businesses ||--o{ niche_reports : "weekly"
     businesses ||--o{ posts : has
     businesses ||--o{ messages : "conversation"
     businesses ||--o{ jobs : runs
@@ -201,6 +202,16 @@ create table content_plans (
     ('generating','pending_approval','revising','approved','failed'))
 );
 create index ix_content_plans_business_id_week_start on content_plans (business_id, week_start);
+
+-- Weekly Niche Report (Should, ADR 0025): what works in the Business's niche, from grounded web search
+create table niche_reports (
+  id           uuid primary key default gen_random_uuid(),
+  business_id  uuid not null references businesses(id) on delete cascade,
+  week_start   date not null,                  -- Monday, in the Business's timezone
+  report       jsonb not null,                 -- NicheReport (agents.md § Niche Analyst)
+  created_at   timestamptz not null default now(),
+  unique (business_id, week_start)
+);
 
 create table posts (
   id                uuid primary key default gen_random_uuid(),
