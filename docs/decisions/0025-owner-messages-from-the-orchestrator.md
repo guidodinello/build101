@@ -1,0 +1,27 @@
+# 0025: Owner messages are written by the orchestrator, from typed events
+
+- Date: 2026-10-18
+- Status: proposed
+
+## Context
+
+Until now code sent fixed Spanish text for events around a post (`PHOTOS_KEPT`, `JOB_FAILED`, `PUBLISH_PENDING`, the published link, unreadable media, ...), per [conversation-design.md](../product/conversation-design.md). In a live WhatsApp test on 2026-10-18 the fixed "¿Armo un post con estas fotos?" was followed by the orchestrator's own "¿tal cual o con diseño?": the Owner got two questions for one post, because the fixed text spent the "one question per post" without knowing the conversation. The same blindness shows when the Owner already asked "armame algo para Navidad" before sending photos: asking again is wrong. The Owner replies to these messages, so the orchestrator has to have written them, or at least seen them.
+
+The user decided (2026-10-18): the Owner-facing conversation is written by the Gemini orchestrator ([ADR 0023](0023-gemini-text-llm.md)), never by hardcoded text. This generalizes the follow-up after a sent post, which already worked that way.
+
+## Decision
+
+- Code emits a **typed event** (`backend/app/conversation/events.py`): `PostSent`, `PostFailed`, `Published`, `PublishPending`, `PublishFailed`, `PhotosReceived` (photos with no text), `AudioUnclear`, `UnsupportedMedia`, `PhotoUnreadable`, `PhotoTooBig`, `StaleButton`.
+- One entry point, `ChatHandler.notify(sender, event, channel)`. It adds the event as a system note (`[...]`) to the sender's history and runs one orchestrator turn on it, under the sender's history lock, so it never interleaves with an Owner turn and the note and the reply are both in the history the Owner's next message is read against.
+- Approval stays in code ([ADR 0007](0007-approve-every-post.md)): an event turn has no Owner words, so its `Approval` is empty and `approve_post` always refuses. `create_post` is refused too (`not_owner_request`), except after `PhotosReceived`, where the Owner may already have asked for a post: the model then proceeds as if they had just asked, or asks its one question.
+- `Published`: the permalink is data, not copy. If the model's reply doesn't contain it verbatim, code appends it.
+- Fixed text (`backend/app/copy/messages_es.py`) stays only as the fallback when the LLM is unavailable: `REPLY_FAILED`, the holding messages (`STILL_WORKING`, `LOOKING_AT_PHOTOS`) and, when an event turn fails, that event's old text (`events.fallback`). `PostSent` has no fallback: the post already arrived. When a fallback is sent, the history note records what the Owner was told.
+- Not events: `carousel_slide` ("1/2") is a label on an image, and `BRAND_GENERATING` is sent by the onboarding API, which has no chat handler and no conversation yet; it stays fixed until the onboarding chat (T23) routes it through the orchestrator.
+
+## Consequences
+
+- One Gemini call per event, about 2–3 s with `gemini-3.5-flash`, and its cost. The outcome message of a publish now arrives a few seconds later than the old fixed text.
+- If the LLM is down at that moment, the Owner still hears the outcome (fixed text). For photos with no text that fallback is the old question, so the double-question risk returns only when the LLM is down.
+- The prompt has one "System events" section (`conversation/prompts/events.md`) that says how to react to each event, replacing the scattered note rules.
+- The copy deck is no longer the literal text of most of these messages: it documents tone, and marks which rows are fallbacks.
+- Producers (`PostMaker`, `PostPublisher`) no longer touch the history or `messages_es`; they call the registered `notify` and fail loudly if it was never wired.
