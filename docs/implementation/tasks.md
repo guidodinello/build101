@@ -34,7 +34,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 ### T10: LLM client · A · M
 
 - Read: [architecture/agents.md § LLM client conventions](../architecture/agents.md#llm-client-conventions)
-- Build: `app/llm/client.py` on Gemini ([ADR 0023](../decisions/0023-gemini-text-llm.md)): `structured(agent, system, history, output_model, thinking_level, business_id, job_id=None) -> T` and a function-calling step for the orchestrator. Writes `agent_runs`. Raises `LLMError` on a non-`completed` status, empty output or SDK error. **Started:** `ChatModel` / `GeminiChat.reply()` (text turn, stateless history with thought steps kept) is in, with function calling (`tools` in, `Reply.function_calls` out; a turn that only calls tools ends in `requires_action`) and `structured(agent, system, content, schema, thinking_level)` from T56; `business_id`, `job_id` and `agent_runs` are still to do.
+- Build: `app/llm/client.py` on Gemini ([ADR 0023](../decisions/0023-gemini-text-llm.md)): `structured(agent, system, history, output_model, thinking_level, business_id, job_id=None) -> T` and a function-calling step for the orchestrator. Writes `agent_runs`. Raises `LLMError` on a non-`completed` status, empty output or SDK error. **Started:** `ChatModel` / `GeminiChat.reply()` (text turn, stateless history with thought steps kept) is in, with function calling (`tools` in, `Reply.function_calls` out; a turn that only calls tools ends in `requires_action`) and `structured(agent, system, content, schema, thinking_level)` from T56, and `grounded(...)` (structured with built-in tools) for the Niche Analyst (T58); `business_id`, `job_id` and `agent_runs` are still to do.
 - Done when: a pytest (marked `live`, skipped without key) gets a valid small Pydantic object back and an `agent_runs` row exists.
 
 ### T11: Asset Analyst (photos and logo) · A · M
@@ -55,7 +55,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 ### T14: Art Director · A · M
 
 - Read: [agents.md § Art Director](../architecture/agents.md#art-director), [ADR 0018](../decisions/0018-ai-image-generation-service.md)
-- Build: `app/agents/art_director.py` + prompt: picks the reference photos (the Owner's photos from `posts.candidate_asset_ids` first, else the best matches from the library) and writes the image prompt from the Brand Brain, the brief and trend notes (optional input; source not decided). Fixed prompt rules appended in code (image Posts: no text, prices, offers or logo changes; keep the real product). Post-validation (asset ownership, candidate membership, 1–10 references, rules present) with one retry; fallback brief.
+- Build: `app/agents/art_director.py` + prompt: picks the reference photos (the Owner's photos from `posts.candidate_asset_ids` first, else the best matches from the library) and writes the image prompt from the Brand Brain, the brief and trend notes (optional input: the latest [Niche Report](../architecture/agents.md#niche-analyst), [ADR 0025](../decisions/0025-weekly-niche-report.md)). Fixed prompt rules appended in code (image Posts: no text, prices, offers or logo changes; keep the real product). Post-validation (asset ownership, candidate membership, 1–10 references, rules present) with one retry; fallback brief.
 - Build (carousel mode, used by T55, [ADR 0022](../decisions/0022-carousels-in-mvp.md)): returns `CarouselBrief`: 1–10 references, one English `style_prompt` shared by every slide (palette hex, typography, layout grid, text safe area), one `SlideScene` per `CarouselCopy` slide in the same order (scene only, no text), Spanish `style_notes`. Post-validation adds: one scene per slide, indexes 1..n in order.
 - Done when: given copy + 4 candidate photos it returns a valid `ImageBrief`; given 2 Owner photos its references include those 2 (interim default: only those 2, see the open question on the photo library); the fixed rules are always in the prompt; invalid outputs are corrected or fall back; given a 5-slide `CarouselCopy` it returns a `CarouselBrief` with 5 scenes.
 
@@ -250,6 +250,13 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 
 - Build: T17's Should part: `plan_week` only when asked ("armame el plan de la semana"), plan buttons in T18, and `revise_post` with the Feedback Classifier (F4.4).
 - Done when: the plan arrives only on request; "más corto y mencioná el envío gratis" produces a revised post.
+
+### T58: Weekly Niche Report (F3.6, F3.7) · A · S
+
+- Read: [agents.md § Niche Analyst](../architecture/agents.md#niche-analyst), [ADR 0025](../decisions/0025-weekly-niche-report.md)
+- Done already: the Niche Analyst (`app/agents/niche_analyst.py`, grounded Gemini call, source checks, redirect resolution), the first niche's data, a CLI that saves a report, and its insights as trend notes of the `PostDrafter` (`NICHE_REPORT_PATH`).
+- Build, once T16 and T19 exist: the `niche_reports` migration and model, the `generate_niche_report` job (every Monday per onboarded Business, retried later on `503`), the `niche_report` tool, and trend notes read from the latest row by the Content Strategist, Copywriter and Art Director (T13, T14, T52) instead of the file.
+- Done when: a Monday run saves one report per Business; "¿qué está funcionando en mi rubro?" answers with the report's `summary`, or starts the job when there is none this week.
 
 ### T29: Zernio webhook · B · S
 

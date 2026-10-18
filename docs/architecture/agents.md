@@ -32,7 +32,8 @@ All text LLM calls go through `app/llm/client.py` ([ADR 0023](../decisions/0023-
 - **Caching**: order the prompt stable → volatile (system instruction → Brand Brain → dynamic context) so implicit context caching can hit. Never put timestamps in the system instruction.
 - **Images**: send as image content (signed Supabase URL, or base64 for small files). Resize to max 1568 px on the long side before upload to save tokens.
 - **Video** (Could): Gemini reads video natively, but agents still get ffprobe metadata plus keyframes from the Frame Extractor until the team decides otherwise ([ADR 0023](../decisions/0023-gemini-text-llm.md)).
-- **Timeouts**: 90 s for specialists, 60 s per orchestrator step. On the free tier, `gemini-3.8-flash` took 5–26 s per chat turn with ~400 thought tokens, and some turns went over 30 s (measured over WhatsApp on 2026-10-17); the typing indicator stays on while it runs. The timeout bounds the whole call, SDK retries included. **429 is not retried**: the SDK sleeps for the response's `Retry-After` as-is, and a free-tier daily-quota 429 asked for about 19 h (2026-10-18), so the call fails at once and the Owner gets the fixed error message.
+- **Timeouts**: 90 s for specialists, 60 s per orchestrator step, 180 s for a call with built-in tools (the Niche Analyst took 33–100 s with `url_context` + `google_search` on 2026-10-18). On the free tier, `gemini-3.8-flash` took 5–26 s per chat turn with ~400 thought tokens, and some turns went over 30 s (measured over WhatsApp on 2026-10-17); the typing indicator stays on while it runs. The timeout bounds the whole call, SDK retries included. **429 is not retried**: the SDK sleeps for the response's `Retry-After` as-is, and a free-tier daily-quota 429 asked for about 19 h (2026-10-18), so the call fails at once and the Owner gets the fixed error message.
+- **Built-in tools** (`GeminiChat.grounded`): a structured call with `tools=[{"type": "url_context"}, {"type": "google_search"}]` and a `response_format` schema in the same interaction (they combine, checked live on 2026-10-18). It returns the parsed output plus the pages the tools returned: `url_context_result` steps with status `success`, and `url_citation` annotations of the output.
 - **Logging**: each call writes `agent_runs` (business_id, agent, model, thinking level, input JSON, output JSON, input/output/thought/cached tokens, latency_ms, status, error). Until T02 the client logs those fields.
 
 Before changing any of this, check the current Gemini API docs (<https://ai.google.dev/gemini-api/docs>). Model IDs and parameters change.
@@ -290,16 +291,18 @@ A prompt can be composed from several files: a line that is only `{{include <pat
 
 **Purpose:** tell the Agency what is working in the Business's niche this week (Should, F3.6, [ADR 0025](../decisions/0025-weekly-niche-report.md)). Sources compared in [research/niche-trend-sources.md](../research/niche-trend-sources.md); first niche: [research/furniture-decor-uruguay.md](../research/furniture-decor-uruguay.md).
 
-- Input: `businesses.category`, `location`, the Brand Brain (products, audience, pillars), the niche's reference websites and search themes (a static list per niche in `app/agents/data/`), reference websites the Owner named, today's date.
-- Call: one Gemini interaction through `app/llm/client.py` with the built-in `url_context` (reads the reference websites named in the prompt, up to 20 URLs) and `google_search` tools ([URL context docs](https://ai.google.dev/gemini-api/docs/url-context)). Source links come from the response's URL citations, not from the model's text.
+- Input: `businesses.category`, `location`, the Brand Brain (products, audience, pillars), the niche's reference websites and search themes (a static list per niche in `app/agents/data/`), reference websites the Owner named, today's date. Until the Brand Brain exists, a `BusinessProfile` (name, category, location, a free-text "about").
+- Code: `app/agents/niche_analyst.py`, prompt in `app/agents/prompts/niche_analyst.md`, niches in `app/agents/data/niches.py` (first: `curated-wood-furniture-uy`, from [research/furniture-decor-uruguay.md](../research/furniture-decor-uruguay.md#search-themes-for-the-niche-analyst)).
+- Call: one Gemini interaction through `app/llm/client.py` (`grounded`, thinking `medium`) with the built-in `url_context` (reads the reference websites named in the prompt, up to 20 URLs) and `google_search` tools ([URL context docs](https://ai.google.dev/gemini-api/docs/url-context)).
+- Sources: the model writes `source_urls`, and code keeps a link only when it checks out: a page the tools returned (URL context results, URL citations), a page of a reference website, or a Google Search result. Search results come back as `vertexaisearch.cloud.google.com/grounding-api-redirect/...` links; code follows each redirect once (no page fetch) and stores the real page URL, and drops the link when it doesn't resolve (it expires and names nothing). An insight left with no source is dropped; fewer than 3 sourced insights raise `LLMError`.
 - Output (`NicheReport`):
 
   ```python
   class NicheInsight(BaseModel):
       kind: Literal["theme", "format", "hook", "visual"]
       insight: str                 # Spanish, one or two sentences
-      post_idea: str | None        # how this Business could use it
-      source_urls: list[str]       # at least one, from the response's URL citations
+      post_idea: str | None        # how this Business could use it (the model writes "" for none)
+      source_urls: list[str]       # at least one, checked in code (see Sources)
 
   class NicheReport(BaseModel):
       week_start: date
@@ -307,8 +310,8 @@ A prompt can be composed from several files: a line that is only `{{include <pat
       insights: list[NicheInsight] # 3–8
   ```
 
-- Rules: describe what works, never copy a reference store's photos, product names or copy; no prices, discounts or dates in `post_idea` (commercial dates come from the Content Strategist's static list); drop an insight with no source.
-- Downstream: the latest report's insights are the **trend notes** of the Content Strategist, Copywriter and Art Director (`visual` insights shape the Art Director's image and carousel prompts). Trend notes change angle, format and styling, never facts.
+- Rules: describe what the stores and articles do, never how well it performs unless a cited source measures it (the hands-on run got "tasa altísima de retención" from a store's website); never copy a reference store's photos, product names or copy; no prices, discounts or dates in `post_idea` (commercial dates come from the Content Strategist's static list): code also drops a `post_idea` with `$`, `%`, "precio", "descuento", "oferta", "cuotas" or a day and month; drop an insight with no source.
+- Downstream: the latest report's insights are the **trend notes** of the Content Strategist, Copywriter and Art Director (`visual` insights shape the Art Director's image and carousel prompts). Trend notes change angle, format and styling, never facts. `trend_notes(report)` renders them as one line per insight (`- [kind] insight Idea: post_idea`). Before the database and the job runner, `uv run python -m app.agents.niche_cli` writes a report to a file and `NICHE_REPORT_PATH` feeds its insights to the `PostDrafter` (the Copywriter and Art Director stand-in of T56).
 
 ### Feedback Classifier
 

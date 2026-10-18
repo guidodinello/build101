@@ -20,11 +20,13 @@ logger = logging.getLogger(__name__)
 ThinkingLevel = Literal["low", "medium", "high"]
 Step = dict[str, Any]  # an Interactions API step, as sent and as stored in the history
 Content = dict[str, Any]  # a content block of a user_input step (text or image)
-Tool = dict[str, Any]  # a function declaration: {"type": "function", "name", "description", ...}
+Tool = dict[str, Any]  # a function declaration, or a built-in tool: {"type": "google_search"}
 
 # Free-tier gemini-3.8-flash took 5–26 s per chat turn on 2026-10-17, and some turns over 30 s.
 REQUEST_TIMEOUT_S = 60.0
 STRUCTURED_TIMEOUT_S = 90.0
+# Niche Analyst runs with url_context + google_search took 33–100 s on 2026-10-18.
+GROUNDED_TIMEOUT_S = 180.0
 
 # The SDK sleeps for a 429's Retry-After as-is, ignoring its own backoff cap
 # (google/genai/_gaos/utils/retries.py); a daily-quota 429 asked for 19 h on 2026-10-18.
@@ -56,6 +58,18 @@ class Reply:
     function_calls: list[FunctionCall] = field(default_factory=list)
 
 
+@dataclass(frozen=True, slots=True)
+class WebSource:
+    url: str
+    title: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Grounded[T: BaseModel]:
+    output: T
+    sources: list[WebSource]  # what the tools actually read or cited, from the response steps
+
+
 @runtime_checkable
 class ChatModel(Protocol):
     async def reply(
@@ -75,6 +89,18 @@ class ChatModel(Protocol):
         schema: type[T],
         thinking_level: ThinkingLevel,
     ) -> T: ...
+
+
+class GroundedModel(Protocol):
+    async def grounded[T: BaseModel](
+        self,
+        agent: str,
+        system: str,
+        content: list[Content],
+        schema: type[T],
+        thinking_level: ThinkingLevel,
+        tools: list[Tool],
+    ) -> Grounded[T]: ...
 
 
 def text_content(text: str) -> Content:
@@ -148,25 +174,44 @@ class GeminiChat:
         schema: type[T],
         thinking_level: ThinkingLevel,
     ) -> T:
-        response_format = {
-            "type": "text",
-            "mime_type": "application/json",
-            "schema": schema.model_json_schema(),
-        }
         interaction = await self._create(
             agent,
             system,
             [{"type": "user_input", "content": content}],
             thinking_level,
             STRUCTURED_TIMEOUT_S,
-            response_format=response_format,
+            response_format=response_format(schema),
         )
-        if interaction.status != "completed" or not interaction.output_text:
-            raise LLMError(f"{agent}: status={interaction.status} errors={interaction.errors}")
-        try:
-            return schema.model_validate_json(interaction.output_text)
-        except ValidationError as exc:
-            raise LLMError(f"{agent}: output doesn't match {schema.__name__}: {exc}") from exc
+        return parse_output(agent, interaction, schema)
+
+    async def grounded[T: BaseModel](
+        self,
+        agent: str,
+        system: str,
+        content: list[Content],
+        schema: type[T],
+        thinking_level: ThinkingLevel,
+        tools: list[Tool],
+    ) -> Grounded[T]:
+        """A structured call with built-in tools (url_context, google_search) the model runs.
+
+        Tools and a `response_format` schema combine in one interaction (checked live on
+        2026-10-18, docs/research/niche-trend-sources.md).
+        """
+        interaction = await self._create(
+            agent,
+            system,
+            [{"type": "user_input", "content": content}],
+            thinking_level,
+            GROUNDED_TIMEOUT_S,
+            tools=tools,
+            response_format=response_format(schema),
+        )
+        output = parse_output(agent, interaction, schema)
+        steps = [
+            step.model_dump(mode="json", exclude_none=True) for step in interaction.steps or []
+        ]
+        return Grounded(output, web_sources(steps))
 
     async def _create(
         self,
@@ -209,3 +254,35 @@ class GeminiChat:
             (time.monotonic() - started) * 1000,
         )
         return interaction
+
+
+def response_format(schema: type[BaseModel]) -> dict[str, Any]:
+    return {"type": "text", "mime_type": "application/json", "schema": schema.model_json_schema()}
+
+
+def parse_output[T: BaseModel](agent: str, interaction: Any, schema: type[T]) -> T:
+    if interaction.status != "completed" or not interaction.output_text:
+        raise LLMError(f"{agent}: status={interaction.status} errors={interaction.errors}")
+    try:
+        return schema.model_validate_json(interaction.output_text)
+    except ValidationError as exc:
+        raise LLMError(f"{agent}: output doesn't match {schema.__name__}: {exc}") from exc
+
+
+def web_sources(steps: list[Step]) -> list[WebSource]:
+    """The pages a grounded call read (url_context) or cited (url_citation), first seen first."""
+    found: dict[str, WebSource] = {}
+    for step in steps:
+        if step["type"] == "url_context_result":
+            for result in step.get("result", []):
+                if result.get("url") and result.get("status", "success") == "success":
+                    found.setdefault(result["url"], WebSource(result["url"]))
+        elif step["type"] == "model_output":
+            for block in step.get("content", []):
+                for note in block.get("annotations", []):
+                    if note.get("type") != "url_citation" or not note.get("url"):
+                        continue
+                    known = found.get(note["url"])
+                    if known is None or known.title is None:  # a citation adds the title
+                        found[note["url"]] = WebSource(note["url"], note.get("title"))
+    return list(found.values())

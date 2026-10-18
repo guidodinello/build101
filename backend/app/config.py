@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,6 +38,9 @@ class Settings(BaseSettings):
     public_backend_url: str | None = None
     max_posts_per_day: int = 5
     max_photo_mb: int = 10
+    # A Niche Report saved by `python -m app.agents.niche_cli` (ADR 0025): its insights are the
+    # trend notes of post generation, until the weekly job saves them in niche_reports (T19)
+    niche_report_path: Path | None = None
 
     whatsapp_channel: Literal["kapso", "simulator"] = "kapso"
     kapso_api_key: str | None = None

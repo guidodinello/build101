@@ -14,6 +14,7 @@ from app.llm.client import (
     FunctionCall,
     GeminiChat,
     LLMError,
+    WebSource,
     text_content,
     user_step,
 )
@@ -161,3 +162,57 @@ async def test_a_call_that_never_returns_hits_the_deadline(
 
     with pytest.raises(LLMError, match="no answer within"):
         await model.reply("orchestrator", "system", [user_step("hola")], thinking_level="low")
+
+
+async def test_a_grounded_call_returns_the_output_and_what_the_tools_read() -> None:
+    steps = [
+        {"type": "url_context_call", "id": "u1", "arguments": {"urls": ["https://a.uy"]}},
+        {
+            "type": "url_context_result",
+            "call_id": "u1",
+            "result": [
+                {"url": "https://a.uy", "status": "success"},
+                {"url": "https://paywalled.uy", "status": "paywall"},
+            ],
+        },
+        {"type": "google_search_call", "id": "g1", "arguments": {"queries": ["madera"]}},
+        {"type": "google_search_result", "call_id": "g1", "result": [{"search_suggestions": "x"}]},
+        {
+            "type": "model_output",
+            "content": [
+                {
+                    "type": "text",
+                    "text": '{"title": "Mesa"}',
+                    "annotations": [
+                        {"type": "url_citation", "url": "https://a.uy", "title": "A"},
+                        {"type": "url_citation", "url": "https://b.uy/nota"},
+                    ],
+                }
+            ],
+        },
+    ]
+    model, interactions = chat_with(
+        FakeInteraction(
+            status="completed",
+            output_text='{"title": "Mesa"}',
+            steps=[FakeStep(step) for step in steps],
+        )
+    )
+    tools = [{"type": "url_context"}, {"type": "google_search"}]
+
+    grounded = await model.grounded(
+        "niche_analyst", "system", [text_content("hola")], Title, "medium", tools
+    )
+
+    assert grounded.output == Title(title="Mesa")
+    assert grounded.sources == [WebSource("https://a.uy", "A"), WebSource("https://b.uy/nota")]
+    request = interactions.requests[0]
+    assert request["tools"] == tools
+    assert request["response_format"]["schema"]["required"] == ["title"]
+
+
+async def test_a_grounded_call_with_no_output_is_an_error() -> None:
+    model, _ = chat_with(FakeInteraction(status="failed"))
+
+    with pytest.raises(LLMError, match="niche_analyst"):
+        await model.grounded("niche_analyst", "system", [], Title, "medium", [])

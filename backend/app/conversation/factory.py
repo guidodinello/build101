@@ -1,5 +1,7 @@
 import logging
+from pathlib import Path
 
+from app.agents.niche_analyst import NicheReport, trend_notes
 from app.channels.inbound import EchoHandler, InboundHandler
 from app.config import Settings
 from app.imagegen.factory import build_image_gen
@@ -41,7 +43,7 @@ def build_inbound_handler(
                     "PUBLISHER=zernio without ZERNIO_ACCOUNT_ID: posts can't be published"
                 )
             posts = PostMaker(
-                PostDrafter(model),
+                PostDrafter(model, load_trend_notes(settings.niche_report_path)),
                 build_image_gen(settings),
                 photos,
                 images,
@@ -67,3 +69,12 @@ def build_inbound_handler(
             return chat
         case "echo":
             return EchoHandler()
+
+
+def load_trend_notes(path: Path | None) -> str | None:
+    """The saved Niche Report's insights as trend notes; a missing file is a config error."""
+    if path is None:
+        return None
+    report = NicheReport.model_validate_json(path.read_text())
+    logger.info("trend notes from the Niche Report of the week of %s", report.week_start)
+    return trend_notes(report)
