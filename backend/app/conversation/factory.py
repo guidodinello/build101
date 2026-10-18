@@ -18,6 +18,7 @@ from .button_router import ButtonRouter
 from .chat import ChatHandler
 from .history import InMemoryHistory
 from .library import BrandBrains, BrandLibrary
+from .onboarding import OnboardingGate
 from .photos import InMemoryPhotos
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,8 @@ def build_inbound_handler(
             )
             posts.on_event(chat.notify)
             publishing.on_event(chat.notify)
-            return chat
+            if sessions is None:
+                return chat
+            return OnboardingGate(chat, sessions, settings.frontend_url, settings.assistant_name)
         case "echo":
             return EchoHandler()

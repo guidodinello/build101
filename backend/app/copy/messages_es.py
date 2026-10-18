@@ -6,7 +6,8 @@ module holds only:
 
 - fallbacks for when the LLM is unavailable: `REPLY_FAILED`, `STILL_WORKING`, `LOOKING_AT_PHOTOS`
   and the text of each event (`events.fallback`), sent only if that event's turn fails;
-- text sent directly, outside the chat: `BRAND_GENERATING` (onboarding API, until T23);
+- text sent directly, outside the chat: Flow 1 before the web form (`welcome`, `name_ack_link`,
+  `link_reminder`) and `BRAND_GENERATING` (onboarding API);
 - labels, not conversation: `carousel_slide`.
 """
 
@@ -55,6 +56,25 @@ BUTTON_NO_THANKS = "No, gracias"
 BUTTON_MAKE_POST = "Sí, armalo"
 BUTTON_KEEP_PHOTO = "No, guardala"
 BUTTON_KEEP_PHOTOS = "No, guardalas"
+
+
+def welcome(assistant_name: str) -> str:
+    return (
+        f"¡Hola! 👋 Soy {assistant_name}, tu agencia de marketing en WhatsApp. Te ayudo a "
+        "planear, crear y publicar contenido para tus redes, y *nada se publica sin que vos lo "
+        "apruebes*. ¿Cómo se llama tu negocio?"
+    )
+
+
+def name_ack_link(business_name: str, url: str) -> str:
+    return (
+        f"¡Buenísimo, {business_name}! Para conocer tu marca necesito unos datos y algunas "
+        f"fotos. Son 5 minutos desde el celu 👇 {url}"
+    )
+
+
+def link_reminder(url: str) -> str:
+    return f"Para arrancar me falta que completes esto (5 min) 👇 {url}"
 
 
 def photo_too_big(max_mb: int) -> str:

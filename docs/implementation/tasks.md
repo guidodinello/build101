@@ -89,7 +89,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 ### T23: Inbound handler + onboarding router (Flow 1) · B · M
 
 - Read: [product/user-flows.md](../product/user-flows.md) (state machines, Flow 1), conversation-design.md copy deck
-- Build: `app/conversation/inbound.py` (per-business `asyncio.Lock`, create business on first contact, route by type/state), `onboarding_router.py` (states `new` → `awaiting_web_form`, magic link creation, `link_reminder`, "link" keyword re-sends), stub for `button_router`; the orchestrator side starts from `app/conversation/chat.py` (`ChatHandler`: Gemini replies to text and voice-note transcripts, per-sender lock, in-memory history).
+- Build: `app/conversation/onboarding.py`, built as `OnboardingGate`: an `InboundHandler` that wraps `ChatHandler` when `DATABASE_URL` is set. It works under a per-sender `asyncio.Lock`, creates the Business on first contact, and owns the states before the form: `new` → welcome → `awaiting_name` → the name (text or a voice-note transcript) and a magic link → `awaiting_web_form` → `link_reminder` with a new link on any message, at most once per 30 s. Messages written before the welcome went out aren't taken as the name. From `generating_brand` on, every message goes to the chat. No LLM: the texts are the copy deck's fixed rows.
 - Done when: new number → welcome → name → magic link with a working URL, both on WhatsApp and simulator; unit tests for the state transitions.
 
 ## H7–12
