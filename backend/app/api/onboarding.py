@@ -20,7 +20,7 @@ from app.channels.base import ChannelError, ChannelPort
 from app.channels.router import get_channel
 from app.config import Settings, get_settings
 from app.copy import messages_es
-from app.db.models import AssetProduct, BrandAsset, Business, MagicLink, Product
+from app.db.models import AssetProduct, BrandAsset, Business, MagicLink, Product, SocialAccount
 from app.db.session import get_session
 from app.jobs.queue import enqueue
 from app.onboarding import schemas
@@ -412,6 +412,7 @@ async def _photos_holding_a_slot(session: AsyncSession, business_id: uuid.UUID) 
             select(func.count()).where(
                 BrandAsset.business_id == business_id,
                 BrandAsset.kind == "photo",
+                BrandAsset.source == "web",
                 BrandAsset.archived_at.is_(None),
                 (BrandAsset.status == "ready")
                 | ((BrandAsset.status == "uploading") & recent_ticket),
@@ -435,6 +436,7 @@ async def _check_complete(session: AsyncSession, business: Business) -> None:
         select(func.count()).where(
             BrandAsset.business_id == business.id,
             BrandAsset.kind == "photo",
+            BrandAsset.source == "web",
             BrandAsset.status == "ready",
             BrandAsset.archived_at.is_(None),
         )
@@ -466,6 +468,7 @@ async def _state(
             select(BrandAsset)
             .where(
                 BrandAsset.business_id == business.id,
+                BrandAsset.source == "web",
                 BrandAsset.status == "ready",
                 BrandAsset.archived_at.is_(None),
             )
@@ -523,11 +526,24 @@ async def _state(
             for asset in assets
         ],
         preferences=schemas.Questionnaire.model_validate(preferences) if preferences else None,
-        # No Instagram step in the MVP: posts go to the one demo account (ADR 0024).
-        instagram=schemas.Instagram(status="not_connected", handle=business.instagram_handle),
+        instagram=await _instagram(session, business),
         completed=onboarding.link.completed_at is not None,
         whatsapp_url=settings.whatsapp_url,
     )
+
+
+async def _instagram(session: AsyncSession, business: Business) -> schemas.Instagram:
+    """The connection that reads the account for the Brand Brain (ADR 0028); publishing still
+    goes to the one demo account (ADR 0024)."""
+    account = await session.scalar(
+        select(SocialAccount)
+        .where(SocialAccount.business_id == business.id, SocialAccount.platform == "instagram")
+        .order_by(SocialAccount.updated_at.desc())
+        .limit(1)
+    )
+    if account is None:
+        return schemas.Instagram(status="not_connected", handle=business.instagram_handle)
+    return schemas.Instagram(status=account.status, handle=account.handle)
 
 
 def _to_asset(asset: BrandAsset, url: str, product_ids: list[str]) -> schemas.Asset:

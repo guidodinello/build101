@@ -286,11 +286,10 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 
 ### T53: Instagram feed import (F2.8) · B · C
 
-- Read: [integrations.md § Reading the Owner's existing Instagram media](../architecture/integrations.md#reading-the-owners-existing-instagram-media-could)
-- Out of the MVP with F2.8: it needs the Owner to connect their own Instagram ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)).
-- Prerequisite: the pre-hackathon test shows Zernio's `GET /v1/accounts/{accountId}/posts` returns Instagram posts with full-size images. If not, skip this task.
-- Build: `/api/o/{token}/instagram/import`, `/instagram/media`, `/instagram/media/selection`; `import_instagram_media` job; wizard step 6b (grid with progress, untick to exclude, "Listo, seguir").
-- Done when: after connecting the demo IG, step 6b shows its recent posts and the kept images become analyzed Brand assets with `source = 'instagram'`.
+- Read: [integrations.md § Reading the Owner's Instagram](../architecture/integrations.md#reading-the-owners-instagram-adr-0028), [ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)
+- **Built differently than first planned**: the read goes through our own Meta app with Instagram Login, not Zernio, whose read access was too thin; the import is automatic, with no step 6b review grid.
+- Built: `POST /api/o/{token}/instagram/connect`, `GET /oauth/instagram/callback`, the `import_instagram` job, the Brand Strategist's `<instagram>` input, migration `0002`, wizard step 6 re-reading the state on return.
+- Done when: after connecting the demo IG (an Instagram tester of our Meta app), its profile and captions reach the Brand Strategist and its newest images become analyzed Brand assets with `source = 'instagram'`. Not yet checked against the live account.
 
 ### T54: Colors and a simple logo in the chat (F2.9) · A · C
 

@@ -12,7 +12,7 @@ One live loop, scoped by [ADR 0016](decisions/0016-demo-scope-one-post.md): a sh
 - Brand voice learns from corrections, not only from past posts
 - Catalog, content uploads and Offers in the dashboard; Reels v1 from the owner's own videos ([ADR 0012](decisions/0012-catalog-content-dashboard-reels.md))
 - From the second design pass ([design/mockups/](design/mockups/README.md)), beyond the MVP:
-  - Import the photos and videos of the owner's Instagram feed after connecting, so the Agency starts with real material (Wizard 6b; F2.8, read access to verify)
+  - Import the owner's Instagram feed after connecting, so the Agency starts with real material: built as an automatic import through our own Meta app ([ADR 0028](decisions/0028-read-instagram-with-our-meta-app.md)); the Wizard 6b review grid and video import remain
   - Build colors, and optionally a simple logo, in the chat when the owner has none (WA-Sin-marca; F2.9)
   - Instagram stories from a request ("el sábado abrimos el taller de 10 a 14, hacé una historia"): a vertical 1080×1920 generated image ([ADR 0018](decisions/0018-ai-image-generation-service.md)); publishing support through Zernio to verify (Chat 6; F4.7, Won't in the MVP)
 - Designer agent: before/after layouts from real photos, through the same image service ([ADR 0018](decisions/0018-ai-image-generation-service.md)), never altering the product. Carousels with text slides are already in the MVP ([ADR 0022](decisions/0022-carousels-in-mvp.md))

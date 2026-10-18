@@ -1,6 +1,6 @@
 # Data model
 
-Postgres on Supabase ([ADR 0003](../decisions/0003-database-supabase-sqlalchemy.md)). The schema below is the **initial Alembic migration** (`backend/migrations/versions/0001_initial.py`, executing this SQL). After that, every change is a new migration; never edit an applied one.
+Postgres on Supabase ([ADR 0003](../decisions/0003-database-supabase-sqlalchemy.md)). The schema below is the **current schema**: the initial Alembic migration (`backend/migrations/versions/0001_initial.py`, executing its `.sql`) plus the later ones listed in [Migrations](#migrations). Every change is a new migration; never edit an applied one.
 
 Conventions follow [`.claude/rules/database.md`](../../.claude/rules/database.md): explicitly named constraints and indexes (`uq_`, `ck_`, `ix_`, `{table}_{col}_fkey`), every FK column indexed (or covered by a composite index or unique constraint that starts with it), `timestamptz` everywhere, enum-like values as `text` + `check`, JSON in `jsonb`. Primary keys are UUIDs rather than identity integers, because IDs travel in WhatsApp button payloads and URLs (see the ADR).
 
@@ -52,7 +52,7 @@ create table businesses (
   instagram_handle   text,
   timezone           text not null default 'America/Montevideo',
   onboarding_state   text not null default 'new',
-  onboarding_data    jsonb not null default '{}',    -- raw wizard answers: questionnaire, 3 words, colors (products live in `products`)
+  onboarding_data    jsonb not null default '{}',    -- raw wizard answers: questionnaire, 3 words, colors (products live in `products`); "instagram": the import (see Notes)
   conversation_state jsonb not null default '{}',    -- {"awaiting": "post_feedback", "post_id": "..."}
   channel            text not null default 'whatsapp',
   plan               text not null default 'free',   -- future billing
@@ -109,13 +109,14 @@ create table brand_assets (
   derived_from_asset_id  uuid constraint brand_assets_derived_from_asset_id_fkey
                            references brand_assets(id) on delete cascade,  -- a frame saved from a video
   frame_offset_ms        int,                       -- where in that video the frame was taken
-  owner_hint             text,                      -- optional label from the Owner
+  owner_hint             text,                      -- optional label from the Owner; an imported photo's caption
+  external_id            text,                      -- 'instagram': the Instagram media id, so a re-import skips it
   analysis               jsonb,                     -- AssetAnalysis (photo, logo) or VideoAnalysis (video); null until analyzed
   palette                jsonb,                     -- ["#2f3e2c", ...] (logos, Pillow)
   archived_at            timestamptz,
   created_at             timestamptz not null default now(),
   constraint ck_brand_assets_kind check (kind in ('logo','photo','video')),
-  constraint ck_brand_assets_source check (source in ('web','whatsapp','instagram')),  -- 'instagram': feed import (F2.8, Could)
+  constraint ck_brand_assets_source check (source in ('web','whatsapp','instagram')),  -- 'instagram': feed import (ADR 0028)
   constraint ck_brand_assets_status check (status in ('uploading','ready','failed')),
   constraint ck_brand_assets_duration_only_video check (duration_ms is null or kind = 'video'),
   constraint ck_brand_assets_frame_has_source check (
@@ -123,6 +124,8 @@ create table brand_assets (
 );
 create index ix_brand_assets_business_id_kind on brand_assets (business_id, kind);
 create index ix_brand_assets_derived_from_asset_id on brand_assets (derived_from_asset_id);
+create unique index uq_brand_assets_business_id_source_external_id
+  on brand_assets (business_id, source, external_id) where external_id is not null;
 
 -- Which Products a Brand asset shows (a living-room photo can show the sofa, the table and the rug)
 create table asset_products (
@@ -177,17 +180,20 @@ create table social_accounts (
   id                   uuid primary key default gen_random_uuid(),
   business_id          uuid not null constraint social_accounts_business_id_fkey references businesses(id) on delete cascade,
   platform             text not null,
-  provider             text not null,                 -- 'mock' | 'zernio'
+  provider             text not null,                 -- 'meta' (our app, reads, ADR 0028) | 'zernio' | 'mock'
   provider_profile_id  text,                          -- the provider's id for this Business
   provider_account_id  text,                          -- the provider's id for the connected IG account
   handle               text,
   status               text not null default 'pending',
+  access_token         text,                          -- 'meta': the long-lived Instagram Login token
+  token_expires_at     timestamptz,                   -- 60 days after the connect; not refreshed yet
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now(),
-  constraint uq_social_accounts_business_id_platform unique (business_id, platform),
+  constraint uq_social_accounts_business_id_platform_provider unique (business_id, platform, provider),
   constraint ck_social_accounts_platform check (platform in ('instagram','facebook')),
   constraint ck_social_accounts_status check (status in ('pending','connected','error'))
 );
+alter table social_accounts enable row level security;   -- holds tokens (ADR 0028)
 
 create table content_plans (
   id           uuid primary key default gen_random_uuid(),
@@ -340,7 +346,7 @@ create table jobs (
   finished_at  timestamptz,
   created_at   timestamptz not null default now(),
   constraint ck_jobs_kind check (kind in ('analyze_asset','generate_brand','generate_plan',
-    'generate_post','revise_post','redo_slides','publish_post')),
+    'generate_post','revise_post','redo_slides','publish_post','import_instagram')),
   constraint ck_jobs_status check (status in ('queued','running','succeeded','failed'))
 );
 create index ix_jobs_business_id on jobs (business_id);
@@ -373,11 +379,19 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 
 - **Phone number = identity** in the MVP. Multi-user businesses later need `users` + `business_members`; nothing else in the schema assumes one owner except `businesses.owner_phone`.
 - **Simulator businesses** use fake phone numbers prefixed `sim-` and `channel = 'simulator'`, so the outbound channel is chosen per business.
-- **Row Level Security**: off for the hackathon (the backend uses the service role key and is the only DB client). Turn RLS on before any client talks to Supabase directly. Browser uploads don't break this rule: the browser only writes to Storage, through a signed upload URL the backend issues for one path ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)).
+- **Row Level Security**: off for the hackathon (the backend uses the service role key and is the only DB client), except on `social_accounts`, which holds Instagram access tokens ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)). RLS there has no policies, so Supabase's `anon` and `authenticated` roles read nothing; the backend connects as the table owner, which RLS does not restrict. Turn RLS on for the rest before any client talks to Supabase directly. Browser uploads don't break this rule: the browser only writes to Storage, through a signed upload URL the backend issues for one path ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)).
 - **Products and Offers**: the Catalog lives in `products`, not in `onboarding_data` or the Brand Brain. The Brand Brain keeps only a featured summary that references product ids; agents read the full Catalog and the `active` Offers (not past `ends_on`) from these tables. `current_offers` no longer exists.
 - **Archiving, not deleting**: Owners archive Products, Brand assets and Offers (`archived_at`, or `status = 'archived'` for Offers). Archived rows are hidden from agents and the dashboard. Published and scheduled Posts keep their generated image or video; draft Posts (`pending_approval`, `revising`) that use archived material are flagged for review.
 - **Variations**: `generate_post` writes one `post_variations` row per generated image; picking one copies its path and URL to `posts.image_path` / `image_url` and sets `variation_n`. Approval ([ADR 0007](../decisions/0007-approve-every-post.md)) applies to the picked variation; for an image Post the publisher only ever reads `posts.image_url`. Image-service cost is logged in `agent_runs` with `agent = 'image_gen'`.
 - **Carousel slides** ([ADR 0022](../decisions/0022-carousels-in-mvp.md)): a carousel (`posts.format = 'carousel'`) has no Variations and leaves `posts.image_path` / `image_url` / `variation_n` null. `generate_post` writes one `post_slides` row per slide at `posts.revision`; `redo_slides` bumps the revision, writes the redone slides and copies the unchanged rows, so each revision is a complete carousel. The publisher reads the current revision's rows in `idx` order. Images are stored at `renders/{business_id}/{post_id}-r{revision}-s{idx}.jpg`. `text_check` keeps the Text Checker's result; a slide that still fails after its one regeneration is kept with `matches = false`.
 - **Video frames**: the Asset Analyst saves the best frames of a video as `photo` assets with `derived_from_asset_id` and `frame_offset_ms` set, so the Art Director can use them like any photo.
 - **Build priority** ([ADR 0016](../decisions/0016-demo-scope-one-post.md)): the first migration creates the whole schema, including the Catalog, Offer, video and Reel columns from [ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md), because a column costs nothing and a later migration mid-hackathon does. The Must scope only writes businesses, magic links, photos and logos (wizard and chat), Brand Brains, ad-hoc posts and the conversation tables; `products` holds the 1–5 wizard Products. The rest stays empty until its Could feature is built.
+- **Instagram import** ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)): `import_instagram` writes `businesses.onboarding_data["instagram"]` = `{username, name, biography, website, followers_count, media_count, imported_at, posts: [{type, caption, likes, comments, timestamp, permalink}]}` (newest first, captions cut at 1,000 characters), and one `photo` Brand asset per imported image with `source = 'instagram'`, `external_id` = the media id and `owner_hint` = the post's caption (cut at 200). The wizard's photo counts and grid only see `source = 'web'`.
 - **Seed**: `backend/app/db/seed.py` creates the demo business with a pre-generated Brand Brain and plan (see the demo fallbacks in [../product/mvp.md](../product/mvp.md#demo-fallbacks)).
+
+## Migrations
+
+| Revision | What it changes |
+|---|---|
+| `0001` | The whole schema above as first designed |
+| `0002` | Instagram import ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)): `social_accounts.access_token`, `token_expires_at`, unique on `(business_id, platform, provider)`, RLS on; `brand_assets.external_id` and its partial unique index; job kind `import_instagram` |

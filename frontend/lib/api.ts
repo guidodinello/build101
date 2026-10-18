@@ -198,12 +198,6 @@ export const onboardingApi = {
       body: "{}",
     }),
 
-  instagramCallback: (token: string, query: Record<string, string>, accountId?: string) =>
-    request<OnboardingState>(`${onboarding(token)}/instagram/callback`, {
-      method: "POST",
-      body: JSON.stringify({ account_id: accountId, query }),
-    }),
-
   complete: (token: string) =>
     request<{ status: string }>(`${onboarding(token)}/complete`, { method: "POST" }),
 };

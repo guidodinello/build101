@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 
 from app.agents.asset_analyst import CatalogProduct, analyze_photo
@@ -110,3 +111,38 @@ async def test_revise_mode_sends_the_previous_brain_and_the_correction() -> None
     text = model.contents[0][0]["text"]
     assert "<previous_brand_brain>" in text
     assert "<correction>somos más formales</correction>" in text
+
+
+def instagram_posts(count: int) -> list[dict[str, object]]:
+    return [
+        {"caption": f"Post {i} #Roble #montevideo", "likes": i, "comments": 0, "type": "IMAGE"}
+        for i in range(count)
+    ]
+
+
+async def test_the_owner_instagram_reaches_the_strategist_as_a_sample() -> None:
+    model = SequenceModel([brand_brain()])
+    instagram = {
+        "username": "katei",
+        "biography": "Muebles de roble",
+        "posts": [*instagram_posts(40), {"caption": "", "likes": 999}],
+    }
+
+    await write_brand_brain(model, inputs(instagram=instagram))
+
+    text = model.contents[0][0]["text"]
+    block = json.loads(text.split("<instagram>\n")[1].split("\n</instagram>")[0])
+    captions = [item["caption"].split(" #")[0] for item in block["captions"]]
+    assert captions[:2] == ["Post 39", "Post 38"]  # most engaged first, then the newest
+    assert len(captions) == 30
+    assert "Post 0" in captions and "Post 25" not in captions
+    assert block["top_hashtags"][:2] == ["#roble", "#montevideo"]
+    assert (block["biography"], block["posts_read"]) == ("Muebles de roble", 41)
+
+
+async def test_without_instagram_there_is_no_instagram_block() -> None:
+    model = SequenceModel([brand_brain()])
+
+    await write_brand_brain(model, inputs())
+
+    assert "<instagram>" not in model.contents[0][0]["text"]

@@ -36,7 +36,7 @@ CORS: allow every origin in `FRONTEND_ORIGINS` (comma-separated: Vercel URL + `h
 
 ### Onboarding (web wizard)
 
-All under `/api/o/{token}`. The token is the onboarding magic link. Must, except the Instagram feed import endpoints (Could).
+All under `/api/o/{token}`. The token is the onboarding magic link. The Instagram connect and its callback read the Owner's account for the Brand Brain ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)).
 
 | Method | Path | Body | Response |
 |---|---|---|---|
@@ -48,12 +48,16 @@ All under `/api/o/{token}`. The token is the onboarding magic link. Must, except
 | POST | `/api/o/{token}/assets/{asset_id}/complete` | — | `Asset` (logo includes `palette`) |
 | DELETE | `/api/o/{token}/assets/{asset_id}` | — | `204`: archives the asset (the ✕ on a wizard thumbnail) |
 | PUT | `/api/o/{token}/preferences` | `Questionnaire` (below) | `OnboardingState` |
-| POST | `/api/o/{token}/instagram/connect` | `{}` | `{"auth_url": "..."}`: creates the Zernio profile if needed and returns the hosted connect URL. `redirect_url` = `{FRONTEND_URL}/o/{token}?step=instagram&connected=1` |
-| POST | `/api/o/{token}/instagram/callback` | `{account_id?, query: {...}}`: the frontend forwards the query params Zernio appended to the redirect | `OnboardingState` |
-| POST | `/api/o/{token}/instagram/import` | `{}` | `202 {"job_id"}`: **Could (F2.8)**, only once a way to read the account's media exists ([integrations.md](integrations.md#reading-the-owners-existing-instagram-media-could)). Lists the recent media and creates `InstagramMedia` candidates |
-| GET | `/api/o/{token}/instagram/media` | — | **Could.** `{status: "importing" \| "done" \| "unavailable", done, total, items: InstagramMedia[]}` for the progress bar and the grid on step 6b |
-| PUT | `/api/o/{token}/instagram/media/selection` | `{excluded_ids: [str]}` | **Could.** The Owner unticks what we shouldn't use; the rest is downloaded as Brand assets (`source = 'instagram'`) by `import_instagram_media` |
+| POST | `/api/o/{token}/instagram/connect` | `{}` | `{"auth_url": "..."}`: Instagram's authorize URL for our Meta app (scope `instagram_business_basic`), with `redirect_uri = {PUBLIC_BACKEND_URL}/oauth/instagram/callback` and a signed `state` valid 15 minutes. With `INSTAGRAM=mock` the URL points straight at the callback with a fake code. `409 onboarding_completed` after `/complete` |
 | POST | `/api/o/{token}/complete` | — | `202 {"status": "generating_brand"}`. Validates required fields (name, category, 1–5 products, 3–15 photos, logo optional but recommended), sets state, enqueues `generate_brand`, sends `brand_generating` on WhatsApp. Calling it again after it succeeded returns `202` and does nothing |
+
+The Instagram callback is not under `/api/o/{token}`: Meta redirects the browser to one fixed URL, registered in the app.
+
+| Method | Path | Query | Response |
+|---|---|---|---|
+| GET | `/oauth/instagram/callback` | `code`, `state`, or `error` when the Owner refused | `303` to `{FRONTEND_URL}/o/{token}?step=instagram&connected=1` after exchanging the code for a long-lived token, upserting `social_accounts` (`provider = 'meta'`, `status = 'connected'`, `handle`), filling `businesses.instagram_handle` if empty and enqueuing `import_instagram`. `connected=0` when the Owner refused or Meta failed. A forged or expired `state` is `400 invalid_state`; the link's own errors (`404`, `410`) as below |
+
+The wizard's `assets` list only the Owner's uploads (`source = 'web'`); imported Instagram photos are Brand assets too, but they don't count toward the 3 to 15 photos and don't show in the grid. `instagram` in `OnboardingState` is the Business's latest `social_accounts` row for Instagram (`not_connected` when there is none).
 
 Link errors: an unknown token is `404 link_not_found`, an expired one `410 link_expired`, and every write after `/complete` succeeded is `409 onboarding_completed` (`GET` still works and shows `completed: true`). A body that doesn't validate is `422 invalid_request`; a Supabase Storage failure is `502 storage_unavailable`.
 
@@ -86,8 +90,6 @@ type Asset = {
   analyzed: boolean;
   archived: boolean;
 };
-type InstagramMedia = { id: string; media_type: "image" | "video" | "carousel"; thumbnail_url: string;
-                        permalink: string | null; taken_at: string | null; excluded: boolean };   // Could (F2.8)
 type Product = { id: string; name: string; description: string; price: string | null;
                  category: string | null; position: number; asset_count: number; archived: boolean };
 type Offer = { id: string; kind: "pack" | "promo"; title: string; conditions: string;

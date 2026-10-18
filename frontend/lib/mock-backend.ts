@@ -189,17 +189,12 @@ export function deleteAsset(token: string, assetId: string) {
 }
 
 export function connectInstagram(token: string) {
-  business(token);
-  return { auth_url: `/o/${encodeURIComponent(token)}?step=instagram&connected=1&accountId=mock-ig` };
-}
-
-export function instagramCallback(token: string) {
   const found = business(token);
   found.instagram = {
     status: "connected",
     handle: found.business.instagram_handle ?? "tunegocio",
   };
-  return snapshot(found);
+  return { auth_url: `/o/${encodeURIComponent(token)}?step=instagram&connected=1` };
 }
 
 export function complete(token: string) {

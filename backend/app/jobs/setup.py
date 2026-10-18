@@ -3,11 +3,13 @@ import logging
 from app.channels.base import ChannelPort
 from app.config import Settings
 from app.db.session import get_sessionmaker
+from app.instagram.factory import build_instagram
 from app.llm.client import GeminiChat
 from app.storage import get_storage
 
 from .asset import analyze_asset
 from .brand import generate_brand
+from .instagram import import_instagram_job
 from .runner import JobFunction, JobRunner
 
 logger = logging.getLogger(__name__)
@@ -36,4 +38,12 @@ def build_job_runner(settings: Settings, channel: ChannelPort) -> JobRunner | No
         logger.warning("job runner is off: %s not set", ", ".join(missing))
         return None
     model = GeminiChat.from_api_key(settings.gemini_api_key or "", settings.gemini_chat_model)
-    return JobRunner(get_sessionmaker(), JOBS, get_storage(), channel, model, NOTIFY_ON_FAILURE)
+    jobs = {
+        **JOBS,
+        "import_instagram": import_instagram_job(
+            build_instagram(settings),
+            settings.instagram_import_max_posts,
+            settings.instagram_import_max_images,
+        ),
+    }
+    return JobRunner(get_sessionmaker(), jobs, get_storage(), channel, model, NOTIFY_ON_FAILURE)

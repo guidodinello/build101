@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     zernio_profile_id: str | None = None
     zernio_account_id: str | None = None
 
+    # Reading the Owner's Instagram through our own Meta app (ADR 0028). INSTAGRAM = meta | mock
+    instagram: Literal["meta", "mock"] = "mock"
+    instagram_app_id: str | None = None
+    instagram_app_secret: str | None = None
+    instagram_graph_version: str = "v24.0"
+    instagram_import_max_posts: int = 100
+    instagram_import_max_images: int = 24
+
     @property
     def whatsapp_url(self) -> str:
         return f"https://wa.me/{self.whatsapp_bot_number or ''}"

@@ -24,7 +24,6 @@ async function handle(request: Request, context: Context) {
     if (route === "PUT preferences") return Response.json(mock.savePreferences(token, await body()));
     if (route === "POST uploads") return Response.json(mock.requestUpload(token, await body()));
     if (route === "POST instagram/connect") return Response.json(mock.connectInstagram(token));
-    if (route === "POST instagram/callback") return Response.json(mock.instagramCallback(token));
     if (route === "POST complete") return Response.json(mock.complete(token), { status: 202 });
     if (rest[0] === "assets" && rest[1]) {
       if (method === "POST" && rest[2] === "complete") {

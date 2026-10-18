@@ -59,7 +59,8 @@ Check the hackathon rules first: if pre-written code is not allowed, do only acc
 - [ ] Supabase project (the **Free** plan is enough for the Must scope: photos only); `assets` (private) and `renders` (public) buckets. Pro + a 300 MB file limit only if the Could video work starts ([../research/media-uploads.md](../research/media-uploads.md)).
 - [ ] Vercel project linked to the repo (`frontend/` root).
 - [ ] Railway account verified through GitHub (Trial); check the Trial's end date against the demo ([ADR 0017](../decisions/0017-backend-host-railway.md)).
-- [ ] Call Zernio's `GET /v1/accounts/{accountId}/posts` for the demo IG and note whether it returns Instagram posts with full-size images: that decides whether the Could feed import (T53) is possible ([../architecture/integrations.md](../architecture/integrations.md#reading-the-owners-existing-instagram-media-could)).
+- [x] ~~Call Zernio's `GET /v1/accounts/{accountId}/posts` for the demo IG~~: the feed import (T53) reads through our own Meta app instead ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)).
+- [ ] Add the demo Instagram as an Instagram Tester of our Meta app, register `$PUBLIC_BACKEND_URL/oauth/instagram/callback`, connect it with `INSTAGRAM=meta` and check that captions and the bio come back ([../architecture/integrations.md](../architecture/integrations.md#reading-the-owners-instagram-adr-0028)).
 
 **Demo business materials** (from the teammate with the furniture business):
 

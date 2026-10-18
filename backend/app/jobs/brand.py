@@ -17,8 +17,10 @@ from .runner import JobContext
 
 logger = logging.getLogger(__name__)
 
-# Flow 3 targets the summary within 60 s of the form; the analyses run first, in parallel.
+# Flow 3 targets the summary within 60 s of the form; the Instagram import and the photo
+# analyses run first, in parallel.
 ANALYSES_WAIT_S = 60.0
+INPUT_JOBS = ("analyze_asset", "import_instagram")
 ANALYSES_POLL_S = 2.0
 WHATSAPP_BODY_MAX = 1024
 
@@ -87,21 +89,24 @@ async def send_brand_summary(
 
 
 async def _wait_for_analyses(context: JobContext, business_id: uuid.UUID) -> None:
-    """Give the photo analyses queued with the form time to finish; then go on without them."""
+    """Give the import and the photo analyses time to finish; then go on without them.
+
+    The import queues its photos' analyses as it finishes, so the wait covers those too.
+    """
     deadline = time.monotonic() + ANALYSES_WAIT_S
     while True:
         async with context.sessions() as db:
             pending = await db.scalar(
                 select(func.count()).where(
                     Job.business_id == business_id,
-                    Job.kind == "analyze_asset",
+                    Job.kind.in_(INPUT_JOBS),
                     Job.status.in_(("queued", "running")),
                 )
             )
         if not pending:
             return
         if time.monotonic() >= deadline:
-            logger.warning("brand for %s goes on with %d analyses pending", business_id, pending)
+            logger.warning("brand for %s goes on with %d input jobs pending", business_id, pending)
             return
         await asyncio.sleep(ANALYSES_POLL_S)
 
@@ -168,6 +173,7 @@ async def _inputs(
             for asset in assets
             if asset.kind == "photo" and asset.analysis
         ],
+        instagram=business.onboarding_data.get("instagram"),
         previous=previous,
         correction=correction,
     )

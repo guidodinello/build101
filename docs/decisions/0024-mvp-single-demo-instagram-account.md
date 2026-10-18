@@ -2,6 +2,7 @@
 
 - Date: 2026-10-17
 - Status: proposed
+- Partly superseded by: [0028](0028-read-instagram-with-our-meta-app.md) (the Instagram connect and the feed import; publishing still goes to the demo account)
 
 ## Context
 

@@ -88,6 +88,7 @@ class BrandAsset(Base):
     duration_ms: Mapped[int | None]
     derived_from_asset_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("brand_assets.id"))
     owner_hint: Mapped[str | None]
+    external_id: Mapped[str | None]
     analysis: Mapped[dict[str, Any] | None]
     palette: Mapped[list[str] | None]
     archived_at: Mapped[datetime | None]
@@ -111,6 +112,23 @@ class BrandBrainVersion(Base):
     data: Mapped[dict[str, Any]]
     reason: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class SocialAccount(Base):
+    __tablename__ = "social_accounts"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    business_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("businesses.id"))
+    platform: Mapped[str]
+    provider: Mapped[str]
+    provider_profile_id: Mapped[str | None]
+    provider_account_id: Mapped[str | None]
+    handle: Mapped[str | None]
+    status: Mapped[str] = mapped_column(server_default="pending")
+    access_token: Mapped[str | None]
+    token_expires_at: Mapped[datetime | None]
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
 
 class Job(Base):
