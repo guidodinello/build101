@@ -60,7 +60,7 @@ Priority uses MoSCoW for the 24h build: **Must** = the demo fails without it; **
 | F3.3 | Plan changes in natural language | Could |
 | F3.4 | Calendar view on the web dashboard | Could |
 | F3.5 | Ideas on request ("no sé qué subir esta semana"): the bot proposes 3 ideas, the owner picks | Should |
-| F3.6 | Weekly Niche Report: the Niche Analyst (Claude, with web search and fetch) reads the niche's reference websites and the web for what works; the report feeds trend notes to the Gemini agents (Content Strategist, Copywriter, Art Director) ([ADR 0025](../decisions/0025-weekly-niche-report.md)) | Should |
+| F3.6 | Weekly Niche Report: the Niche Analyst (Gemini with URL context and Google Search) reads the niche's reference websites and the web for what works; the report feeds trend notes to the Content Strategist, Copywriter and Art Director ([ADR 0025](../decisions/0025-weekly-niche-report.md)) | Should |
 | F3.7 | Niche Report on request ("¿qué está funcionando en mi rubro?"): a short summary in the chat, with ideas to post | Should |
 
 ### F4 — Content creation

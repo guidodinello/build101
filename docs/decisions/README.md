@@ -43,4 +43,4 @@ When an ADR is superseded, set its Status to `superseded`, add `- Superseded by:
 | [0022](0022-carousels-in-mvp.md) | Carousels with text slides are in the MVP | proposed | 2026-10-17 |
 | [0023](0023-gemini-text-llm.md) | Gemini as the text LLM | proposed | 2026-10-17 |
 | [0024](0024-mvp-single-demo-instagram-account.md) | The MVP publishes to one demo Instagram account | proposed | 2026-10-17 |
-| [0025](0025-weekly-niche-report.md) | Weekly Niche Report written by Claude | proposed | 2026-10-18 |
+| [0025](0025-weekly-niche-report.md) | Weekly Niche Report from the niche's websites and Google Search | proposed | 2026-10-18 |
