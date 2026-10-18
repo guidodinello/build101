@@ -17,17 +17,19 @@ logger = logging.getLogger(__name__)
 
 
 class BrandLibrary:
-    """The photos the Owner uploaded in the wizard, offered to the chat as `b1`, `b2`, ...
+    """The photos the Owner uploaded in the wizard, offered to the chat as `b1`, `b2`, ...,
+    and their logo.
 
     Until T19 moves the chat onto the database. Ids follow upload order over every photo of the
-    Business, archived ones included, so a photo keeps its id. Each agents' copy is downloaded
-    once and kept in memory.
+    Business, archived ones included, so a photo keeps its id. Each agents' copy, and the logo's
+    original, is downloaded once and kept in memory.
     """
 
     def __init__(self, sessions: async_sessionmaker[AsyncSession], storage: StoragePort) -> None:
         self._sessions = sessions
         self._storage = storage
         self._images: dict[uuid.UUID, bytes] = {}
+        self._logos: dict[uuid.UUID, bytes] = {}
 
     async def photos(self, sender: str) -> list[Photo]:
         async with self._sessions() as db:
@@ -67,6 +69,31 @@ class BrandLibrary:
             for photo_id, asset in numbered
             if asset.id in self._images
         ]
+
+    async def logo(self, sender: str) -> bytes | None:
+        """The latest logo as uploaded, not the agents' JPEG copy, which drops transparency."""
+        async with self._sessions() as db:
+            asset = await db.scalar(
+                select(BrandAsset)
+                .join(Business, Business.id == BrandAsset.business_id)
+                .where(
+                    Business.owner_phone == sender,
+                    BrandAsset.kind == "logo",
+                    BrandAsset.status == "ready",
+                    BrandAsset.archived_at.is_(None),
+                )
+                .order_by(BrandAsset.created_at.desc(), BrandAsset.id.desc())
+                .limit(1)
+            )
+        if asset is None:
+            return None
+        if asset.id not in self._logos:
+            data = await self._storage.download(ASSETS_BUCKET, asset.storage_path)
+            if data is None:
+                logger.warning("the logo %s is missing from storage", asset.id)
+                return None
+            self._logos[asset.id] = data
+        return self._logos[asset.id]
 
     async def _fetch(self, asset: BrandAsset) -> None:
         if asset.id in self._images:

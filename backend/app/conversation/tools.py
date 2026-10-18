@@ -46,6 +46,14 @@ CREATE_POST: Tool = {
                     "old one can no longer be published."
                 ),
             },
+            "with_logo": {
+                "type": "boolean",
+                "description": (
+                    "true only when the Owner asked for their logo on the post and "
+                    "<brand_logo> is present: it goes small in a corner of every image, exactly "
+                    "as they uploaded it."
+                ),
+            },
             "slide_count": {
                 "type": "integer",
                 "minimum": MIN_SLIDES,

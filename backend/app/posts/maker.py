@@ -19,7 +19,7 @@ from app.conversation.events import Event, Notify, PostFailed, PostSent
 from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
 from app.imagegen.base import ImageGenPort
-from app.media.images import to_post_image
+from app.media.images import add_logo, to_post_image
 from app.media.public import PublicImages
 
 from .drafts import PostDrafter
@@ -28,6 +28,10 @@ from .store import APPROVABLE, InMemoryPosts, Post, PostImage
 logger = logging.getLogger(__name__)
 
 MIN_SLIDES = 2
+LOGO_SPACE_NOTE = (
+    "Leave the bottom-right corner, about a quarter of the width and a tenth of the height, "
+    "free of text and of the product: the brand's logo is added there afterwards."
+)
 WHATSAPP_CAPTION_MAX = 1024
 
 
@@ -38,6 +42,7 @@ class CreatePostArgs(BaseModel):
     asset_ids: list[str] = Field(default_factory=list, max_length=MAX_SLIDES)
     style: Literal["photos", "design"]
     slide_count: int | None = Field(default=None, ge=MIN_SLIDES, le=MAX_SLIDES)
+    with_logo: bool = False
     replaces: str | None = None
 
 
@@ -109,6 +114,7 @@ class PostMaker:
             asset_ids=[photo.id for photo in post.source_photos],
             style=post.style,
             slide_count=post.slide_count,
+            with_logo=post.with_logo,
         )
         return self._start(post.sender, args, post.source_photos, channel)
 
@@ -117,6 +123,9 @@ class PostMaker:
     ) -> dict[str, Any]:
         if sender in self._generating:
             return {"error": "generation_in_progress"}
+        logo = self._photos.logo(sender) if args.with_logo else None
+        if args.with_logo and logo is None:
+            return {"error": "no_logo"}
         # Only a design generates images, which is what the daily limit caps.
         today = self._now().date()
         day, started = self._designs_today.get(sender, (today, 0))
@@ -130,7 +139,7 @@ class PostMaker:
         for photo in photos:
             photo.used = True
         post_id = uuid.uuid4().hex[:8]
-        task = asyncio.create_task(self._generate(sender, post_id, args, photos, channel))
+        task = asyncio.create_task(self._generate(sender, post_id, args, photos, logo, channel))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return {"post_id": post_id, "status": "generating"}
@@ -145,13 +154,14 @@ class PostMaker:
         post_id: str,
         args: CreatePostArgs,
         photos: list[Photo],
+        logo: bytes | None,
         channel: ChannelPort,
     ) -> None:
         started = time.monotonic()
         event: Event
         try:
             brand = await self._brand(sender, post_id)
-            post = await self._render(args, photos, brand)
+            post = await self._render(args, photos, brand, logo)
             paths = await self._send(sender, post.images, post.text, channel)
             self._keep(sender, post_id, args, photos, paths, post)
             event = PostSent(
@@ -203,19 +213,29 @@ class PostMaker:
             logger.exception("event for post %s failed for %s", post_id, mask(sender))
 
     async def _render(
-        self, args: CreatePostArgs, photos: list[Photo], brand: BrandBrain | None
+        self,
+        args: CreatePostArgs,
+        photos: list[Photo],
+        brand: BrandBrain | None,
+        logo: bytes | None,
     ) -> RenderedPost:
         """The post's images in order (one per photo, unless a design asks for a slide count)."""
         references = [photo.data for photo in photos]
         if args.style == "photos":
             copy = await self._drafter.copy(args.brief, references, brand)
             images = [await asyncio.to_thread(to_post_image, data) for data in references]
-            return RenderedPost(images, post_text(copy.caption, copy.hashtags), headlines=[])
+            return RenderedPost(
+                await with_logo(images, logo), post_text(copy.caption, copy.hashtags), headlines=[]
+            )
 
         count = args.slide_count or len(photos)
         copy, brief = await self._drafter.design(
             args.brief, references, [photo.id for photo in photos], count, brand
         )
+        if logo:
+            brief = brief.model_copy(
+                update={"style_prompt": f"{brief.style_prompt}\n{LOGO_SPACE_NOTE}"}
+            )
         one_per_photo = len(photos) == count
         slides = await CarouselGenerator(self._image_gen).generate(
             copy,
@@ -226,7 +246,7 @@ class PostMaker:
             else None,
         )
         return RenderedPost(
-            [slide.image for slide in slides],
+            await with_logo([slide.image for slide in slides], logo),
             post_text(copy.caption, copy.hashtags),
             headlines=[slide.headline for slide in copy.slides],
         )
@@ -251,6 +271,7 @@ class PostMaker:
                 brief=args.brief,
                 style=args.style,
                 slide_count=args.slide_count,
+                with_logo=args.with_logo,
                 source_photos=photos,
             )
         )
@@ -288,6 +309,12 @@ class PostMaker:
             logger.warning("post text is %d chars, over the image caption limit", len(caption))
             await channel.send_text(sender, caption)
         return paths
+
+
+async def with_logo(images: list[bytes], logo: bytes | None) -> list[bytes]:
+    if logo is None:
+        return images
+    return [await asyncio.to_thread(add_logo, image, logo) for image in images]
 
 
 def post_text(caption: str, hashtags: list[str]) -> str:

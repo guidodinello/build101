@@ -112,3 +112,46 @@ async def test_an_owner_without_a_brand_brain_has_none(
 
     assert await BrandBrains(sessions).latest(PHONE) is None
     assert await BrandBrains(sessions).latest("59800000000") is None
+
+
+async def test_the_latest_logo_is_read_as_uploaded_once(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    storage = CountingStorage()
+    start = datetime.now(UTC) - timedelta(hours=1)
+    async with sessions() as db:
+        business = Business(owner_phone=PHONE, name="Katei")
+        db.add(business)
+        await db.flush()
+        logos = [
+            BrandAsset(
+                business_id=business.id,
+                kind="logo",
+                source="web",
+                status="ready",
+                storage_path=f"{business.id}/logo-{n}.png",
+                mime_type="image/png",
+                created_at=start + timedelta(minutes=n),
+            )
+            for n in (1, 2)
+        ]
+        db.add_all(logos)
+        await db.commit()
+    newest = make_image((200, 80), format="PNG")
+    storage.put("assets", f"{business.id}/logo-1.png", make_image((10, 10), format="PNG"))
+    storage.put("assets", f"{business.id}/logo-2.png", newest)
+    library = BrandLibrary(sessions, storage)
+
+    assert await library.logo(PHONE) == newest
+    assert await library.logo(PHONE) == newest
+    assert storage.downloads == 1
+
+
+async def test_an_owner_without_a_logo_has_none(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    async with sessions() as db:
+        db.add(Business(owner_phone=PHONE, name="Katei"))
+        await db.commit()
+
+    assert await BrandLibrary(sessions, FakeStorage()).logo(PHONE) is None

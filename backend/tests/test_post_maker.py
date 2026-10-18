@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
+from io import BytesIO
 
 import pytest
+from PIL import Image
 from sqlalchemy.exc import OperationalError
 
 from app.agents.schemas import BrandBrain
@@ -9,7 +11,7 @@ from app.conversation.photos import LOCAL_TZ, InMemoryPhotos
 from app.media.images import POST_SIZE, image_size
 from app.media.public import PublicImages
 from app.posts.drafts import SYSTEM_PROMPT, CarouselDraft, PostCopy, PostDrafter, SlideDraft
-from app.posts.maker import WHATSAPP_CAPTION_MAX, PostMaker
+from app.posts.maker import LOGO_SPACE_NOTE, WHATSAPP_CAPTION_MAX, PostMaker
 from app.posts.store import InMemoryPosts, Post, PostImage
 from tests.conftest import make_image
 from tests.fakes import CountingImageGen, FakeChannel, ScriptedModel, brand_brain
@@ -510,3 +512,65 @@ def test_a_publishing_post_is_never_dropped_to_make_room() -> None:
     assert store.get(SENDER, "busy") is busy
     assert store.get(SENDER, "a") is None
     assert store.get(SENDER, "b") is not None
+
+
+LOGO_RED = (220, 0, 0)
+
+
+def bottom_right_pixel(data: bytes) -> tuple[int, int, int]:
+    """A pixel inside the logo's corner: 4% margin, then into the logo."""
+    with Image.open(BytesIO(data)) as image:
+        return image.convert("RGB").getpixel((image.width - 60, image.height - 60))
+
+
+async def test_a_post_with_the_logo_stamps_it_on_every_image(photos: InMemoryPhotos) -> None:
+    photos.set_logo(SENDER, make_image((300, 120), color="#dc0000", format="PNG"))
+    model = ScriptedModel(drafts={PostCopy: PostCopy(caption="Mesa", hashtags=["#muebles"])})
+    store = InMemoryPosts()
+    posts = maker(model, CountingImageGen(), photos, store=store)
+
+    result = posts.create_post(
+        SENDER,
+        {"brief": "mesa", "asset_ids": ["f1", "f2"], "style": "photos", "with_logo": True},
+        FakeChannel(),
+    )
+    await posts.join()
+
+    post = store.get(SENDER, result["post_id"])
+    assert post is not None and post.with_logo
+    for image in post.images:
+        red, green, blue = bottom_right_pixel(image.data)
+        assert red > 180 and green < 60 and blue < 60
+
+
+async def test_a_design_with_the_logo_keeps_its_corner_clear(photos: InMemoryPhotos) -> None:
+    photos.set_logo(SENDER, make_image((300, 120), color="#dc0000", format="PNG"))
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(2)})
+    image_gen = CountingImageGen()
+    posts = maker(model, image_gen, photos)
+
+    posts.create_post(
+        SENDER,
+        {"brief": "mesa", "asset_ids": ["f1", "f2"], "style": "design", "with_logo": True},
+        FakeChannel(),
+    )
+    await posts.join()
+
+    assert len(image_gen.calls) == 2
+    assert all(LOGO_SPACE_NOTE in prompt for prompt in image_gen.calls)
+
+
+async def test_a_post_with_the_logo_without_one_is_refused(photos: InMemoryPhotos) -> None:
+    model = ScriptedModel(drafts={PostCopy: PostCopy(caption="Mesa", hashtags=["#muebles"])})
+    channel = FakeChannel()
+    posts = maker(model, CountingImageGen(), photos)
+
+    result = posts.create_post(
+        SENDER,
+        {"brief": "mesa", "asset_ids": ["f1"], "style": "photos", "with_logo": True},
+        channel,
+    )
+
+    assert result == {"error": "no_logo"}
+    assert channel.images == []
+    assert model.structured_calls == []

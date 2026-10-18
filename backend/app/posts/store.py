@@ -43,6 +43,7 @@ class Post:
     brief: str = ""
     style: Literal["photos", "design"] = "photos"
     slide_count: int | None = None
+    with_logo: bool = False
     source_photos: list[Photo] = field(default_factory=list)
     publish_attempts: int = 0
 

@@ -251,7 +251,9 @@ class ChatHandler:
         await self._refresh_library(sender)
         recent = self._photos.recent(sender)
         unseen = [photo for photo in recent if not photo.seen]
-        with_context = step_with_photos(text, recent, unseen, self._photos.library(sender))
+        with_context = step_with_photos(
+            text, recent, unseen, self._photos.library(sender), self._photos.logo(sender)
+        )
         keep_alive = self._start(self._keep_owner_posted(sender, message_id, bool(unseen), channel))
         try:
             text, turn = await self._converse(sender, with_context, approval, True, channel)
@@ -307,7 +309,8 @@ class ChatHandler:
         if with_photos:
             await self._refresh_library(sender)
         library = self._photos.library(sender) if with_photos else []
-        current = step_with_photos(note, recent, unseen, library) if with_photos else step
+        logo = self._photos.logo(sender) if with_photos else None
+        current = step_with_photos(note, recent, unseen, library, logo) if with_photos else step
         keep_alive = (
             self._start(self._keep_owner_posted(sender, message_id, bool(unseen), channel))
             if with_photos
@@ -381,6 +384,7 @@ class ChatHandler:
             return
         try:
             self._photos.set_library(sender, await self._library.photos(sender))
+            self._photos.set_logo(sender, await self._library.logo(sender))
         except (SQLAlchemyError, StorageError):
             # Answer with the photos already loaded rather than not at all.
             logger.warning("loading the wizard photos failed for %s", mask(sender), exc_info=True)
@@ -485,19 +489,27 @@ async def send_with_buttons(
 
 
 def step_with_photos(
-    text: str, recent: list[Photo], unseen: list[Photo], library: list[Photo] | None = None
+    text: str,
+    recent: list[Photo],
+    unseen: list[Photo],
+    library: list[Photo] | None = None,
+    logo: bytes | None = None,
 ) -> Step:
     """The context (and the photos the model hasn't seen) ride on this turn's user step only,
     so the system prompt and the stored history stay byte-identical across turns."""
     return user_step(
         text,
-        text_content(context_block(recent, unseen, library)),
+        text_content(context_block(recent, unseen, library, has_logo=logo is not None)),
         *(image_content(photo.data, "image/jpeg") for photo in unseen),
     )
 
 
 def context_block(
-    recent: list[Photo], attached: list[Photo], library: list[Photo] | None = None
+    recent: list[Photo],
+    attached: list[Photo],
+    library: list[Photo] | None = None,
+    *,
+    has_logo: bool = False,
 ) -> str:
     lines = [describe_photo(photo) for photo in recent] or ["none"]
     if attached:
@@ -506,6 +518,8 @@ def context_block(
     if library:
         listed = "\n".join(f"- {photo.id}: {photo.caption}" for photo in library)
         block += f"\n<brand_photos>\n{listed}\n</brand_photos>"
+    if has_logo:
+        block += "\n<brand_logo>uploaded</brand_logo>"
     return block
 
 

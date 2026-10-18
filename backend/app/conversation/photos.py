@@ -47,8 +47,9 @@ class InMemoryPhotos:
         self._recent_for = recent_for
         self._now = now
         self._senders: defaultdict[str, _SenderPhotos] = defaultdict(_SenderPhotos)
-        # The wizard's photos (`BrandLibrary`), refreshed every turn; they don't expire.
+        # The wizard's photos and logo (`BrandLibrary`), refreshed every turn; they don't expire.
         self._library: dict[str, list[Photo]] = {}
+        self._logos: dict[str, bytes] = {}
 
     def add(self, sender: str, data: bytes, caption: str | None) -> Photo:
         stored = self._senders[sender]
@@ -67,6 +68,16 @@ class InMemoryPhotos:
 
     def library(self, sender: str) -> list[Photo]:
         return self._library.get(sender, [])
+
+    def set_logo(self, sender: str, logo: bytes | None) -> None:
+        if logo is None:
+            self._logos.pop(sender, None)
+        else:
+            self._logos[sender] = logo
+
+    def logo(self, sender: str) -> bytes | None:
+        """The logo file as the Owner uploaded it, transparency included."""
+        return self._logos.get(sender)
 
     def find(self, sender: str, ids: list[str]) -> tuple[list[Photo], list[str]]:
         """The kept and library photos with these ids, used ones included, and the ids not found."""
