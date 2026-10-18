@@ -14,12 +14,13 @@ class PublishMedia(BaseModel):
 class PublishResult(BaseModel):
     """Outcome of a publish call.
 
-    `retrying`: the provider accepted the post and retries on its own. Do not re-publish;
-    the webhook (T29) or a later status check confirms it. `scheduled` is reserved for a
-    post the caller asked to publish later (T30).
+    `pending`: the provider accepted the post and has not reached a final outcome (it is still
+    publishing, or retries a transient error on its own). The post may well go live: do not
+    report a failure and do not re-publish; the webhook (T29) or a later status check confirms
+    it. `scheduled` is reserved for a post the caller asked to publish later (T30).
     """
 
-    status: Literal["published", "scheduled", "retrying", "failed"]
+    status: Literal["published", "scheduled", "pending", "failed"]
     external_post_id: str | None = None
     permalink: str | None = None
     error: str | None = None
@@ -37,6 +38,7 @@ class PublisherPort(Protocol):
         caption: str,
         media: PublishMedia,
         when: datetime | None = None,
+        idempotency_key: str | None = None,
     ) -> PublishResult: ...
 
 

@@ -1,4 +1,7 @@
+import asyncio
 import logging
+import math
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, Self
 
@@ -9,24 +12,43 @@ from .base import PublisherError, PublishMedia, PublishResult
 logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT_S = 30.0
-# publishNow is synchronous: Zernio answers after Instagram has processed the media
+# publishNow is documented as synchronous, but Instagram answers 201 "publishing" while it
+# processes the media (observed on the live test, 2026-10-18); this only bounds the POST itself
 PUBLISH_TIMEOUT_S = 120.0
+# After a non-final answer, poll GET /posts/{id}. A pending result at the cap is not a failure
+POLL_INTERVAL_S = 2.0
+POLL_TIMEOUT_S = 90.0
 MAX_CAROUSEL_ITEMS = 10
 MIN_CAROUSEL_ITEMS = 2
 INSTAGRAM = "instagram"
 STATUS_PUBLISHED = "published"
-# 207 with this post status: every platform hit a transient error and Zernio retries on its own
-STATUS_RETRYING = "scheduled"
+# Post statuses from Zernio's OpenAPI spec: these are final and mean the post did not go out
+STATUSES_FAILED = frozenset({"failed", "partial", "cancelled"})
+# Not final: still publishing, or (207) a transient error that Zernio retries on its own
+STATUSES_PENDING = frozenset({"publishing", "scheduled"})
 HTTP_CONFLICT = 409
-HTTP_MULTI_STATUS = 207
 ERROR_BODY_CHARS = 300
+
+Sleep = Callable[[float], Awaitable[None]]
 
 
 class ZernioPublisher:
     """PublisherPort over Zernio's unified publishing API (ADR 0008)."""
 
-    def __init__(self, client: httpx.AsyncClient) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        sleep: Sleep = asyncio.sleep,
+        poll_interval_s: float = POLL_INTERVAL_S,
+        poll_timeout_s: float = POLL_TIMEOUT_S,
+    ) -> None:
+        if poll_interval_s <= 0:
+            raise ValueError(f"poll_interval_s must be positive, got {poll_interval_s}")
         self._client = client
+        self._sleep = sleep
+        self._poll_interval_s = poll_interval_s
+        # counted in attempts, not by clock, so a patched sleep cannot make the loop spin
+        self._poll_attempts = math.ceil(poll_timeout_s / poll_interval_s)
 
     @classmethod
     def from_settings(
@@ -34,6 +56,9 @@ class ZernioPublisher:
         api_key: str,
         base_url: str,
         transport: httpx.AsyncBaseTransport | None = None,
+        sleep: Sleep = asyncio.sleep,
+        poll_interval_s: float = POLL_INTERVAL_S,
+        poll_timeout_s: float = POLL_TIMEOUT_S,
     ) -> Self:
         client = httpx.AsyncClient(
             base_url=base_url,
@@ -41,7 +66,7 @@ class ZernioPublisher:
             timeout=REQUEST_TIMEOUT_S,
             transport=transport,
         )
-        return cls(client)
+        return cls(client, sleep, poll_interval_s, poll_timeout_s)
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -80,6 +105,7 @@ class ZernioPublisher:
         caption: str,
         media: PublishMedia,
         when: datetime | None = None,
+        idempotency_key: str | None = None,
     ) -> PublishResult:
         if when is not None:
             raise NotImplementedError("scheduling is T30's Should part")
@@ -89,10 +115,13 @@ class ZernioPublisher:
             "platforms": [{"platform": INSTAGRAM, "accountId": account_id}],
             "publishNow": True,
         }
+        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
         response = await self._request(
-            "POST", "/posts", json=body, timeout=PUBLISH_TIMEOUT_S, accept={HTTP_MULTI_STATUS}
+            "POST", "/posts", json=body, headers=headers, timeout=PUBLISH_TIMEOUT_S
         )
-        result = _publish_result(response)
+        result = _post_result(_json(response))
+        if result.status == "pending" and result.external_post_id:
+            result = await self._wait_for_outcome(result.external_post_id, result)
         logger.info(
             "zernio publish: http=%d status=%s post=%s",
             response.status_code,
@@ -100,6 +129,31 @@ class ZernioPublisher:
             result.external_post_id,
         )
         return result
+
+    async def _wait_for_outcome(self, post_id: str, pending: PublishResult) -> PublishResult:
+        """Poll the post until Zernio reports a final outcome. Never re-POSTs, never raises.
+
+        The post already exists, so raising here would invite a retry and a duplicate: a poll
+        that fails is logged and skipped, and running out of attempts returns `pending`.
+        """
+        result = pending
+        for attempt in range(1, self._poll_attempts + 1):
+            await self._sleep(self._poll_interval_s)
+            try:
+                response = await self._request("GET", f"/posts/{post_id}")
+                result = _post_result(_json(response))
+            except PublisherError as exc:
+                logger.warning("zernio poll %d for post %s failed: %s", attempt, post_id, exc)
+                continue
+            if result.status != "pending":
+                return result
+        waited_s = self._poll_attempts * self._poll_interval_s
+        return result.model_copy(
+            update={
+                "external_post_id": post_id,
+                "error": f"still publishing after {waited_s:.0f} s",
+            }
+        )
 
     async def _request(
         self,
@@ -154,13 +208,18 @@ def _field(obj: Any, key: str) -> str:
     return value
 
 
-def _publish_result(response: httpx.Response) -> PublishResult:
-    body = _json(response)
+def _post_result(body: dict[str, Any]) -> PublishResult:
+    """Map a create-post or get-post body to a result, by `post.status` alone.
+
+    Only a final failure maps to `failed`: anything not final (including a post that is live
+    but whose permalink is not there yet) is `pending`, so the caller never reports a failure
+    for a post that may still go out.
+    """
     post = body.get("post")
     if not isinstance(post, dict):
-        raise PublisherError("zernio publish response has no post")
+        raise PublisherError("zernio response has no post")
     post_id = post.get("_id") if isinstance(post.get("_id"), str) else None
-    post_status = post.get("status")
+    status = post.get("status")
     target = next(
         (
             p
@@ -170,19 +229,20 @@ def _publish_result(response: httpx.Response) -> PublishResult:
         {},
     )
 
-    if post_status == STATUS_PUBLISHED and response.status_code != HTTP_MULTI_STATUS:
+    if status == STATUS_PUBLISHED:
+        permalink = target.get("platformPostUrl")
+        if isinstance(permalink, str) and permalink:
+            return PublishResult(status="published", external_post_id=post_id, permalink=permalink)
         return PublishResult(
-            status="published",
+            status="pending",
             external_post_id=post_id,
-            permalink=_field(target, "platformPostUrl"),
+            error="published, but Zernio has no permalink yet",
         )
-    if post_status == STATUS_RETRYING and response.status_code == HTTP_MULTI_STATUS:
-        return PublishResult(
-            status="retrying", external_post_id=post_id, error="provider is retrying"
-        )
-    reason = (
-        target.get("errorMessage")
-        or body.get("error")
-        or f"post status {post_status!r} (http {response.status_code})"
+    if status in STATUSES_FAILED:
+        reason = target.get("errorMessage") or body.get("error") or f"post status {status!r}"
+        return PublishResult(status="failed", external_post_id=post_id, error=str(reason))
+    if status not in STATUSES_PENDING:
+        logger.warning("zernio post %s has an unknown status %r", post_id, status)
+    return PublishResult(
+        status="pending", external_post_id=post_id, error=f"post status {status!r}"
     )
-    return PublishResult(status="failed", external_post_id=post_id, error=str(reason))

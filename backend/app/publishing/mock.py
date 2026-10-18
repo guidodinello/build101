@@ -31,6 +31,7 @@ class MockPublisher:
         caption: str,
         media: PublishMedia,
         when: datetime | None = None,
+        idempotency_key: str | None = None,
     ) -> PublishResult:
         await asyncio.sleep(self._delay_s)
         post_id = uuid4().hex[:ID_CHARS]
