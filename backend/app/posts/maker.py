@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Literal
@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 
 MIN_SLIDES = 2
 WHATSAPP_CAPTION_MAX = 1024
+
+# Called as (sender, post_id, note, channel) once a post reached the Owner. It owns adding the
+# note to the history: the chat handler does it under the sender's lock and answers the note.
+PostSent = Callable[[str, str, str, ChannelPort], Awaitable[None]]
 
 
 class CreatePostArgs(BaseModel):
@@ -79,6 +83,11 @@ class PostMaker:
         self._generating: set[str] = set()
         self._designs_today: dict[str, tuple[date, int]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
+        self._post_sent: PostSent | None = None
+
+    def on_post_sent(self, callback: PostSent) -> None:
+        """Register who follows up after a post arrives (wired where the chat handler is built)."""
+        self._post_sent = callback
 
     def create_post(
         self, sender: str, arguments: dict[str, Any], channel: ChannelPort
@@ -126,11 +135,12 @@ class PostMaker:
         channel: ChannelPort,
     ) -> None:
         started = time.monotonic()
+        note: str | None = None
         try:
             post = await self._render(args, photos)
             paths = await self._send(sender, post.images, post.text, channel)
             self._keep(sender, post_id, args, paths, post)
-            self._history.extend(sender, [user_step(sent_note(post_id, args, photos, post))])
+            note = sent_note(post_id, args, photos, post)
             logger.info(
                 "post %s (%s, %d images) sent to %s in %.1fs",
                 post_id,
@@ -149,6 +159,19 @@ class PostMaker:
                 logger.warning("could not tell %s that post %s failed", mask(sender), post_id)
         finally:
             self._generating.discard(sender)
+        if note is not None:
+            # After the guard is released, and outside the try: a failing follow-up must not
+            # report a failed post that the Owner already has.
+            await self._announce(sender, post_id, note, channel)
+
+    async def _announce(self, sender: str, post_id: str, note: str, channel: ChannelPort) -> None:
+        if self._post_sent is None:
+            self._history.extend(sender, [user_step(note)])
+            return
+        try:
+            await self._post_sent(sender, post_id, note, channel)
+        except Exception:
+            logger.exception("follow-up for post %s failed for %s", post_id, mask(sender))
 
     async def _render(self, args: CreatePostArgs, photos: list[Photo]) -> RenderedPost:
         """The post's images in order (one per photo, unless a design asks for a slide count)."""

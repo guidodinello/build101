@@ -53,7 +53,7 @@ def build_inbound_handler(
             publishing = PostPublisher(
                 publisher, store, history, images, settings.public_backend_url, account_id
             )
-            return ChatHandler(
+            chat = ChatHandler(
                 model,
                 history,
                 photos,
@@ -63,5 +63,7 @@ def build_inbound_handler(
                 settings.assistant_name,
                 max_photo_mb=settings.max_photo_mb,
             )
+            posts.on_post_sent(chat.post_sent)
+            return chat
         case "echo":
             return EchoHandler()

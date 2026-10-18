@@ -169,6 +169,47 @@ async def test_a_sent_design_leaves_a_note_with_its_headlines_and_text(
     assert f'Text: "{POST_TEXT}"' in text
 
 
+async def test_a_registered_follow_up_gets_the_note_once_the_guard_is_free(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(1)})
+    history, channel = InMemoryHistory(), FakeChannel()
+    posts = maker(model, CountingImageGen(), photos, history=history)
+    seen: list[tuple[str, str, str, bool]] = []
+
+    async def follow_up(sender: str, post_id: str, note: str, to: object) -> None:
+        assert to is channel
+        # The guard is free, so an Owner turn can ask for another post meanwhile.
+        seen.append((sender, post_id, note, SENDER in posts._generating))
+
+    posts.on_post_sent(follow_up)
+    result = posts.create_post(
+        SENDER, {"brief": "m", "asset_ids": ["f1"], "style": "design"}, channel
+    )
+    await posts.join()
+
+    [(sender, post_id, note, generating)] = seen
+    assert (sender, post_id, generating) == (SENDER, result["post_id"], False)
+    assert note.startswith(f"[post {post_id} sent to the Owner]")
+    assert history.get(SENDER) == []  # the follow-up owns adding the note
+
+
+async def test_a_failing_follow_up_is_not_a_failed_post(photos: InMemoryPhotos) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(1)})
+    channel = FakeChannel()
+    posts = maker(model, CountingImageGen(), photos)
+
+    async def follow_up(sender: str, post_id: str, note: str, to: object) -> None:
+        raise RuntimeError("boom")
+
+    posts.on_post_sent(follow_up)
+    posts.create_post(SENDER, {"brief": "m", "asset_ids": ["f1"], "style": "design"}, channel)
+    await posts.join()
+
+    assert channel.sent == []  # no JOB_FAILED
+    assert len(channel.images) == 1
+
+
 async def test_a_text_too_long_for_a_caption_follows_the_images(photos: InMemoryPhotos) -> None:
     long_caption = "a" * WHATSAPP_CAPTION_MAX
     model = ScriptedModel(drafts={PostCopy: PostCopy(caption=long_caption, hashtags=[])})
