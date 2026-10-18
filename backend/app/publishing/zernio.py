@@ -1,6 +1,6 @@
 import asyncio
 import logging
-import math
+import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, Self
@@ -15,9 +15,12 @@ REQUEST_TIMEOUT_S = 30.0
 # publishNow is documented as synchronous, but Instagram answers 201 "publishing" while it
 # processes the media (observed on the live test, 2026-10-18); this only bounds the POST itself
 PUBLISH_TIMEOUT_S = 120.0
-# After a non-final answer, poll GET /posts/{id}. A pending result at the cap is not a failure
+# After a non-final answer, poll GET /posts/{id} until the wall-clock cap. A pending result at
+# the cap is not a failure. Each poll gets its own short timeout, so a hung GET overruns the cap
+# by at most one poll (cap + interval + POLL_REQUEST_TIMEOUT_S), not by the 30 s default
 POLL_INTERVAL_S = 2.0
 POLL_TIMEOUT_S = 90.0
+POLL_REQUEST_TIMEOUT_S = 10.0
 MAX_CAROUSEL_ITEMS = 10
 MIN_CAROUSEL_ITEMS = 2
 INSTAGRAM = "instagram"
@@ -30,10 +33,14 @@ HTTP_CONFLICT = 409
 ERROR_BODY_CHARS = 300
 
 Sleep = Callable[[float], Awaitable[None]]
+Clock = Callable[[], float]
 
 
 class ZernioPublisher:
-    """PublisherPort over Zernio's unified publishing API (ADR 0008)."""
+    """PublisherPort over Zernio's unified publishing API (ADR 0008).
+
+    `sleep` and `clock` are injectable so tests drive the poll loop without waiting.
+    """
 
     def __init__(
         self,
@@ -41,14 +48,15 @@ class ZernioPublisher:
         sleep: Sleep = asyncio.sleep,
         poll_interval_s: float = POLL_INTERVAL_S,
         poll_timeout_s: float = POLL_TIMEOUT_S,
+        clock: Clock = time.monotonic,
     ) -> None:
         if poll_interval_s <= 0:
             raise ValueError(f"poll_interval_s must be positive, got {poll_interval_s}")
         self._client = client
         self._sleep = sleep
         self._poll_interval_s = poll_interval_s
-        # counted in attempts, not by clock, so a patched sleep cannot make the loop spin
-        self._poll_attempts = math.ceil(poll_timeout_s / poll_interval_s)
+        self._poll_timeout_s = poll_timeout_s
+        self._clock = clock
 
     @classmethod
     def from_settings(
@@ -59,6 +67,7 @@ class ZernioPublisher:
         sleep: Sleep = asyncio.sleep,
         poll_interval_s: float = POLL_INTERVAL_S,
         poll_timeout_s: float = POLL_TIMEOUT_S,
+        clock: Clock = time.monotonic,
     ) -> Self:
         client = httpx.AsyncClient(
             base_url=base_url,
@@ -66,7 +75,7 @@ class ZernioPublisher:
             timeout=REQUEST_TIMEOUT_S,
             transport=transport,
         )
-        return cls(client, sleep, poll_interval_s, poll_timeout_s)
+        return cls(client, sleep, poll_interval_s, poll_timeout_s, clock)
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -120,7 +129,15 @@ class ZernioPublisher:
             "POST", "/posts", json=body, headers=headers, timeout=PUBLISH_TIMEOUT_S
         )
         result = _post_result(_json(response))
-        if result.status == "pending" and result.external_post_id:
+        if result.status == "pending":
+            if not result.external_post_id:
+                # nothing to poll and nothing for the webhook (T29) to match: surface it
+                # instead of returning a pending result that can never be resolved
+                raise PublisherError(
+                    "zernio accepted the post but returned no post id, so it cannot be tracked; "
+                    "it may still go live, so check the account before retrying "
+                    "(a retry with the same Idempotency-Key replays the original post)"
+                )
             result = await self._wait_for_outcome(result.external_post_id, result)
         logger.info(
             "zernio publish: http=%d status=%s post=%s",
@@ -134,20 +151,26 @@ class ZernioPublisher:
         """Poll the post until Zernio reports a final outcome. Never re-POSTs, never raises.
 
         The post already exists, so raising here would invite a retry and a duplicate: a poll
-        that fails is logged and skipped, and running out of attempts returns `pending`.
+        that fails is logged and skipped, and reaching the wall-clock cap returns `pending`.
         """
+        start = self._clock()
+        deadline = start + self._poll_timeout_s
         result = pending
-        for attempt in range(1, self._poll_attempts + 1):
+        attempt = 0
+        while self._clock() < deadline:
+            attempt += 1
             await self._sleep(self._poll_interval_s)
             try:
-                response = await self._request("GET", f"/posts/{post_id}")
+                response = await self._request(
+                    "GET", f"/posts/{post_id}", timeout=POLL_REQUEST_TIMEOUT_S
+                )
                 result = _post_result(_json(response))
             except PublisherError as exc:
                 logger.warning("zernio poll %d for post %s failed: %s", attempt, post_id, exc)
                 continue
             if result.status != "pending":
                 return result
-        waited_s = self._poll_attempts * self._poll_interval_s
+        waited_s = self._clock() - start
         return result.model_copy(
             update={
                 "external_post_id": post_id,

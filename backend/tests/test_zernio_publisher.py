@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from app.publishing.base import PublisherError, PublishMedia
-from app.publishing.zernio import ZernioPublisher
+from app.publishing.zernio import POLL_REQUEST_TIMEOUT_S, PUBLISH_TIMEOUT_S, ZernioPublisher
 
 BASE_URL = "https://zernio.test/api/v1"
 ACCOUNT_ID = "acc-1"
@@ -16,23 +16,41 @@ IMAGE = PublishMedia(format="image", url="https://img.test/1.jpg")
 Handler = Callable[[httpx.Request], httpx.Response]
 
 
+class FakeClock:
+    """Monotonic time that only moves when a fake sleep or a slow poll advances it."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
 def publisher_with(
     handler: Handler,
     *,
     sleeps: list[float] | None = None,
     poll_interval_s: float = 2.0,
     poll_timeout_s: float = 90.0,
+    get_latency_s: float = 0.0,
 ) -> tuple[ZernioPublisher, list[httpx.Request]]:
-    """A publisher over a mocked transport. Its sleep only records, so no test waits."""
+    """A publisher over a mocked transport. Sleeping only advances a fake clock: no test waits.
+
+    `get_latency_s` makes every GET take that long on the fake clock (a slow Zernio).
+    """
     requests: list[httpx.Request] = []
     slept = sleeps if sleeps is not None else []
+    clock = FakeClock()
 
     def record(request: httpx.Request) -> httpx.Response:
         requests.append(request)
+        if request.method == "GET":
+            clock.now += get_latency_s
         return handler(request)
 
     async def fake_sleep(seconds: float) -> None:
         slept.append(seconds)
+        clock.now += seconds
 
     publisher = ZernioPublisher.from_settings(
         api_key="sk_test",
@@ -41,6 +59,7 @@ def publisher_with(
         sleep=fake_sleep,
         poll_interval_s=poll_interval_s,
         poll_timeout_s=poll_timeout_s,
+        clock=clock,
     )
     return publisher, requests
 
@@ -218,10 +237,47 @@ async def test_still_publishing_at_the_cap_is_pending_not_a_failure() -> None:
     assert sleeps == [2.0, 2.0, 2.0]
 
 
-def test_the_default_cap_is_90_seconds_in_2_second_polls() -> None:
-    publisher = ZernioPublisher(httpx.AsyncClient())
+async def test_the_default_cap_is_90_seconds_in_2_second_polls() -> None:
+    publisher, requests = publisher_with(scripted(reply(201, PUBLISHING), reply(200, PUBLISHING)))
 
-    assert publisher._poll_attempts == 45
+    result = await publisher.publish(ACCOUNT_ID, "x", IMAGE)
+
+    assert result.status == "pending"
+    assert len(posts(requests, "GET")) == 45
+    assert "90 s" in (result.error or "")
+
+
+async def test_the_cap_is_wall_clock_so_slow_polls_do_not_stretch_it() -> None:
+    publisher, requests = publisher_with(
+        scripted(reply(201, PUBLISHING), reply(200, PUBLISHING)), get_latency_s=30.0
+    )
+
+    result = await publisher.publish(ACCOUNT_ID, "x", IMAGE)
+
+    # polls land at 32 s, 64 s and 96 s; the third crosses the 90 s cap and ends the loop
+    assert result.status == "pending"
+    assert len(posts(requests, "GET")) == 3
+    assert "96 s" in (result.error or "")
+
+
+async def test_each_poll_has_its_own_short_timeout() -> None:
+    publisher, requests = publisher_with(scripted(reply(201, PUBLISHING), reply(200, PUBLISHED)))
+
+    await publisher.publish(ACCOUNT_ID, "x", IMAGE)
+
+    [poll] = posts(requests, "GET")
+    assert poll.extensions["timeout"]["read"] == POLL_REQUEST_TIMEOUT_S
+    [post] = posts(requests, "POST")
+    assert post.extensions["timeout"]["read"] == PUBLISH_TIMEOUT_S
+
+
+async def test_a_pending_post_without_an_id_raises_and_is_not_polled() -> None:
+    no_id = {"post": {"status": "publishing", "platforms": []}}
+    publisher, requests = publisher_with(scripted(reply(201, no_id), reply(200, PUBLISHED)))
+
+    with pytest.raises(PublisherError, match="no post id"):
+        await publisher.publish(ACCOUNT_ID, "x", IMAGE)
+    assert posts(requests, "GET") == []
 
 
 async def test_207_scheduled_is_zernio_retrying_then_it_lands() -> None:
