@@ -1,33 +1,37 @@
-# Furniture and home-decor stores in Uruguay: niche study
+# Curated solid-wood furniture and home stores in Uruguay: niche study
 
-First niche for the weekly Niche Report ([ADR 0025](../decisions/0025-weekly-niche-report.md)): who sells furniture and decor in Uruguay, how they talk on their channels, the commercial calendar, and what the Niche Analyst should search each week. All sources read 2026-10-18. Instagram needs a login, so no profile was opened: handles come from the brands' own sites or directories, and **no follower counts were found**. The Divino and Balton site claims below were re-checked by hand on the same date.
+First niche for the weekly Niche Report ([ADR 0025](../decisions/0025-weekly-niche-report.md)). The focus is **curated, carefully made wood furniture**: stores and workshops like La Ibérica that sell solid-wood, timeless pieces with a design eye, not the price-led chains. All sources read 2026-10-18. Instagram needs a login, so no profile was opened: handles come from the brands' own sites, and **no follower counts were found**.
 
-## Main players
+## The reference: La Ibérica
 
-| Player | What they sell, price band | Instagram | Source |
-|---|---|---|---|
-| **Sodimac** (Falabella) | Home improvement plus furniture (living, dining, kitchen, bath, outdoor), deco, lighting; low price band | @SodimacUY | [sodimac.com.uy](https://www.sodimac.com.uy), [Sodimac 2016 report](https://www.sodimac.cl/static/site/nuestra-empresa/RS-sodimac2016/RA/X.html) |
-| **Divino** | Local chain: mattresses, sofas, dining, deco, bazar, appliances; mass to mid | @divinouy (site footer) | [divino.com.uy](https://www.divino.com.uy), [locales](https://www.divino.com.uy/locales) |
-| **Kave Home** (Spanish brand, local partner) | Design furniture, high price; stores in Montevideo and Punta del Este | not found | [Interior Daily](https://www.interiordaily.com/article/9697412/kave-home-opens-second-store-in-uruguay/) |
-| **Zara Home** (franchised to Regency Group since 2023) | Deco and textiles, upper mid | not found | [Forbes España](https://forbes.es/ultima-hora/313866/inditex-transferira-a-regency-group-la-gestion-de-las-operaciones-de-zara-y-zara-home-en-argentina-y-uruguay/) |
-| **Viasono** | Uruguayan, mattresses and design furniture, 4 stores, premium | not found | [Forbes Argentina](https://www.forbesargentina.com/negocios/viasono-cruza-charco-empresa-uruguaya-diseno-descanso-llego-argentina-como-primer-paso-su-plan-expansion-n92654) |
-| **Balton Hogar** | Direct importer, online first with a showroom; value prices | @balton.uy | [balton.com.uy](https://balton.com.uy/) |
-| **La Cueva Muebles** | Broad catalogue, low to mid | @lacuevamuebles | [guiadeo.com](https://guiadeo.com/comercio/cueva-muebles) |
-| **ComboHome** | Low-price furniture combos | @combohome.uy | [ComboHome blog](https://combohome.uy/blogs/news/las-9-mejores-mueblerias-de-uruguay) |
-| **Small makers and author design** (Lais Muebles, Fábrica Sur, Diseño Montevideo) | Made to order, mid to premium: the closest peers of the MVP's Owner ([mvp.md](../product/mvp.md)) | @lais_muebles; others not confirmed | [laismuebles.com.uy](https://www.laismuebles.com.uy/), [fabricasur.com](https://www.fabricasur.com/en), [disenomontevideo.com.uy](https://disenomontevideo.com.uy/) |
+- Montevideo home store founded in **1892**, run by the family's third and fourth generations; once the name for wedding registries, it moved its focus to decor and to selling online nationwide ([InfoNegocios, 2019-08-13](https://infonegocios.biz/amp/bien-de-familia/la-iberica-127-anos-de-historia-y-7-familiares-trabajando-en-la-empresa)).
+- Sells furniture (sofas, armchairs, tables, sideboards, bedroom, outdoor), lighting, tableware and decor. Product names state the wood: "OLMO MACIZO", "ROBLE MACIZO", "HAYA MACIZA", "PINO MACIZO RECICLADO"; other materials include linen, velvet, Italian leather, rattan, travertine and marble ([laiberica.com.uy](https://www.laiberica.com.uy/)).
+- Messaging is advice and atmosphere, not price: "Armonía & funcionalidad", "AMBIENTES QUE INSPIRAN", a design tip ("Seguí la regla del 80/20": 80% timeless, 20% bold pieces), "materiales fuertes y diseños atemporales", integral advice and wedding registries. **No financing or cuotas on the home page**; free shipping above a threshold ([laiberica.com.uy](https://www.laiberica.com.uy/)).
+- Instagram: @bazarlaiberica ([laiberica.com.uy](https://www.laiberica.com.uy/)).
 
-The "best mueblerías" lists from ComboHome and Balton are written by competitors that rank themselves first; read their price bands as rough.
+## Peers in the same segment
 
-## How they talk (from their sites)
+| Player | What they sell | How they talk | Instagram | Source |
+|---|---|---|---|---|
+| **Marvic** | Family workshop (Canelones, since 2011): collection in solid Uruguayan wood (álamo, eucalipto, fresno, ciprés from national plantations), made to measure; showrooms in Montevideo and Punta del Este | "medidas pensadas para tu vida real, no para un catálogo"; boards air-dried about 2 years; 12-month warranty; free delivery and assembly in Montevideo; WhatsApp as main channel | @marvic.uy | [marvic.com.uy](https://marvic.com.uy/) |
+| **Casa & Samic** | Furniture, lighting, design objects and flooring | "tienda de mobiliario, iluminación, objetos de diseño y pisos" | samic.uy | [samic.com.uy](https://www.samic.com.uy/) |
+| **Diseño Montevideo** | Made-to-order furniture, about 30 years | Unique pieces, quality, made to measure | not confirmed | [disenomontevideo.com.uy](https://disenomontevideo.com.uy/), [Facebook](https://www.facebook.com/DisenoMontevideo/) |
+| **Lais Muebles** | Design furniture | — | @lais_muebles | [laismuebles.com.uy](https://www.laismuebles.com.uy/) |
+| **Design stores on Constituyente and nearby** (Zaguán Muebles, Sámago, Altro Disegno, Mod, Las Jacintas) | Custom and restored pieces, wood furniture and accessories | Customer chooses finishes (Zaguán); undated list, check they are still open | not listed | [Univision](https://www.univision.com/explora/13-mueblerias-de-montevideo-que-vas-a-querer-conocer) |
+| **Kave Home, Viasono** | Imported design furniture; Uruguayan design and rest brand, premium | — | not found | [Interior Daily](https://www.interiordaily.com/article/9697412/kave-home-opens-second-store-in-uruguay/), [Forbes Argentina](https://www.forbesargentina.com/negocios/viasono-cruza-charco-empresa-uruguaya-diseno-descanso-llego-argentina-como-primer-paso-su-plan-expansion-n92654) |
 
-Posts were not sampled; this is what the brands put up front on their sites.
+Design scene: the Concurso Nacional de Diseño de Muebles 2026 (Pronto Maderas and Universidad ORT) has the theme "El asiento uruguayo" ([ORT bases](https://fd.ort.edu.uy/innovaportal/file/159178/1/bases-concurso-nacional-diseno-de-muebles-2026-vf.pdf)).
 
-- **Financing first**: Divino shows "12 cuotas de oca", "Plan Recambio 25%" that stacks with financing, and its own credit ([divino.com.uy](https://www.divino.com.uy)). Balton: "Hasta 12 Cuotas sin interés" and a lower price for bank transfer ([balton.com.uy](https://balton.com.uy/)). Uruguayans pay 74% of online purchases by credit card ([Montevideo Portal](https://www.montevideo.com.uy/Noticias/Uruguay-lidera-el-crecimiento-del-eCommerce-en-America-Latina-en-2025-uc926770)).
-- **Delivery second**: Divino's "Envío gratis INTERIOR"; Balton's "COMPRÁ Y RECIBILO DE 24 A 72 HRS EN MONTEVIDEO" and daily shipping to the interior (same sources).
-- **Trust**: Balton shows 2,511 reviews averaging 4.98 ([balton.com.uy](https://balton.com.uy/)); a review aggregator collects complaints about a big chain's deliveries and after-sales ([yorugupino.com](https://yorugupino.com/tienda-de-muebles/montevideo/divino-s-a-casa-central/)). Delivery and assembly that work are worth showing.
-- **Recurring promos**: seasonal sales, outlet, combos, "Ofertas del mes", "Los más vendidos", 3D room planning (same sources).
-- **WhatsApp is the sales channel** for online-first stores (Balton's main contact is WhatsApp, [balton.com.uy](https://balton.com.uy/)); a large Buenos Aires furniture store calls Instagram its main sales channel ([Perfil](https://noticias.perfil.com/noticias/amp/empresas-y-protagonistas/la-muebleria-mas-grande-de-buenos-aires-y-su-lucha-contra-las-estafas-virtuales.phtml)).
-- **Gap**: no Uruguayan source on which Instagram formats work in this niche. Until posts are sampled by hand, formats follow [instagram-content-trends.md](instagram-content-trends.md) (carousels for saves, Reels for reach).
+## What sets this segment apart
+
+- **Material and origin are the message**: the wood is named (roble, olmo, haya, eucalipto) and its origin and drying are explained (La Ibérica, Marvic above). The mass chains lead with cuotas, free shipping and "llega mañana" instead (Divino and Balton sites: [divino.com.uy](https://www.divino.com.uy), [balton.com.uy](https://balton.com.uy/)), which this segment doesn't.
+- **Advice and atmosphere**: rooms that inspire, design rules, integral advice (La Ibérica); made to measure for the customer's real space (Marvic).
+- **Trust through craft**: warranty, the workshop, delivery and assembly by the maker (Marvic).
+- **Gap**: no posts were sampled, so which formats work on their Instagram is unknown. Until then, formats follow [instagram-content-trends.md](instagram-content-trends.md) (carousels for saves, Reels for reach) and the carousel shapes in [carousel-references.md](carousel-references.md) ("Cómo cuidar la madera maciza" fits this segment directly).
+
+## Not the focus: price-led chains
+
+Sodimac, Divino, Balton, La Cueva, ComboHome sell on price, cuotas and fast delivery ([divino.com.uy](https://www.divino.com.uy), [balton.com.uy](https://balton.com.uy/), [ComboHome blog](https://combohome.uy/blogs/news/las-9-mejores-mueblerias-de-uruguay)). They are useful only as contrast; the Niche Report should not push their tone onto a curated Owner.
 
 ## Market context
 
@@ -59,25 +63,26 @@ Candidates for `commercial_dates_uy.json` ([agents.md § Content Strategist](../
 
 A first list for the niche's search themes (`app/agents/data/`, [agents.md § Niche Analyst](../architecture/agents.md#niche-analyst)), in Spanish:
 
-- `mueblería Montevideo promoción cuotas`
-- `muebles Uruguay envío gratis interior`
-- `tendencias decoración 2026 Uruguay`
-- `muebles de diseño uruguayo madera`
-- `ambientación living pequeño apartamento Montevideo`
-- `Ciberlunes Uruguay hogar muebles`, `Black Friday Uruguay muebles`
-- `Día de la Madre Uruguay regalos hogar deco` (only near the date)
+- `muebles madera maciza Uruguay diseño`
+- `madera uruguaya muebles a medida eucalipto fresno`
+- `cuidado madera maciza muebles consejos`
+- `tendencias decoración 2026 madera natural materiales nobles`
+- `ambientación living madera estilo atemporal`
+- `diseño de mobiliario uruguayo` (fairs, contests, studios)
 - `Casa FOA Uruguay`, `feria Ideas+ diseño`
+- `listas de casamiento deco Montevideo`, `Día de la Madre Uruguay regalos deco` (only near the date)
 
-Candidate reference accounts, for a later Business Discovery step (handles from the brands' sites or directories, not checked on Instagram): @divinouy, @SodimacUY, @balton.uy, @lacuevamuebles, @combohome.uy, @lais_muebles.
+Candidate reference accounts, for a later Business Discovery step (handles from the brands' sites, not checked on Instagram): @bazarlaiberica, @marvic.uy, @samic.uy, @lais_muebles.
 
 ## Implications for build101
 
-- **Facts stay the Owner's**: financing, free shipping and delivery times are what this niche sells with, but the agents never invent them ([AGENTS.md](../../AGENTS.md#building-the-mvp)). The Niche Report can suggest "mostrá las cuotas si las tenés"; the copy only states cuotas or shipping when they come from an Offer, the Brand Brain or the Owner's words.
-- **Small makers differ from the chains**: the MVP's Owner is closer to the made-to-order workshops than to Divino or Sodimac, so the report should favour craft, materials and process (taller, madera, a medida) over price-led promos.
-- **Delivery and assembly as proof**: behind-the-scenes and "llegó a casa" posts address the niche's main complaint.
+- **The Brand Brain's materials are the story**: the copy should name the wood and how the piece is made, but only from the Brand Brain, the Catalog or the Owner's words ([AGENTS.md](../../AGENTS.md#building-the-mvp)); the agents never invent a species, origin or drying time.
+- **Tone**: calm, advice-led, timeless ("cómo cuidar", "cómo combinar", "por qué roble"); avoid urgency and price-led promos unless the Owner asks.
+- **Images**: warm natural light, wood grain and texture close-ups, styled rooms; matches the regional 2026 trends in Market context and the Art Director's scene choices.
+- **Formats to try first**: care and material carousels, workshop process, "antes de llegar a tu casa" (making and delivery).
 
 ## Open points
 
 - Sample recent posts of the reference accounts by hand (logged in) to see formats and engagement; nothing here is from Instagram itself.
-- Confirm Nov 2026 CyberLunes and 2027 Mother's and Father's Day dates before adding them to `commercial_dates_uy.json`.
-- Find the home and furniture share of Uruguayan e-commerce (CEDU or [ICEX](https://www.icex.es/content/dam/icex/centros/uruguay/documentos/2025/resumen-ejecutivo-informe-e-pais-comercio-electronico-uruguay-2025.pdf) reports).
+- Confirm the Constituyente design stores still operate and find their handles.
+- Confirm Nov 2026 CyberLunes and 2027 Mother's and Father's Day dates before adding them to `commercial_dates_uy.json`; this segment may skip CyberLunes and Black Friday altogether.
