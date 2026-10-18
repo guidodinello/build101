@@ -29,7 +29,7 @@ STRUCTURED_TIMEOUT_S = 90.0
 # The SDK sleeps for a 429's Retry-After as-is, ignoring its own backoff cap
 # (google/genai/_gaos/utils/retries.py); a daily-quota 429 asked for 19 h on 2026-10-18.
 # So 429 is not retried, and each call also gets a wall-clock deadline (`_create`).
-RETRY_STATUS_CODES = [408, 500, 502, 503, 504]
+RETRY_STATUS_CODES = [408, 409, 500, 502, 503, 504]  # the SDK default minus 429
 HTTP_OPTIONS = types.HttpOptions(
     retry_options=types.HttpRetryOptions(http_status_codes=RETRY_STATUS_CODES)
 )
