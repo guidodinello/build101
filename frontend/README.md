@@ -25,6 +25,7 @@ Until the backend serves the onboarding endpoints (T24), set `ENABLE_MOCK_API=tr
 - `components/onboarding/`: wizard shell, one file per step under `steps/`, the photo upload queue.
 - `lib/api.ts`: REST client and types, written by hand from `api.md`. `lib/upload.ts`: signed-URL uploads.
 - `components/ui/`: shadcn/ui components, restyled to the tokens in [web-app.md](../docs/design/web-app.md#visual-language).
+- `app/api/render/` + `lib/post-render/`: the post slide renderer ([ADR 0028](../docs/decisions/0028-designed-slides-ai-scene-code-layout.md)). The backend POSTs one slide's spec and gets a 1080×1350 JPEG, rendered by Takumi without a browser. Template families are in `lib/post-render/families/`, fonts (OFL) in `lib/post-render/fonts/`. Contract: [integrations.md § Slide renderer](../docs/architecture/integrations.md#slide-renderer-takumi-on-vercel). With `ENABLE_TEMPLATE_PREVIEW=true`, `/dev/post-templates` shows every family over sample copy.
 
 ## Deploy
 
@@ -55,5 +56,7 @@ Set for Production and Preview (`vercel env add KEY production`, value on stdin)
 | `NEXT_PUBLIC_WHATSAPP_URL` | `https://wa.me/56920403095`, the shared Kapso sandbox number (same as the backend's `WHATSAPP_BOT_NUMBER`) |
 | `ENABLE_MOCK_API` | `false` |
 | `NEXT_PUBLIC_DEV_TOKEN` | unset (the simulator is not used in production) |
+| `RENDER_SECRET` | a random secret, the same as the backend's `RENDERER_SECRET`; without it `/api/render` answers 503 |
+| `ENABLE_TEMPLATE_PREVIEW` | `false` |
 
 The backend must list the Vercel domain in `FRONTEND_URL` and `FRONTEND_ORIGINS` ([backend/README.md](../backend/README.md#environment-variables)), or magic links point at localhost and browser calls fail CORS.
