@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     kapso_phone_number_id: str | None = None
     kapso_base_url: str = "https://api.kapso.ai/meta/whatsapp/v24.0"
 
+    # The MVP publishes to one demo Instagram account (ADR 0024); the ids replace
+    # social_accounts until the database exists.
+    publisher: Literal["zernio", "mock"] = "mock"
+    zernio_api_key: str | None = None
+    zernio_base_url: str = "https://zernio.com/api/v1"
+    zernio_profile_id: str | None = None
+    zernio_account_id: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:
