@@ -93,7 +93,7 @@ Generated, not fixed: the acknowledgement that names the chosen photo ("Dale, lo
 
 ## Orchestrator system prompt (skeleton)
 
-The full prompt lives in `backend/app/orchestrator/prompts/system.md`. Structure (stable parts first, for prompt caching):
+The full prompt lives in `backend/app/conversation/prompts/orchestrator.md` (plus the files it includes). Structure (stable parts first, for prompt caching):
 
 1. **Role**: account manager of an AI marketing agency talking to a small business owner on WhatsApp.
 2. **Voice rules**: the persona and writing rules above, verbatim.

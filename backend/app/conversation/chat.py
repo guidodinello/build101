@@ -23,6 +23,7 @@ from app.media.images import prepare_reference
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts
+from app.prompts import load_prompt
 
 from .approval import Approval, decide
 from .history import InMemoryHistory
@@ -32,7 +33,7 @@ from .tools import TOOLS
 logger = logging.getLogger(__name__)
 
 AGENT = "orchestrator"
-SYSTEM_PROMPT_PATH = Path(__file__).parent / "prompts" / "system.md"
+SYSTEM_PROMPT_PATH = Path(__file__).parent / "prompts" / "orchestrator.md"
 MAX_STEPS = 5
 BYTES_PER_MB = 1024 * 1024
 # WhatsApp delivers an album as one message per photo, 1–4 s apart (seen on 2026-10-17).
@@ -43,7 +44,7 @@ KEEP_ALIVE_S = 20.0
 
 @cache
 def system_prompt(assistant_name: str) -> str:
-    return SYSTEM_PROMPT_PATH.read_text().format(assistant_name=assistant_name)
+    return load_prompt(SYSTEM_PROMPT_PATH).format(assistant_name=assistant_name)
 
 
 @dataclass(slots=True)

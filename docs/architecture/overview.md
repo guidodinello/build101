@@ -223,8 +223,8 @@ build101/
 │   │   ├── main.py           # FastAPI app, routers, startup
 │   │   ├── config.py         # pydantic-settings
 │   │   ├── api/              # webhooks_whatsapp.py, onboarding.py, dashboard.py, uploads.py, dev.py
-│   │   ├── conversation/     # inbound.py, onboarding_router.py, button_router.py, state.py
-│   │   ├── orchestrator/     # orchestrator.py, tools.py, prompts/system.md
+│   │   ├── conversation/     # chat.py (orchestrator loop), tools.py, approval.py, history.py, photos.py, factory.py,
+│   │   │                     # prompts/ (orchestrator.md + making_posts.md, publishing.md, rules.md); planned: onboarding_router.py, button_router.py, state.py
 │   │   ├── agents/           # asset_analyst.py, brand_strategist.py, content_strategist.py,
 │   │   │                     # copywriter.py, art_director.py, text_checker.py, schemas.py, prompts/*.md
 │   │   ├── carousel/         # schemas.py (CarouselCopy, CarouselBrief, TextCheck), prompts.py (build_slide_prompt), generator.py (CarouselGenerator)
@@ -235,6 +235,7 @@ build101/
 │   │   ├── transcription/    # base.py (TranscriberPort), gemini.py, mock.py (voice notes)
 │   │   ├── media/            # video.py (ffprobe, keyframes, WhatsApp preview), images.py (HEIC, palette, prepare_reference, resize to 1080×1350)
 │   │   ├── llm/              # client.py (wrapper + agent_runs logging)
+│   │   ├── prompts/          # __init__.py (load_prompt, {{include}}), shared/writing_style.md
 │   │   ├── storage.py
 │   │   ├── copy/messages_es.py
 │   │   └── db/               # models.py, session.py, repositories.py, seed.py

@@ -114,6 +114,8 @@ Each agent lives in `app/agents/<name>.py` with:
 
 Prompts are written in English (instructions) and require output content in Rioplatense Spanish. Every prompt includes the voice rules from [../product/conversation-design.md](../product/conversation-design.md) where relevant.
 
+A prompt can be composed from several files: a line that is only `{{include <path>}}` is replaced by that file, with the path relative to the including file. `load_prompt` in `app/prompts/` resolves includes (nested, with cycle detection; a missing file raises) before `str.format` fills placeholders such as `{assistant_name}`. Fragments shared by several prompts live in `app/prompts/shared/` (today `writing_style.md`, used by the orchestrator); the rest sit next to the code that fills them, e.g. `app/conversation/prompts/` (`orchestrator.md` includes `making_posts.md`, `publishing.md` and `rules.md`).
+
 ### Asset Analyst
 
 **Purpose:** understand each uploaded photo or video so other agents can choose material without looking at every file again.
@@ -346,11 +348,11 @@ Image generation costs money and takes time (first paid run: a 3-slide carousel 
 
 Nothing else calls `ImageGenPort` from a conversation: no keyword match and no separate intent classifier. Keywords miss natural requests and fire on questions ("¿cuánto sale un post?"), and a classifier adds a call per message and can't see that "la veta" answers the question the bot just asked. The model already has the conversation, so the decision costs no extra call. The other paths into image generation are `redo_slides` and `revise_post`, which also start from a tool call on a Post the Owner is looking at.
 
-The `create_post` description tells the model when to call it ("only when the Owner asks you to make a post or a carousel; never for greetings, questions or comments on an existing post"). If it fires too often in testing, tighten that description and add an example to `prompts/system.md`; the guards keep a wrong call from spending money twice.
+The `create_post` description tells the model when to call it ("only when the Owner asks you to make a post or a carousel; never for greetings, questions or comments on an existing post"). If it fires too often in testing, tighten that description and add an example to `app/conversation/prompts/making_posts.md`; the guards keep a wrong call from spending money twice.
 
 ### Conversation rules
 
-From the second design pass ([../design/mockups/](../design/mockups/README.md), rows 1 and 1b). They live in `prompts/system.md`, with the guards in code.
+From the second design pass ([../design/mockups/](../design/mockups/README.md), rows 1 and 1b). They live in the orchestrator prompt (`app/conversation/prompts/orchestrator.md` and the files it includes), with the guards in code.
 
 - **Open chat after onboarding (Must, F1.10).** Once the Owner confirms the Brand Brain, the bot sends `ready_open_chat` ("¿En qué te puedo ayudar hoy?") and waits. Nothing proposes or generates a weekly plan unless the Owner asks for one.
 - **A post from photos and a request (Must, F4.5).** The Owner sends one or more photos and asks for a post in their own words ("me llegó esta mesa ratona nueva, armame algo para subir"), or only writes the request. Photos the Owner just sent appear in `<recent_photos>`; the model passes them to `create_post` as `asset_ids`. One photo makes a single-image post; several make a carousel with one slide per photo (product decision, 2026-10-17).
