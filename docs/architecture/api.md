@@ -263,9 +263,11 @@ class TranscriberPort(Protocol):
 
 # app/publishing/base.py
 class PublishResult(BaseModel):
-    status: Literal["published", "scheduled", "retrying", "failed"]
-    # retrying: the provider accepted the post and retries on its own. Do not re-publish;
-    # the webhook (T29) or a later status check confirms it. scheduled: T30's real scheduling.
+    status: Literal["published", "scheduled", "pending", "failed"]
+    # pending: the provider accepted the post and has not reached a final outcome (still
+    # publishing, or retrying a transient error on its own). It may well go live: do not report
+    # a failure and do not re-publish; the webhook (T29) or a later status check confirms it.
+    # scheduled: T30's real scheduling.
     external_post_id: str | None
     permalink: str | None
     error: str | None
@@ -273,12 +275,15 @@ class PublishResult(BaseModel):
 # The port takes plain ids, not ORM models, so the adapter doesn't depend on the database.
 # Callers pass social_accounts.provider_profile_id / provider_account_id (the MVP reads them
 # from env, ADR 0024). Infrastructure failures raise PublisherError; provider outcomes
-# (failed, retrying) come back in PublishResult.
+# (failed, pending) come back in PublishResult. publish() waits a bounded time for a final
+# status first (integrations.md § Zernio). The caller chooses idempotency_key (T30: from the
+# Post id) so a retry after a timeout cannot publish twice.
 class PublisherPort(Protocol):
     async def ensure_profile(self, name: str, external_id: str) -> str: ...         # provider profile id
     async def connect_url(self, profile_id: str, platform: str, redirect_url: str) -> str: ...
     async def publish(self, account_id: str, caption: str, media: PublishMedia,
-                      when: datetime | None = None) -> PublishResult: ...
+                      when: datetime | None = None,
+                      idempotency_key: str | None = None) -> PublishResult: ...
 
 class PublishMedia(BaseModel):
     format: Literal["image", "reel", "carousel"]

@@ -164,6 +164,7 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 - Build: `app/publishing/zernio.py` (ensure_profile, connect_url, publish now, 207 handling; scheduling comes with T30's Should part), `mock.py`, `/api/o/{token}/instagram/connect` + `/callback`, `PUBLISHER` env switch.
 - Done when: a test publish to the demo IG succeeds (then delete the IG post by hand: Zernio can't delete a published Instagram post).
 - MVP scope: one demo Instagram account from env (`ZERNIO_PROFILE_ID`, `ZERNIO_ACCOUNT_ID`); the connect endpoints, callback and wizard step 6 are out of the MVP ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)).
+- Fix after the first live run (2026-10-18): `publishNow` can answer 201 `publishing`, so `publish` now polls `GET /v1/posts/{id}` (2 s, up to 90 s) instead of reporting a failure, and returns `pending` if it is still not final.
 - Started (PR #22): `app/publishing/` with `PublisherPort`, `ZernioPublisher` (`ensure_profile`, `connect_url`, publish now with 207 handling), `MockPublisher`, the `PUBLISHER` switch and the demo account env. Left: the live publish run on the demo IG, and wiring the publisher into `jobs/publish.py` (T30). The connect endpoints and callback are deferred by ADR 0024.
 
 ## H13–16
@@ -176,7 +177,7 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 
 ### T30: Publish job + guards · A · M
 
-- Build (Must): `jobs/publish.py` (status guard, need-IG path, publish now, store permalink, messages). In the MVP the account id comes from `ZERNIO_ACCOUNT_ID`, so the need-IG path only fires when it is missing ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). Handle `PublishResult.status`: `retrying` means do not re-publish, wait for the webhook (T29) or a status check.
+- Build (Must): `jobs/publish.py` (status guard, need-IG path, publish now, store permalink, messages). In the MVP the account id comes from `ZERNIO_ACCOUNT_ID`, so the need-IG path only fires when it is missing ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). Handle `PublishResult.status`: `pending` (Zernio is still publishing, or retrying on its own) means do not report a failure and do not re-publish, wait for the webhook (T29) or a status check. Pass `idempotency_key` derived from the Post id on every publish, so a retry after a timeout or a 5xx cannot publish twice.
 - Build (Should, F5.3): scheduling: `post_schedule`, `schedule_time` and approvals with a time in free text ("mañana a la tarde" → ISO in the Business's timezone via a tiny structured call; "a la tarde" defaults to 18:00), Zernio `scheduledFor`.
 - Done when: approve → publish now on the real IG returns the permalink in WhatsApp. Should: "subilo mañana a la tarde" schedules for tomorrow 18:00 local and the bot confirms the time.
 
