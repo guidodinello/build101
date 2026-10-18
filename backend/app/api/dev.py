@@ -48,7 +48,7 @@ async def create_onboarding_link(
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> OnboardingLinkResponse:
-    """Stand-in for the WhatsApp onboarding (T23): the Business for a phone, and a new link."""
+    """Shortcut past the WhatsApp onboarding, for tests and the simulator: a Business, a link."""
     phone = re.sub(r"\D", "", body.phone)
     business = await session.scalar(select(Business).where(Business.owner_phone == phone))
     if business is None:

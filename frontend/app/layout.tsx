@@ -14,7 +14,7 @@ const bricolage = Bricolage_Grotesque({
 });
 
 export const metadata: Metadata = {
-  title: "build101",
+  title: "Neitor AI",
   description: "Tu agencia de marketing en WhatsApp",
 };
 

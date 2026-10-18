@@ -3,6 +3,7 @@ from typing import Any, Self
 import httpx
 
 from .base import Button, ChannelError
+from .whatsapp_format import to_whatsapp
 
 REQUEST_TIMEOUT_S = 30.0
 MAX_BUTTONS = 3
@@ -47,12 +48,12 @@ class KapsoChannel:
         await self._download_client.aclose()
 
     async def send_text(self, to: str, text: str) -> str:
-        return await self._send(to, {"type": "text", "text": {"body": text}})
+        return await self._send(to, {"type": "text", "text": {"body": to_whatsapp(text)}})
 
     async def send_image(self, to: str, image_url: str, caption: str | None = None) -> str:
         image: dict[str, Any] = {"link": image_url}
         if caption:
-            image["caption"] = caption
+            image["caption"] = to_whatsapp(caption)
         return await self._send(to, {"type": "image", "image": image})
 
     async def send_buttons(
@@ -69,7 +70,7 @@ class KapsoChannel:
             raise ValueError("send_buttons takes at most one header (image or video)")
         interactive: dict[str, Any] = {
             "type": "button",
-            "body": {"text": body},
+            "body": {"text": to_whatsapp(body)},
             "action": {
                 "buttons": [
                     {"type": "reply", "reply": {"id": b.id, "title": b.title}} for b in buttons

@@ -26,11 +26,33 @@ Vendored from upstream at the pinned commit, so they can be refreshed by copying
 
 ## Infrastructure skills
 
-Vendored from upstream at the pinned commit, copied as-is.
+Vendored from upstream at the pinned commit, copied as-is (`vercel-cli` plus the upstream `LICENSE`).
 
 | Skill | What it does | When to use | Source |
 |---|---|---|---|
 | [use-railway](use-railway/SKILL.md) | Operates Railway through the `railway` CLI: projects, services, deploys, variables, domains, logs, metrics | Deploying or troubleshooting the backend on Railway ([ADR 0012](../../docs/decisions/0012-backend-host-railway.md)). Needs the Railway CLI logged in (`railway login`) | [railwayapp/railway-skills `plugins/railway/skills/use-railway`](https://github.com/railwayapp/railway-skills/tree/526e95524e964ed326689cbac4464d97a58ab81c/plugins/railway/skills/use-railway), MIT © 2026 Railway Corporation |
 | [supabase](supabase/SKILL.md) | Supabase guidance: Database, Storage, Auth, migrations, CLI and MCP usage, debugging and logs | Any work on our Supabase project ([ADR 0003](../../docs/decisions/0003-database-supabase-sqlalchemy.md)): schema, buckets, Supabase errors. Needs the Supabase CLI (`brew install supabase/tap/supabase`) | [supabase/agent-skills `skills/supabase`](https://github.com/supabase/agent-skills/tree/c9be0e931b7930f7d02126d04774d904c381e7d7/skills/supabase), MIT © 2026 Supabase |
+| [vercel-cli](vercel-cli/SKILL.md) | Operates Vercel through the `vercel` CLI: deploys, projects, environment variables, domains, logs | Deploying or troubleshooting the frontend on Vercel ([ADR 0004](../../docs/decisions/0004-frontend-nextjs-vercel.md)). Needs the Vercel CLI (`npm i -g vercel`) logged in (`vercel login`) | [vercel/vercel `skills/vercel-cli`](https://github.com/vercel/vercel/tree/c628be7835e03a965b93e9cf9e2bd5ac2acbf5eb/skills/vercel-cli), Apache-2.0 © 2017 Vercel, Inc. ([LICENSE](vercel-cli/LICENSE)) |
+
+## Kapso skills (installed locally, not committed)
+
+Kapso's official skills ([gokapso/agent-skills](https://github.com/gokapso/agent-skills)) publish no license, so we don't vendor them into this public repo. Each person installs them into this project; `.gitignore` keeps the folders out of git, and `skills-lock.json` (committed) records what to install. Use them for any work on our WhatsApp channel ([ADR 0020](../../docs/decisions/0020-whatsapp-via-kapso.md)).
+
+| Skill | When to use |
+|---|---|
+| `integrate-whatsapp` | Webhooks, sending messages, templates and media |
+| `observe-whatsapp` | Logs, delivery failures, webhook retries, health checks |
+| `automate-whatsapp` | Kapso workflows, functions and executions |
+| `integrate-whatsapp-calling` | WhatsApp voice calls |
+
+Setup, from the repo root:
+
+```bash
+npx skills add gokapso/agent-skills -a claude-code -s '*' -y   # skills into .claude/skills/
+npx @kapso/cli login                                            # Kapso CLI (MIT), no global install
+npx @kapso/cli status
+```
+
+The skills prefer the Kapso CLI when it is logged in; agents call it as `npx @kapso/cli <command>`.
 
 License texts for the adapted and vendored skills: [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).

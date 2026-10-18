@@ -7,7 +7,7 @@ in the conversation history and answers. Primitives only, so `posts/` can import
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from app.channels.base import ChannelPort
+from app.channels.base import Button, ChannelPort
 from app.copy import messages_es
 
 
@@ -75,8 +75,8 @@ class PublishFailed:
 
     def note(self) -> str:
         return (
-            f"[post {self.post_id} publish failed] Instagram did not take it. It can't be "
-            "published again: offer to make a new one."
+            f"[post {self.post_id} publish failed] Instagram did not take it. The Owner can try "
+            "again with the Reintentar button under your message."
         )
 
 
@@ -123,6 +123,110 @@ class StaleButton:
         return "[stale button] The Owner tapped a button that is no longer active."
 
 
+@dataclass(frozen=True, slots=True)
+class BrandConfirmed:
+    def note(self) -> str:
+        return "[brand confirmed] The Owner confirmed the brand summary. Onboarding is done."
+
+
+@dataclass(frozen=True, slots=True)
+class BrandFixAsked:
+    def note(self) -> str:
+        return (
+            "[brand fix asked] The Owner tapped Corregir algo on the brand summary. Their next "
+            "message is the correction."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BrandRevising:
+    correction: str
+
+    def note(self) -> str:
+        return (
+            f'[brand revising] The correction "{self.correction}" was taken; a new brand summary '
+            "will arrive in a minute."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class JobRetried:
+    kind: str
+
+    def note(self) -> str:
+        return f"[retrying {self.kind}] The Owner tapped Reintentar; it is running again."
+
+
+@dataclass(frozen=True, slots=True)
+class PostApproved:
+    post_id: str
+
+    def note(self) -> str:
+        return (
+            f"[post {self.post_id} approved] The Owner tapped Aprobar. Scheduling isn't built: "
+            "it is published when they tap Publicar ahora under your message."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PostChangeAsked:
+    post_id: str
+
+    def note(self) -> str:
+        return (
+            f"[post {self.post_id} change asked] The Owner tapped Cambiar. Their next message says "
+            f"what to change: remake it with create_post, replaces={self.post_id}."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PostDiscarded:
+    post_id: str
+
+    def note(self) -> str:
+        return (
+            f"[post {self.post_id} discarded] The Owner tapped Descartar. The buttons under your "
+            "message offer another one from the same request."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PostStarted:
+    post_id: str
+    origin: str  # what the Owner tapped: "Sí, otro" or "Sí, armalo"
+
+    def note(self) -> str:
+        return (
+            f'[post {self.post_id} started] From the "{self.origin}" button; it reaches the '
+            "Owner in a few minutes."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PostNotStarted:
+    reason: str  # generation_in_progress, daily_limit, unknown_asset or no_photos
+
+    def note(self) -> str:
+        return f"[post not started] The Owner's tap could not start a post: {self.reason}."
+
+
+@dataclass(frozen=True, slots=True)
+class PublishStarted:
+    post_id: str
+
+    def note(self) -> str:
+        return (
+            f"[post {self.post_id} publishing] The Owner tapped a button to publish it; the "
+            "outcome arrives as its own event."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ActionFailed:
+    def note(self) -> str:
+        return "[action failed] Something broke handling the Owner's tap; nothing changed."
+
+
 Event = (
     PostSent
     | PostFailed
@@ -135,20 +239,62 @@ Event = (
     | PhotoUnreadable
     | PhotoTooBig
     | StaleButton
+    | BrandConfirmed
+    | BrandFixAsked
+    | BrandRevising
+    | JobRetried
+    | PostApproved
+    | PostChangeAsked
+    | PostDiscarded
+    | PostStarted
+    | PostNotStarted
+    | PublishStarted
+    | ActionFailed
 )
 
 # Called as (sender, event, channel). Whoever answers it owns the sender's history lock.
 Notify = Callable[[str, Event, ChannelPort], Awaitable[None]]
 
 
+def buttons(event: Event) -> list[Button]:
+    """The buttons that go under the model's message about `event` (T18)."""
+    match event:
+        case PostSent(post_id=post_id):
+            return [
+                Button(id=f"post_approve:{post_id}", title=messages_es.BUTTON_APPROVE),
+                Button(id=f"post_change:{post_id}", title=messages_es.BUTTON_CHANGE),
+                Button(id=f"post_discard:{post_id}", title=messages_es.BUTTON_DISCARD),
+            ]
+        case PostApproved(post_id=post_id):
+            return [Button(id=f"post_publish:{post_id}", title=messages_es.BUTTON_PUBLISH_NOW)]
+        case PostDiscarded(post_id=post_id):
+            return [
+                Button(id=f"post_replace:{post_id}", title=messages_es.BUTTON_ANOTHER),
+                Button(id="noop", title=messages_es.BUTTON_NO_THANKS),
+            ]
+        case PublishFailed(post_id=post_id):
+            return [Button(id=f"post_retry:{post_id}", title=messages_es.BUTTON_RETRY)]
+        case _:
+            return []
+
+
+POST_NOT_STARTED = {
+    "generation_in_progress": messages_es.GENERATION_BUSY,
+    "daily_limit": messages_es.DAILY_LIMIT,
+    "unknown_asset": messages_es.PHOTOS_GONE,
+    "no_photos": messages_es.PHOTOS_GONE,
+}
+
+
 def fallback(event: Event) -> str | None:
     """What the Owner is told when the LLM can't write the message; None sends nothing.
 
-    A post that already arrived needs no message (`PostSent`).
+    A post that already arrived needs no message (`PostSent`), unless it carries its buttons:
+    then `post_actions` goes with them.
     """
     match event:
         case PostSent():
-            return None
+            return messages_es.post_actions()
         case PostFailed():
             return messages_es.JOB_FAILED
         case Published(permalink=permalink):
@@ -169,3 +315,25 @@ def fallback(event: Event) -> str | None:
             return messages_es.photo_too_big(max_mb)
         case StaleButton():
             return messages_es.STALE_BUTTON
+        case BrandConfirmed():
+            return messages_es.READY_OPEN_CHAT
+        case BrandFixAsked():
+            return messages_es.BRAND_FIX_PROMPT
+        case BrandRevising():
+            return messages_es.REVISING
+        case JobRetried():
+            return messages_es.RETRYING
+        case PostApproved():
+            return messages_es.PUBLISH_NOW_ASK
+        case PostChangeAsked():
+            return messages_es.POST_CHANGE_PROMPT
+        case PostDiscarded():
+            return messages_es.POST_DISCARDED
+        case PostStarted():
+            return messages_es.POST_GENERATING
+        case PostNotStarted(reason=reason):
+            return POST_NOT_STARTED.get(reason, messages_es.REPLY_FAILED)
+        case PublishStarted():
+            return messages_es.PUBLISHING
+        case ActionFailed():
+            return messages_es.REPLY_FAILED

@@ -1,16 +1,28 @@
 import hashlib
 import hmac
 import json
+import os
+import re
+from collections.abc import AsyncIterator
 from io import BytesIO
 from pathlib import Path
 
 import pytest
 from PIL import Image
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.carousel.schemas import CarouselBrief, CarouselCopy
 from app.config import Settings, get_settings
+from app.db.session import create_engine
 
 FIXTURES = Path(__file__).parent / "fixtures"
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
+SCHEMA = Path(__file__).parents[1] / "migrations" / "versions" / "0001_initial.sql"
+
+requires_db = pytest.mark.skipif(
+    not TEST_DATABASE_URL, reason="set TEST_DATABASE_URL to a Postgres the tests can wipe"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -35,3 +47,18 @@ def carousel_spec() -> tuple[CarouselCopy, CarouselBrief]:
 
 def sign(raw: bytes, secret: str) -> str:
     return hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+
+
+@pytest.fixture
+async def sessions() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """A fresh schema per test, from the first migration's SQL."""
+    assert TEST_DATABASE_URL
+    engine = create_engine(TEST_DATABASE_URL)
+    async with engine.begin() as connection:
+        await connection.execute(text("drop schema public cascade"))
+        await connection.execute(text("create schema public"))
+        for statement in re.split(r";\s*$", SCHEMA.read_text(), flags=re.MULTILINE):
+            if statement.strip():
+                await connection.exec_driver_sql(statement)
+    yield async_sessionmaker(engine, expire_on_commit=False)
+    await engine.dispose()

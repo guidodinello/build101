@@ -3,6 +3,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from app.agents.schemas import BrandBrain
 from app.carousel.schemas import (
     MAX_SLIDES,
     CarouselBrief,
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 AGENT = "post_drafter"
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "draft.md").read_text()
+BRAND_FIELDS_NOT_FOR_POSTS = {"whatsapp_summary", "posting"}
 
 
 class PostCopy(BaseModel):
@@ -40,27 +42,34 @@ class CarouselDraft(BaseModel):
 
 
 class PostDrafter:
-    """Brief + photos → the post's copy, and for a design the generator's input too.
+    """Brief + photos + Brand Brain → the post's copy, and for a design the generator's input.
 
-    One structured call, a stand-in for the Copywriter and the Art Director (T13, T14) until
-    the Brand Brain exists. `trend_notes` come from the latest Niche Report (ADR 0025).
+    One structured call, a stand-in for the Copywriter and the Art Director (T13, T14).
+    `trend_notes` come from the latest Niche Report (ADR 0025).
     """
 
     def __init__(self, model: ChatModel, trend_notes: str | None = None) -> None:
         self._model = model
         self._trend_notes = trend_notes
 
-    async def copy(self, brief: str, photos: list[bytes]) -> PostCopy:
+    async def copy(
+        self, brief: str, photos: list[bytes], brand: BrandBrain | None = None
+    ) -> PostCopy:
         request = (
             f"Write the caption for a post of {len(photos)} photo(s), posted as they are, "
             f"without a design.\n\nBrief: {brief}{self._trend_section()}"
         )
         return await self._model.structured(
-            AGENT, SYSTEM_PROMPT, request_content(request, photos), PostCopy, "medium"
+            AGENT, system_prompt(brand), request_content(request, photos), PostCopy, "medium"
         )
 
     async def design(
-        self, brief: str, photos: list[bytes], photo_ids: list[str], slide_count: int
+        self,
+        brief: str,
+        photos: list[bytes],
+        photo_ids: list[str],
+        slide_count: int,
+        brand: BrandBrain | None = None,
     ) -> tuple[CarouselCopy, CarouselBrief]:
         one_per_photo = (
             " Each slide is built from its own photo, in order."
@@ -72,7 +81,7 @@ class PostDrafter:
             f"Brief: {brief}{self._trend_section()}"
         )
         draft = await self._model.structured(
-            AGENT, SYSTEM_PROMPT, request_content(request, photos), CarouselDraft, "medium"
+            AGENT, system_prompt(brand), request_content(request, photos), CarouselDraft, "medium"
         )
         slides = fit_slides(draft.slides, slide_count)
         copy = CarouselCopy(
@@ -98,6 +107,18 @@ class PostDrafter:
         if not self._trend_notes:
             return ""
         return f"\n\nTrend notes (what works in the niche this week):\n{self._trend_notes}"
+
+
+def system_prompt(brand: BrandBrain | None) -> str:
+    """The instructions, then the Business's Brand Brain (agents.md § Brand Brain).
+
+    The Brand Brain goes in the system prompt, not the request, so the prefix stays the same
+    for every post of a Business and caches.
+    """
+    if brand is None:
+        return SYSTEM_PROMPT
+    data = brand.model_dump_json(exclude=BRAND_FIELDS_NOT_FOR_POSTS)
+    return f"{SYSTEM_PROMPT}\n<brand_brain>\n{data}\n</brand_brain>\n"
 
 
 def request_content(request: str, photos: list[bytes]) -> list[Content]:

@@ -5,28 +5,40 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.channels.base import InboundMessage
+from app.channels.base import Button, InboundMessage
 from app.channels.inbound import EchoHandler
 from app.channels.kapso_webhook import parse_message
 from app.config import Settings
+from app.conversation.button_router import ButtonRouter
 from app.conversation.chat import MAX_STEPS, ChatHandler
 from app.conversation.events import (
+    ActionFailed,
     AudioUnclear,
+    BrandConfirmed,
+    BrandFixAsked,
+    BrandRevising,
     Event,
+    JobRetried,
     PhotosReceived,
     PhotoTooBig,
     PhotoUnreadable,
+    PostApproved,
+    PostChangeAsked,
+    PostDiscarded,
     PostFailed,
+    PostNotStarted,
     PostSent,
+    PostStarted,
     Published,
     PublishFailed,
     PublishPending,
+    PublishStarted,
     StaleButton,
     UnsupportedMedia,
 )
 from app.conversation.factory import build_inbound_handler
 from app.conversation.history import InMemoryHistory
-from app.conversation.photos import InMemoryPhotos
+from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
 from app.llm.client import Step, user_step
 from app.media.public import PublicImages
@@ -35,7 +47,8 @@ from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts, Post, PostImage
 from app.publishing.mock import MOCK_ACCOUNT_ID, MockPublisher
-from tests.conftest import FIXTURES
+from app.storage import StorageError
+from tests.conftest import FIXTURES, make_image
 from tests.fakes import (
     PERMALINK,
     CountingImageGen,
@@ -73,11 +86,36 @@ def message(name: str, **changes: object) -> InboundMessage:
     return parse_message(body).model_copy(update=changes)
 
 
+class FakeLibrary:
+    """The wizard's photos and logo, as `BrandLibrary` returns them."""
+
+    def __init__(
+        self, *descriptions: str, logo: bytes | None = None, logo_fails_after: int | None = None
+    ) -> None:
+        self._photos = [
+            Photo(f"b{n}", make_image((900, 1200)), text, local_now(), seen=True)
+            for n, text in enumerate(descriptions, start=1)
+        ]
+        self._logo = logo
+        self._logo_fails_after = logo_fails_after
+        self._logo_calls = 0
+
+    async def photos(self, sender: str) -> list[Photo]:
+        return self._photos
+
+    async def logo(self, sender: str) -> bytes | None:
+        self._logo_calls += 1
+        if self._logo_fails_after is not None and self._logo_calls > self._logo_fails_after:
+            raise StorageError("download failed")
+        return self._logo
+
+
 def build(
     model: ScriptedModel,
     image_gen: CountingImageGen | None = None,
     max_posts_per_day: int = 5,
     keep_alive_s: float = 60.0,
+    library: FakeLibrary | None = None,
 ) -> tuple[ChatHandler, PostMaker]:
     model.drafts.setdefault(PostCopy, DRAFT)
     model.drafts.setdefault(CarouselDraft, carousel_draft(1))
@@ -106,6 +144,8 @@ def build(
         posts,
         publishing,
         store,
+        ButtonRouter(store, posts, publishing, sessions=None),
+        library,
         assistant_name="Mora",
         max_photo_mb=MAX_PHOTO_MB,
         photo_debounce_s=DEBOUNCE_S,
@@ -688,7 +728,7 @@ async def test_a_post_approved_before_the_follow_up_gets_no_question(
     assert any(text.startswith(f"[post {POST_ID} sent") for text in texts)
 
 
-async def test_a_failing_follow_up_sends_nothing_and_keeps_the_post(
+async def test_a_failing_follow_up_sends_only_the_buttons_and_keeps_the_post(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳")])
@@ -698,7 +738,8 @@ async def test_a_failing_follow_up_sends_nothing_and_keeps_the_post(
     gate.set()
     await posts.join()
 
-    assert channel.sent == [(SENDER, "Dale ⏳")]  # no follow-up, no JOB_FAILED
+    # No follow-up and no JOB_FAILED: only the post's buttons, with their fixed line.
+    assert channel.sent == [(SENDER, "Dale ⏳"), (SENDER, messages_es.post_actions())]
     assert len(channel.images) == 1
     assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
     texts = [step_text(step) for step in chat._history.get(SENDER)]
@@ -720,6 +761,19 @@ def pending_post(chat: ChatHandler) -> None:
 
 
 SENT = PostSent(POST_ID, 1, "photos", ("f1",), (), "Texto")
+BUTTON_EVENTS: list[Event] = [
+    BrandConfirmed(),
+    BrandFixAsked(),
+    BrandRevising("somos más formales"),
+    JobRetried("generate_brand"),
+    PostApproved(POST_ID),
+    PostChangeAsked(POST_ID),
+    PostDiscarded(POST_ID),
+    PostStarted(POST_ID, "Sí, otro"),
+    PostNotStarted("daily_limit"),
+    PublishStarted(POST_ID),
+    ActionFailed(),
+]
 EVENTS: list[Event] = [
     SENT,
     PostFailed(POST_ID, "design", ("f1",), "mesa"),
@@ -732,6 +786,7 @@ EVENTS: list[Event] = [
     PhotoUnreadable(),
     PhotoTooBig(MAX_PHOTO_MB),
     StaleButton(),
+    *BUTTON_EVENTS,
 ]
 
 
@@ -815,6 +870,18 @@ FALLBACKS = [
     (PhotoUnreadable(), messages_es.PHOTO_UNREADABLE),
     (PhotoTooBig(MAX_PHOTO_MB), messages_es.photo_too_big(MAX_PHOTO_MB)),
     (StaleButton(), messages_es.STALE_BUTTON),
+    (BrandConfirmed(), messages_es.READY_OPEN_CHAT),
+    (BrandFixAsked(), messages_es.BRAND_FIX_PROMPT),
+    (BrandRevising("x"), messages_es.REVISING),
+    (JobRetried("generate_brand"), messages_es.RETRYING),
+    (PostApproved(POST_ID), messages_es.PUBLISH_NOW_ASK),
+    (PostChangeAsked(POST_ID), messages_es.POST_CHANGE_PROMPT),
+    (PostDiscarded(POST_ID), messages_es.POST_DISCARDED),
+    (PostStarted(POST_ID, "Sí, otro"), messages_es.POST_GENERATING),
+    (PostNotStarted("generation_in_progress"), messages_es.GENERATION_BUSY),
+    (PostNotStarted("unknown_asset"), messages_es.PHOTOS_GONE),
+    (PublishStarted(POST_ID), messages_es.PUBLISHING),
+    (ActionFailed(), messages_es.REPLY_FAILED),
 ]
 
 
@@ -842,15 +909,24 @@ async def test_a_model_that_never_answers_an_event_counts_as_down() -> None:
     assert channel.sent == [(SENDER, messages_es.STALE_BUTTON)]
 
 
-async def test_a_sent_post_event_with_the_model_down_sends_nothing_but_keeps_the_note() -> None:
+async def test_a_sent_post_event_with_the_model_down_still_sends_its_buttons() -> None:
     model, channel = ScriptedModel(fail=True), FakeChannel()
     chat, _ = build(model)
     pending_post(chat)
 
     await chat.notify(SENDER, SENT, channel)
 
-    assert channel.sent == []
-    assert [step_text(step) for step in chat._history.get(SENDER)] == [SENT.note()]
+    body = messages_es.post_actions()
+    assert channel.buttons == [
+        (
+            SENDER,
+            body,
+            [f"post_approve:{POST_ID}", f"post_change:{POST_ID}", f"post_discard:{POST_ID}"],
+        )
+    ]
+    assert [step_text(step) for step in chat._history.get(SENDER)] == [
+        f'{SENT.note()}\nThe Owner was told: "{body}"'
+    ]
 
 
 async def test_another_event_turn_does_not_mark_pending_photos_seen() -> None:
@@ -868,3 +944,96 @@ async def test_another_event_turn_does_not_mark_pending_photos_seen() -> None:
     assert "Attached below, in this order: f1" in current["content"][1]["text"]
     assert [part["type"] for part in current["content"][2:]] == ["image"]
     assert chat._photos.recent(SENDER)[0].seen
+
+
+async def test_the_wizard_photos_are_listed_for_the_model() -> None:
+    model = ScriptedModel()
+    chat, _ = build(model, library=FakeLibrary("Mesa nórdica: Mesa de roble en un living."))
+    channel = FakeChannel()
+
+    await chat.handle(message("text", text="hacé un post de la mesa nórdica"), channel)
+
+    context = model.calls[0][-1]["content"][1]["text"]
+    listed = "- b1: Mesa nórdica: Mesa de roble en un living."
+    assert f"<brand_photos>\n{listed}\n</brand_photos>" in context
+    assert [block["type"] for block in model.calls[0][-1]["content"]] == ["text", "text"]
+
+
+async def test_a_post_can_use_a_wizard_photo() -> None:
+    model = ScriptedModel(
+        replies=[
+            call_reply("create_post", brief="la mesa nórdica", asset_ids=["b1"], style="photos"),
+            text_reply("Dale, lo armo con la foto de la mesa ⏳"),
+        ]
+    )
+    channel = FakeChannel()
+    chat, posts = build(model, library=FakeLibrary("Mesa nórdica: Mesa de roble."))
+
+    await chat.handle(message("text", text="hacé un post de la mesa nórdica así nomás"), channel)
+    await posts.join()
+
+    assert json.loads(model.calls[1][-1]["result"])["status"] == "generating"
+    assert len(channel.images) == 1
+
+
+async def test_a_tap_is_answered_by_the_model_with_the_next_button() -> None:
+    model, channel = ScriptedModel(replies=[text_reply("¡Aprobado! ¿Lo subo ya?")]), FakeChannel()
+    chat, _ = build(model)
+    pending_post(chat)
+    tap = message("interactive").model_copy(
+        update={"button": Button(id=f"post_approve:{POST_ID}", title="Aprobar")}
+    )
+
+    await chat.handle(tap, channel)
+
+    assert step_text(model.calls[0][-1]) == PostApproved(POST_ID).note()
+    assert channel.buttons == [(SENDER, "¡Aprobado! ¿Lo subo ya?", [f"post_publish:{POST_ID}"])]
+    assert chat._store.get(SENDER, POST_ID).status == "approved"
+
+
+async def test_a_noop_tap_gets_no_answer() -> None:
+    model, channel = ScriptedModel(), FakeChannel()
+    tap = message("interactive").model_copy(update={"button": Button(id="noop", title="No")})
+
+    await handler(model).handle(tap, channel)
+
+    assert model.calls == []
+    assert channel.sent == []
+
+
+async def test_the_model_is_told_when_the_owner_uploaded_a_logo() -> None:
+    model = ScriptedModel()
+    chat, _ = build(model, library=FakeLibrary("Mesa", logo=make_image((200, 80), format="PNG")))
+
+    await chat.handle(message("text", text="ponele el logo"), FakeChannel())
+
+    assert "<brand_logo>uploaded</brand_logo>" in model.calls[0][-1]["content"][1]["text"]
+
+
+async def test_a_post_with_the_logo_needs_an_uploaded_logo() -> None:
+    model = ScriptedModel(
+        replies=[
+            call_reply(
+                "create_post", brief="mesa", asset_ids=["b1"], style="photos", with_logo=True
+            ),
+            text_reply("Todavía no tengo tu logo"),
+        ]
+    )
+    chat, posts = build(model, library=FakeLibrary("Mesa"))
+
+    await chat.handle(message("text", text="subí la mesa con mi logo"), FakeChannel())
+    await posts.join()
+
+    assert "<brand_logo>" not in model.calls[0][-1]["content"][1]["text"]
+    assert json.loads(model.calls[-1][-1]["result"]) == {"error": "no_logo"}
+
+
+async def test_a_failed_logo_download_keeps_the_logo_already_loaded() -> None:
+    model = ScriptedModel()
+    library = FakeLibrary("Mesa", logo=make_image((200, 80), format="PNG"), logo_fails_after=1)
+    chat, _ = build(model, library=library)
+
+    await chat.handle(message("text", text="hola"), FakeChannel())
+    await chat.handle(message("text", text="ponele el logo"), FakeChannel())
+
+    assert "<brand_logo>uploaded</brand_logo>" in model.calls[1][-1]["content"][1]["text"]

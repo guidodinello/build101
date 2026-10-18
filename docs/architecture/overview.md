@@ -179,13 +179,13 @@ sequenceDiagram
 
 ## Background jobs
 
-Hackathon implementation: `asyncio.create_task` wrapped in a tiny `JobRunner` that
+Hackathon implementation (`app/jobs/runner.py`, T16): a small in-process `JobRunner` that polls `jobs` every second, claims `queued` rows with `FOR UPDATE SKIP LOCKED` (so a job starts only after the transaction that queued it commits, and jobs queued before a restart still run), and runs each as an `asyncio` task. It
 
 - writes a `jobs` row (`queued → running → succeeded | failed`) with `kind`, `payload`, `result`, `error`;
 - catches exceptions, marks the job failed, and sends `job_failed` to the owner;
 - limits concurrency with a semaphore (`MAX_CONCURRENT_JOBS=4`).
 
-On process restart, `running` jobs older than 5 minutes are marked `failed` at startup (no retries in the demo).
+`running` jobs older than 5 minutes were left by a process that died (a deploy, a dev reload) and are marked `failed`, at startup and then every minute (no automatic retries in the demo). Only `generate_brand` sends `job_failed` (with `retry:{job_id}`); a failed photo analysis is only logged, since the brand is generated without it. `retry:{job_id}` queues a copy and records `retried_by` on the failed row, so a second tap does nothing.
 
 **Production path (post-hackathon):** replace `JobRunner` with a real queue (arq on Redis, or Postgres-based like `procrastinate`) without changing job functions. That's why jobs are plain `async def job(ctx, payload)` functions.
 
@@ -223,8 +223,9 @@ build101/
 │   │   ├── main.py           # FastAPI app, routers, startup
 │   │   ├── config.py         # pydantic-settings
 │   │   ├── api/              # webhooks_whatsapp.py, onboarding.py, dashboard.py, uploads.py, dev.py
-│   │   ├── conversation/     # chat.py (orchestrator loop), tools.py, approval.py, history.py, photos.py, factory.py,
-│   │   │                     # prompts/ (orchestrator.md + making_posts.md, publishing.md, rules.md); planned: onboarding_router.py, button_router.py, state.py
+│   │   ├── conversation/     # onboarding.py (OnboardingGate: Flow 1 before the web form, wraps chat.py), chat.py (orchestrator loop),
+│   │   │                     # tools.py, approval.py, button_router.py, brand.py, history.py, photos.py, factory.py,
+│   │   │                     # prompts/ (orchestrator.md + making_posts.md, publishing.md, rules.md); planned: state.py
 │   │   ├── agents/           # asset_analyst.py, brand_strategist.py, content_strategist.py,
 │   │   │                     # copywriter.py, art_director.py, text_checker.py, schemas.py, prompts/*.md
 │   │   ├── carousel/         # schemas.py (CarouselCopy, CarouselBrief, TextCheck), prompts.py (build_slide_prompt), generator.py (CarouselGenerator)

@@ -3,20 +3,24 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
-from app.conversation.photos import local_now
+from app.conversation.photos import Photo, local_now
 
 MAX_POSTS_PER_SENDER = 10  # each holds its JPEGs until it is published or dropped
 
 PostStatus = Literal[
     "pending_approval",
+    "approved",  # [Aprobar] tapped; "subilo" or [Publicar ahora] publishes it
+    "discarded",
     "publishing",
     "publish_pending",  # not final or not known: the post may be live, never report a failure
     "published",
-    "failed",  # definite failure only; terminal in T57
+    "failed",  # definite failure only; [Reintentar] publishes again with a new key
     "replaced",  # a newer revision was sent; no longer approvable
 ]
 # Statuses a post keeps while a publish may still be running or resolving.
 BUSY: frozenset[PostStatus] = frozenset({"publishing", "publish_pending"})
+# Statuses "subilo" can still publish.
+APPROVABLE: frozenset[PostStatus] = frozenset({"pending_approval", "approved"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +39,18 @@ class Post:
     permalink: str | None = None
     external_post_id: str | None = None
     created_at: datetime = field(default_factory=local_now)
+    # What made it, so [Sí, otro] after [Descartar] can make another from the same request.
+    brief: str = ""
+    style: Literal["photos", "design"] = "photos"
+    slide_count: int | None = None
+    with_logo: bool = False
+    source_photos: list[Photo] = field(default_factory=list)
+    publish_attempts: int = 0
+
+    @property
+    def idempotency_key(self) -> str:
+        """New per [Reintentar]: the provider keeps a failed key's result (T57)."""
+        return self.id if self.publish_attempts <= 1 else f"{self.id}-r{self.publish_attempts}"
 
     @property
     def format(self) -> Literal["image", "carousel"]:
@@ -65,8 +81,8 @@ class InMemoryPosts:
         return next((post for post in self._posts[sender] if post.id == post_id), None)
 
     def pending(self, sender: str) -> list[Post]:
-        """The posts awaiting approval, oldest first: the numbering the Owner sees."""
-        return [post for post in self._posts[sender] if post.status == "pending_approval"]
+        """The posts "subilo" can publish, oldest first: the numbering the Owner sees."""
+        return [post for post in self._posts[sender] if post.status in APPROVABLE]
 
     def listed(self, sender: str) -> list[str] | None:
         return self._listed.get(sender)

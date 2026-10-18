@@ -18,14 +18,14 @@
 |---|---|---|
 | `ENV` | `local` \| `prod` | |
 | `PUBLIC_BACKEND_URL` | `https://api-example.up.railway.app` | Railway-generated domain ([ADR 0017](../decisions/0017-backend-host-railway.md)). Used in logs/webhook docs, and for the URLs of generated images until Supabase Storage is in (T56) |
-| `FRONTEND_URL` | `https://build101.vercel.app` | Magic links + Zernio redirect |
-| `FRONTEND_ORIGINS` | `https://build101.vercel.app,http://localhost:3000` | CORS |
+| `FRONTEND_URL` | `https://build101-khaki.vercel.app` | Magic links + Zernio redirect |
+| `FRONTEND_ORIGINS` | `https://build101-khaki.vercel.app,http://localhost:3000` | CORS |
 | `DATABASE_URL` | `postgresql+asyncpg://...pooler.supabase.com:5432/postgres` | Session pooler |
 | `SUPABASE_URL` | `https://xxxx.supabase.co` | |
 | `SUPABASE_SERVICE_ROLE_KEY` | `eyJ...` | Backend only |
 | `INBOUND_HANDLER` | `chat` \| `echo` | Default `chat`: answers with Gemini ([ADR 0023](../decisions/0023-gemini-text-llm.md)); `echo` repeats what arrived (channel tests, no LLM) |
 | `GEMINI_CHAT_MODEL` | `gemini-3.8-flash` | Text model; uses `GEMINI_API_KEY` |
-| `ASSISTANT_NAME` | `Mora` | Placeholder until the product name is chosen; shown in the welcome |
+| `ASSISTANT_NAME` | `Neitor` | The assistant introduces itself by this name in the welcome (product: Neitor AI) |
 | `MAX_POSTS_PER_DAY` | `5` | Designs (posts with AI-generated images: image Posts and carousels) a Business can start per day; posts of the Owner's photos as they are don't count. `create_post` answers `daily_limit` past it ([agents.md](../architecture/agents.md#when-image-generation-runs)) |
 | `WHATSAPP_CHANNEL` | `kapso` \| `simulator` | Default `kapso`. `simulator` arrives with T21 |
 | `KAPSO_API_KEY` | `...` | WhatsApp through Kapso ([ADR 0020](../decisions/0020-whatsapp-via-kapso.md)). Sent as the `X-API-Key` header ([API introduction](https://docs.kapso.ai/api/introduction.md)) |
@@ -48,7 +48,7 @@
 | `ZERNIO_PROFILE_ID`, `ZERNIO_ACCOUNT_ID` | `...` | The single demo Instagram account's Zernio profile and account ids. Temporary: they stand in for `social_accounts` until T02 exists ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). With `PUBLISHER=zernio`, publishing from the chat (T57) needs `ZERNIO_ACCOUNT_ID` and an HTTPS `PUBLIC_BACKEND_URL` (a `cloudflared` tunnel or Railway, not free ngrok) that Zernio can fetch the post images from; without the account id the bot says publishing isn't connected |
 | `ZERNIO_TEST_IMAGE_URL` | `https://raw.githubusercontent.com/guidodinello/build101/main/backend/tests/fixtures/zernio-live-test.jpg` | Only for `uv run pytest -m live`: a public HTTPS URL serving the fixture JPEG with no redirect. Before the PR merges, put the branch name in place of `main` (the branch is deleted after the squash merge). The live publish posts to the real demo Instagram: delete the post by hand |
 | `ZERNIO_WEBHOOK_SECRET` | random | |
-| `WHATSAPP_BOT_NUMBER` | `15551234567` | Digits only. The `wa.me` link on the wizard's last screen (`OnboardingState.whatsapp_url`) |
+| `WHATSAPP_BOT_NUMBER` | `56920403095` | Digits only: the shared Kapso sandbox number. The `wa.me` link on the wizard's last screen (`OnboardingState.whatsapp_url`) |
 | `ENABLE_DEV_ENDPOINTS` | `true` | `/dev/*` |
 | `DEV_TOKEN` | random | Header `X-Dev-Token` |
 | `MAX_CONCURRENT_JOBS` | `4` | |
@@ -73,7 +73,7 @@ Plan B only (Meta Cloud API direct, if Kapso fails its first-hour test; [integra
 |---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` / prod backend URL |
 | `NEXT_PUBLIC_DEV_TOKEN` | same as `DEV_TOKEN` (simulator only; acceptable for a demo, remove for production) |
-| `NEXT_PUBLIC_WHATSAPP_URL` | `https://wa.me/15551234567` (same number as `WHATSAPP_BOT_NUMBER`; used by the expired-link screen, which has no onboarding state) |
+| `NEXT_PUBLIC_WHATSAPP_URL` | `https://wa.me/56920403095` (same number as `WHATSAPP_BOT_NUMBER`; used by the landing CTAs and the expired-link screen, which has no onboarding state) |
 | `ENABLE_MOCK_API` | `true` locally to serve an in-memory mock of the onboarding API at `/mock-api` (then `NEXT_PUBLIC_API_URL=http://localhost:3000/mock-api`); never set in production |
 
 ## Supabase Storage
@@ -128,6 +128,6 @@ npm run lint && npm run build
 
 ## Deploy
 
-- **Frontend**: Vercel, root directory `frontend/`, env vars above. Every push to `main` deploys.
+- **Frontend**: Vercel ([ADR 0004](../decisions/0004-frontend-nextjs-vercel.md)), root directory `frontend/`, env vars above, at `https://build101-khaki.vercel.app`. Every push to `main` deploys; settings in [frontend/README.md](../../frontend/README.md#deploy).
 - **Backend**: Railway ([ADR 0017](../decisions/0017-backend-host-railway.md)): one service with root directory `backend/`, built from `backend/Dockerfile` (no browser; `ffmpeg` is added only with the Could video work), one replica (in-process jobs and locks), Railway-generated HTTPS domain. Health check `/health`. Trial first (1 GB RAM, account verified through GitHub so outbound calls work), Hobby if needed.
 - **After the first backend deploy**: set the webhook URL in Kapso, run `/dev/seed/demo` if needed, send "hola" from a test phone.

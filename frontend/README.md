@@ -1,6 +1,6 @@
 # Frontend
 
-Next.js app: the onboarding wizard opened from WhatsApp (`/o/[token]`), the read-only dashboard (`/b/[token]`) and the WhatsApp simulator used for development and as the demo fallback (`/dev/chat`).
+Next.js app: the Neitor AI landing page (`/`), the onboarding wizard opened from WhatsApp (`/o/[token]`), the read-only dashboard (`/b/[token]`) and the WhatsApp simulator used for development and as the demo fallback (`/dev/chat`).
 
 - Design: [docs/design/web-app.md](../docs/design/web-app.md)
 - API contract: [docs/architecture/api.md](../docs/architecture/api.md)
@@ -20,7 +20,40 @@ Until the backend serves the onboarding endpoints (T24), set `ENABLE_MOCK_API=tr
 
 ## Layout
 
+- `app/page.tsx` + `components/landing/`: the English landing page, built as one WhatsApp-style thread with Neitor (design: [canvas](https://claude.ai/artifact/4ghMvD3UL9q5x3E4P1Fbai), Option A). Server components except `approval-demo.tsx`, the hero's working Approve / Change buttons. Its colors are the `ld-*` tokens in `app/globals.css`; every CTA opens `NEXT_PUBLIC_WHATSAPP_URL` with "Hi Neitor" typed in (`lib/whatsapp.ts`).
 - `app/o/[token]/`: the onboarding wizard route (loads `OnboardingState` on the server, `?step=` picks the screen).
 - `components/onboarding/`: wizard shell, one file per step under `steps/`, the photo upload queue.
 - `lib/api.ts`: REST client and types, written by hand from `api.md`. `lib/upload.ts`: signed-URL uploads.
 - `components/ui/`: shadcn/ui components, restyled to the tokens in [web-app.md](../docs/design/web-app.md#visual-language).
+
+## Deploy
+
+The frontend runs on Vercel ([ADR 0004](../docs/decisions/0004-frontend-nextjs-vercel.md)): project `build101` in the `guidodinellos-projects` team (Hobby), production at `https://build101-khaki.vercel.app` (`build101.vercel.app` belongs to someone else). Operate it with the Vercel CLI (`npm i -g vercel`, `vercel login`) or the [`vercel-cli`](../.claude/skills/vercel-cli/SKILL.md) skill.
+
+### How it deploys
+
+- **Push to `main`** deploys production; every other pushed branch gets a preview deployment. The project is connected to GitHub `guidodinello/build101`.
+- **Manual deploy** from the repo root: `vercel link --yes --project build101 --scope guidodinellos-projects` once, then `vercel deploy --prod`. Run both from the repo root and not from `frontend/`: the project's root directory is `frontend`, so a link or upload from inside `frontend/` fails with "Root Directory frontend does not exist".
+- `vercel link` appends `.vercel` and `.env*` to the root `.gitignore`; drop the `.env*` line, it would hide `.env.example`.
+
+### Project settings
+
+| Setting | Value |
+|---|---|
+| Root directory | `frontend` |
+| Framework preset | Next.js (default build, output and install commands) |
+| Node.js | 24.x |
+| Production branch | `main` |
+
+### Environment variables
+
+Set for Production and Preview (`vercel env add KEY production`, value on stdin). `NEXT_PUBLIC_*` values are inlined at build time, so a change needs a redeploy.
+
+| Variable | Value |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | the Railway backend, `https://backend-production-6e67.up.railway.app` |
+| `NEXT_PUBLIC_WHATSAPP_URL` | `https://wa.me/56920403095`, the shared Kapso sandbox number (same as the backend's `WHATSAPP_BOT_NUMBER`) |
+| `ENABLE_MOCK_API` | `false` |
+| `NEXT_PUBLIC_DEV_TOKEN` | unset (the simulator is not used in production) |
+
+The backend must list the Vercel domain in `FRONTEND_URL` and `FRONTEND_ORIGINS` ([backend/README.md](../backend/README.md#environment-variables)), or magic links point at localhost and browser calls fail CORS.

@@ -89,6 +89,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## vercel/vercel
+
+Source: <https://github.com/vercel/vercel> (commit `c628be7835e03a965b93e9cf9e2bd5ac2acbf5eb`)
+Used in: skill `vercel-cli` (unmodified)
+
+Copyright 2017 Vercel, Inc. Licensed under the Apache License, Version 2.0. The full license text is in [`skills/vercel-cli/LICENSE`](skills/vercel-cli/LICENSE).
+
 ## vercel-labs/agent-skills
 
 Source: <https://github.com/vercel-labs/agent-skills> (commit `063bee94c3f4df8453406c830b0a7df0f2860278`)

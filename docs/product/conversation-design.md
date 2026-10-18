@@ -5,7 +5,7 @@ How the bot talks. This is the source for the orchestrator's system prompt and f
 ## Persona
 
 - **Who:** the owner's account manager at an AI marketing agency. It speaks for "el equipo" (the agents) but is one voice.
-- **Name:** configurable via `ASSISTANT_NAME` (default: TBD, see [../open-questions.md](../open-questions.md)). It introduces itself by name only in the welcome.
+- **Name:** Neitor (the product is Neitor AI), configurable via `ASSISTANT_NAME`. It introduces itself by name only in the welcome.
 - **Language:** Rioplatense Spanish (Uruguay/Argentina): *vos*, "dale", "genial", "buenísimo", "un toque", "¿te parece?". No *tú*, no Spain Spanish ("vale", "vosotros"), no Argentine slang too local for Uruguay ("boludo", "che" is fine in moderation).
 - **Tone:** warm, short, confident, never salesy. Like a capable person on your team who respects your time.
 - **Never:** technical jargon (no "agent", "LLM", "token", "API", "prompt", "engagement rate"), long paragraphs, more than 1–2 emojis per message, pretending to have published something it didn't, publishing without approval.
@@ -35,9 +35,9 @@ Messages for the Owner. Since [ADR 0026](../decisions/0026-owner-messages-from-t
 | `name_ack_link` | Flow 1, name received | ¡Buenísimo, {business_name}! Para conocer tu marca necesito unos datos y algunas fotos. Son 5 minutos desde el celu 👇 {onboarding_url} | — |
 | `link_reminder` | Message while `awaiting_web_form` | Para arrancar me falta que completes esto (5 min) 👇 {onboarding_url} | — |
 | `brand_generating` *(fixed until T23 routes onboarding through the orchestrator)* | Form submitted | ¡Gracias! Estoy estudiando tu marca, en un minuto te cuento lo que entendí ⏳ | — |
-| `brand_summary` | Flow 3 | Esto es lo que entendí de *{business_name}* 👇 {summary} ¿Es así? | `brand_ok` "Sí, es mi marca" · `brand_fix` "Corregir algo" |
-| `brand_fix_prompt` | `[Corregir algo]` | Contame qué cambio, con tus palabras. | — |
-| `ready_open_chat` | Brand confirmed (F1.10) | ¡Listo, ya conozco tu marca! ¿En qué te puedo ayudar hoy? | — |
+| `brand_summary` | Flow 3, sent by the `generate_brand` job | Esto es lo que entendí de *{business_name}* 👇 {summary} ¿Es así? (`{summary}` is the Brand Strategist's own text, so this stays a fixed frame: the job has no chat handler, like `brand_generating` in ADR 0026) | `brand_ok` "Sí, es mi marca" · `brand_fix` "Corregir algo" |
+| `brand_fix_prompt` **(event** `brand_fix_asked`**)** | `[Corregir algo]` | Contame qué cambio, con tus palabras. | — |
+| `ready_open_chat` **(event** `brand_confirmed`**)** | Brand confirmed (F1.10) | ¡Listo, ya conozco tu marca! ¿En qué te puedo ayudar hoy? | — |
 | `plan_generating` | Plan requested | Dale, armo el plan de la semana ⏳ | — |
 | `plan_preview` | Flow 4 | 📅 *Plan semana del {week_start}* {items} | `plan_approve:{id}` "Aprobar plan" · `plan_change:{id}` "Cambiar algo" |
 | `plan_approved` | Plan approved | ¡Genial! Te voy mandando las publicaciones a medida que estén listas. | — |
@@ -50,28 +50,35 @@ Messages for the Owner. Since [ADR 0026](../decisions/0026-owner-messages-from-t
 | `reel_preview_link` | Flow 5, Reel too big for WhatsApp (sent with the cover image as header) | 🎬 Reel para {when_label} — "{title}" {caption} Mirá el video acá 👇 {preview_url} | Same as `post_preview` |
 | `carousel_slide` *(label, fixed)* | Flow 5, carousel: caption of each slide image, sent in order (**draft**, [ADR 0022](../decisions/0022-carousels-in-mvp.md)) | {n}/{count} | — |
 | `carousel_preview` | Flow 5, after the last slide (**draft**) | 🖼️ Carrusel para {when_label} — "{title}" ({count} slides) {caption} | Same as `post_preview` |
-| `post_sent` **(event, no fixed text)** | T57, until the T18 buttons exist: right after a post's images arrive | The orchestrator writes it from the `[post ... sent to the Owner]` note, in the voice above: asks if they like it and whether to publish it ("¿Te gusta? ¿Lo subo, o le cambio algo?"). If that turn fails, nothing is sent | — |
+| `post_sent` **(event)** | Right after a post's images arrive | The orchestrator writes it from the `[post ... sent to the Owner]` note, in the voice above: asks if they like it and whether to publish it ("¿Te gusta? ¿Lo subo, o le cambio algo?"). If that turn fails, `post_actions` carries the buttons | `post_approve:{id}` "Aprobar" · `post_change:{id}` "Cambiar" · `post_discard:{id}` "Descartar" |
 | `photo_unreadable` **(event)** | A photo that can't be downloaded or opened | No pude abrir la foto 🙈 ¿Me la mandás de nuevo? | — |
 | `carousel_redo_ask` | `[Cambiar]` on a carousel (**draft**) | ¿Qué slide cambio y cómo? Decime el número. | — |
-| `post_change_prompt` | `[Cambiar]` | ¿Qué le cambio? Por ejemplo: "más corto", "otra foto", "mencioná el envío gratis". | — |
+| `post_change_prompt` **(event** `post_change_asked`**)** | `[Cambiar]` | ¿Qué le cambio? Por ejemplo: "más corto", "otra foto", "mencioná el envío gratis". | — |
 | `reel_change_prompt` | `[Cambiar]` on a Reel | ¿Qué le cambio? Por ejemplo: "más corto el texto", "otra portada", "usá el video de la mesa". | — |
-| `post_revising` | Feedback received | Va, lo ajusto ⏳ | — |
+| `post_revising` **(event** `brand_revising` **for the brand)** | Feedback received; for the brand, the correction after `[Corregir algo]` | Va, lo ajusto ⏳ | — |
 | `revision_photo_hint` | After the 3rd revision of a post | Si preferís, mandame una foto que te guste para este post 📸 | — |
-| `post_discarded` | `[Descartar]` | Listo, lo descarto. ¿Querés que haga otro en su lugar? | `post_replace:{id}` "Sí, otro" · `noop` "No, gracias" |
+| `post_discarded` **(event** `post_discarded`**)** | `[Descartar]` | Listo, lo descarto. ¿Querés que haga otro en su lugar? | `post_replace:{id}` "Sí, otro" · `noop` "No, gracias" |
 | `publish_when` | `[Aprobar]` with planned date | ¿Lo programo para el {when_label} o lo publico ya? | `post_schedule:{id}` "Programar" · `post_publish:{id}` "Publicar ahora" |
 | `publish_when_adhoc` | `[Aprobar]` ad-hoc | ¿Lo publico ya o lo programamos? | `post_publish:{id}` "Publicar ahora" · `post_schedule:{id}` "Programar" |
+| `publish_now_ask` **(event** `post_approved`**)** | `[Aprobar]` ad-hoc, until scheduling exists (T30, Should): `publish_when_adhoc` without "Programar" | ¡Aprobado! ¿Lo publico ya? | `post_publish:{id}` "Publicar ahora" |
+| `publishing` **(event** `post_publishing`**)** | `[Publicar ahora]` or `[Reintentar]` on a failed publish | ¡Dale, lo subo! ⏳ | — |
 | `schedule_ask` | `[Programar]` without date | ¿Para cuándo? Decime día y hora, por ejemplo "jueves a las 20". | — |
 | `published` **(event)** | Publish success: the permalink is always in the sent text; code appends it if the reply omits it | ¡Publicado! 🎉 {permalink} | — |
 | `publish_pending` **(event)** | Publish accepted, outcome not final or not known yet (the post may be live: never a failure) | Instagram lo está procesando, en un ratito aparece en tu cuenta ⏳ | — |
 | `scheduled` | Schedule success | ¡Genial! Sale {when_label} ✅ | — |
-| `publish_failed` **(event)** | Publish error | Uy, Instagram no me dejó publicarlo ({reason}). ¿Lo intento de nuevo? (T57, before T18 and without a retry: "Uy, Instagram no me dejó publicarlo 🙈 ¿Probamos armándolo de nuevo?") | `post_retry:{id}` "Reintentar" |
+| `publish_failed` **(event)** | Publish error | Uy, Instagram no me dejó publicarlo 🙈 ¿Lo intento de nuevo? (no `{reason}`: Zernio's errors aren't Owner-facing) | `post_retry:{id}` "Reintentar": publishes again under a new idempotency key |
 | `need_ig` | Publish without IG connected (not reached in the MVP, [ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)) | Para publicar necesito que conectes tu Instagram, es un toque 👇 {connect_url} | — |
-| `job_failed` **(event)** | Agent or image generation error | Uy, se me trabó algo armando esto. ¿Lo intento de nuevo? | `retry:{job_id}` "Reintentar" |
+| `job_failed` | A failed `generate_brand` job (sent by the job runner, which has no chat handler: fixed text like `brand_generating`) | Uy, se me trabó algo armando esto. ¿Lo intento de nuevo? | `retry:{job_id}` "Reintentar" |
 | `stale_button` **(event)** | Button no longer valid for the current state | Ese botón ya no está activo 🙂 | — |
 | `unsupported_media` **(event)** | Sticker/doc/location | Por ahora solo entiendo texto, audios, fotos y videos 🙏 ¿Me lo escribís o me mandás un audio? | — |
 | `audio_unclear` **(event)** | Voice note with no usable transcript | No te llegué a entender el audio 🙈 ¿Me lo mandás de nuevo o me lo escribís? | — |
 | `audio_too_long` | Voice note over `MAX_AUDIO_MB` | Uy, ese audio es muy largo para mí 😅 ¿Me lo mandás más cortito o me lo escribís? | — |
-| `photo_saved` **(event** `photos_received` **until T18)** | Photo received, no context | ¡Buenísima! La guardo para próximos posts 📸 ¿Armo un post con esta foto? | `photo_post:{asset_id}` "Sí, armalo" · `noop` "No, guardala" |
+| `photo_saved` **(event** `photos_received`**)** | Photo received, no context | ¡Buenísima! La guardo para próximos posts 📸 ¿Armo un post con esta foto? | None: the model asks its one question (as is or a design), which a button would skip. `photo_post:{ids}` is still handled if it arrives |
+| `post_actions` **(fallback)** | After a post's images, when the `post_sent` turn gives no text | 👆 ¿Te gusta? ¿Lo subo o le cambio algo? | `post_approve:{id}` "Aprobar" · `post_change:{id}` "Cambiar" · `post_discard:{id}` "Descartar" |
+| `retrying` **(event** `retrying`**)** | `[Reintentar]` on `job_failed` | Dale, lo intento de nuevo ⏳ | — |
+| `post_started` **(event)** | `[Sí, otro]` after `[Descartar]` | ¡Dale! Lo armo ⏳ | — |
+| `post_not_started` **(event)** | `[Sí, otro]` that can't start: another post is being made, the daily limit, or the photos expired (kept 30 minutes until T02) | Estoy terminando otro post 🙌 Apenas te lo mande, armamos este. / Por hoy ya armamos todos los diseños que puedo hacer 🙈 Mañana seguimos. / Ya no tengo esas fotos 🙈 ¿Me las mandás de nuevo? | — |
+| `action_failed` **(event)** | A button's database call failed | Uy, se me trabó algo. ¿Me lo mandás de nuevo en un ratito? | — |
 | `photo_too_big` **(event)** | WhatsApp photo over `MAX_PHOTO_MB` | Esa foto es muy pesada 🙈 ¿Me mandás una más liviana? (hasta {max_mb} MB) | — |
 | `video_saved` | Video received, no context, `reel_suitable` | ¡Qué buen video! Lo guardo 🎬 ¿Armo un Reel con este? | `reel_post:{asset_id}` "Sí, armalo" · `noop` "No, guardalo" |
 | `video_saved_no_reel` | Video received, not `reel_suitable` | ¡Gracias! Lo guardo para sacarle ideas y fotos 🎬 Para un Reel me sirven videos verticales de 3 a 90 segundos. | — |

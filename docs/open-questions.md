@@ -2,9 +2,11 @@
 
 ## To decide before the hackathon
 
-- [ ] **Product name and assistant name.** Needed for the welcome message, the wizard header and the pitch (`ASSISTANT_NAME`).
+- [x] **Product name and assistant name:** the product is **Neitor AI** and the assistant introduces itself as Neitor (`ASSISTANT_NAME=Neitor`), decided 2026-10-18.
 - [ ] **Hackathon rules:** is pre-written code allowed? If not, only accounts, materials and these docs are prepared in advance (see [implementation/plan.md](implementation/plan.md#before-the-hackathon-checklist)).
-- [x] **Backend host:** Railway, Trial first and Hobby if needed ([ADR 0017](decisions/0017-backend-host-railway.md)). Tenki is only the PR reviewer.
+- [x] **Backend host:** Railway, Trial first and Hobby if needed ([ADR 0017](decisions/0017-backend-host-railway.md)). Tenki is only the PR reviewer. Deployed 2026-10-18 in `us-east4-eqdc4a` (Railway has no South America region, so each Supabase round trip crosses continents) on the full Trial.
+- [x] **Kapso repoint to Railway:** done 2026-10-18. The tunnel webhooks on the Sandbox number are paused and a new "Message received" webhook points at the Railway domain; a message went through end to end ([integrations.md](architecture/integrations.md#kapso-setup-hour-1)). Each Kapso webhook has its own secret, so `KAPSO_WEBHOOK_SECRET` had to be updated on Railway.
+- [ ] **Local WhatsApp development:** the `simulator` channel is not built yet (T21), so developing against real WhatsApp locally means toggling the Kapso webhooks back to a tunnel (steps in [backend README § Deploy](../backend/README.md#switching-whatsapp-between-railway-and-local-development)). Decide whether Kapso allows a second webhook or number so both can stay on, or wait for the simulator.
 - [ ] **Demo materials** from the furniture business (logo, photos, products, questionnaire answers, promo, permission to publish).
 
 ## Channel / platform risk
@@ -40,7 +42,7 @@ From [ADR 0018](decisions/0018-ai-image-generation-service.md). Hands-on checks 
 - [ ] **Niche Report quality**: is Gemini's URL context and Google Search good enough for a Uruguayan niche in Spanish? Run it by hand on curated solid-wood furniture before building ([ADR 0025](decisions/0025-weekly-niche-report.md)). A first run on 2026-10-18 (La Ibérica and KATEI sites, `gemini-3.8-flash`) got `429 too_many_requests`: the key is on the **Free Tier**, limited to 20 requests per day for `gemini-3.8-flash`, and Google Search grounding isn't on the free tier for Gemini 3+ ([pricing](https://ai.google.dev/gemini-api/docs/pricing)). The run needs a key from a project with billing linked.
 - [ ] **Reference websites per niche**: which stores' sites the Niche Analyst reads, and whether the Owner can add their own (wizard field or chat). First list in [research/furniture-decor-uruguay.md](research/furniture-decor-uruguay.md#reference-websites).
 - [ ] **Per-post photos vs. the photo library:** do the photos the Owner sends with a request replace the Business's library as references for that Post, or complement it? Interim default in the docs: only the Owner's photos when they sent some (Art Director post-validation, T14).
-- [ ] **The Owner's logo on the image:** prompts forbid drawing or changing a logo; should the real logo appear at all, and how, now that the backend draws nothing? Same for the simple text logo of F2.9 (Could).
+- [x] **The Owner's logo on the image:** yes, when the Owner asks: code stamps the uploaded file in the bottom-right corner, and prompts still forbid drawing a logo ([ADR 0027](decisions/0027-owner-logo-stamped-in-code.md)). Still open: the simple text logo of F2.9 (Could), and uploading the logo from the chat.
 - [ ] **Photos in the live request:** [ADR 0016](decisions/0016-demo-scope-one-post.md) words the demo as "a photo" → one preview, while ADR 0018 assumes a set of photos (around 10) → several variations → a pick. The stage now follows ADR 0018 ([mvp.md](product/mvp.md#demo-goal)); how many photos the live request uses is open.
 - [ ] **Daily generation cap:** `MAX_POSTS_PER_DAY` defaults to 5 per Business ([agents.md](architecture/agents.md#when-image-generation-runs)). Is that right for the demo and for a real Owner, and does a slide redo count against it?
 - [ ] **Time per post:** the old < 45 s target was for rendered templates; set a new one after measuring generation latency.

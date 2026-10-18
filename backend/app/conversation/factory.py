@@ -4,6 +4,7 @@ from pathlib import Path
 from app.agents.niche_analyst import NicheReport, trend_notes
 from app.channels.inbound import EchoHandler, InboundHandler
 from app.config import Settings
+from app.db.session import get_sessionmaker
 from app.imagegen.factory import build_image_gen
 from app.llm.client import GeminiChat
 from app.media.public import PublicImages
@@ -13,9 +14,13 @@ from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts
 from app.publishing.base import PublisherPort
 from app.publishing.mock import MOCK_ACCOUNT_ID
+from app.storage import get_storage
 
+from .button_router import ButtonRouter
 from .chat import ChatHandler
 from .history import InMemoryHistory
+from .library import BrandBrains, BrandLibrary
+from .onboarding import OnboardingGate
 from .photos import InMemoryPhotos
 
 logger = logging.getLogger(__name__)
@@ -42,6 +47,7 @@ def build_inbound_handler(
                 logger.warning(
                     "PUBLISHER=zernio without ZERNIO_ACCOUNT_ID: posts can't be published"
                 )
+            sessions = get_sessionmaker() if settings.database_url else None
             posts = PostMaker(
                 PostDrafter(model, load_trend_notes(settings.niche_report_path)),
                 build_image_gen(settings),
@@ -50,9 +56,16 @@ def build_inbound_handler(
                 store,
                 settings.public_backend_url,
                 settings.max_posts_per_day,
+                brand_of=BrandBrains(sessions).latest if sessions else None,
             )
             publishing = PostPublisher(
                 publisher, store, images, settings.public_backend_url, account_id
+            )
+            buttons = ButtonRouter(store, posts, publishing, sessions)
+            library = (
+                BrandLibrary(sessions, get_storage())
+                if sessions and settings.supabase_url and settings.supabase_service_role_key
+                else None
             )
             chat = ChatHandler(
                 model,
@@ -61,12 +74,16 @@ def build_inbound_handler(
                 posts,
                 publishing,
                 store,
+                buttons,
+                library,
                 settings.assistant_name,
                 max_photo_mb=settings.max_photo_mb,
             )
             posts.on_event(chat.notify)
             publishing.on_event(chat.notify)
-            return chat
+            if sessions is None:
+                return chat
+            return OnboardingGate(chat, sessions, settings.frontend_url, settings.assistant_name)
         case "echo":
             return EchoHandler()
 

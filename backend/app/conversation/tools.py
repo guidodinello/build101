@@ -25,7 +25,10 @@ CREATE_POST: Tool = {
             "asset_ids": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Ids of the photos to use, from <recent_photos> (e.g. f1).",
+                "description": (
+                    "Ids of the photos to use, from <recent_photos> (e.g. f1) or "
+                    "<brand_photos> (e.g. b1)."
+                ),
             },
             "style": {
                 "type": "string",
@@ -41,6 +44,14 @@ CREATE_POST: Tool = {
                     "Only when remaking a post that was already sent because the Owner asked "
                     "for a change: the id of that post (from its [post ... sent] note), so the "
                     "old one can no longer be published."
+                ),
+            },
+            "with_logo": {
+                "type": "boolean",
+                "description": (
+                    "true only when the Owner asked for their logo on the post and "
+                    "<brand_logo> is present: it goes small in a corner of every image, exactly "
+                    "as they uploaded it."
                 ),
             },
             "slide_count": {
