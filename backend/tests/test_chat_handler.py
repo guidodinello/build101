@@ -7,6 +7,7 @@ from app.channels.base import InboundMessage
 from app.channels.inbound import EchoHandler
 from app.channels.kapso_webhook import parse_message
 from app.config import Settings
+from app.conversation.button_router import ButtonRouter
 from app.conversation.chat import MAX_STEPS, ChatHandler
 from app.conversation.factory import build_inbound_handler
 from app.conversation.history import InMemoryHistory
@@ -82,6 +83,7 @@ def build(
         posts,
         publishing,
         store,
+        ButtonRouter(store, posts, publishing, history, sessions=None),
         assistant_name="Mora",
         max_photo_mb=MAX_PHOTO_MB,
         photo_debounce_s=DEBOUNCE_S,
@@ -204,7 +206,8 @@ async def test_a_photo_without_caption_is_kept_and_offered() -> None:
     await chat.handle(message("image", text=None), channel)
     await chat.join()
 
-    assert channel.sent == [(SENDER, messages_es.PHOTO_KEPT)]
+    assert channel.sent == []
+    assert channel.buttons == [(SENDER, messages_es.PHOTO_KEPT, ["photo_post:f1", "noop"])]
     assert model.calls == []
 
 

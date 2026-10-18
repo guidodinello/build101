@@ -92,6 +92,7 @@ class BrandBrain(BaseModel):
     hashtags: list[str]               # 10–20, mix of niche + local
     posting: PostingPrefs             # posts_per_week, preferred_days, preferred_time ("19:00")
     constraints: list[str]            # hard "never" rules from the owner
+    visual_identity: VisualIdentity   # Owner colors win; neutral palette when they have none
     whatsapp_summary: str             # ≤ 600 chars, WhatsApp-formatted, for brand_summary message
 ```
 

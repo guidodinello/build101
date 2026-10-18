@@ -102,6 +102,17 @@ class AssetProduct(Base):
     source: Mapped[str]
 
 
+class BrandBrainVersion(Base):
+    __tablename__ = "brand_brains"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    business_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("businesses.id"))
+    version: Mapped[int]
+    data: Mapped[dict[str, Any]]
+    reason: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
 class Job(Base):
     __tablename__ = "jobs"
 
@@ -110,4 +121,8 @@ class Job(Base):
     kind: Mapped[str]
     payload: Mapped[dict[str, Any]] = mapped_column(server_default="{}")
     status: Mapped[str] = mapped_column(server_default="queued")
+    result: Mapped[dict[str, Any] | None]
+    error: Mapped[str | None]
+    started_at: Mapped[datetime | None]
+    finished_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())

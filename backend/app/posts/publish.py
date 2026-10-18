@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.channels.base import ChannelError, ChannelPort
+from app.channels.base import Button, ChannelError, ChannelPort
 from app.channels.inbound import mask
 from app.conversation.approval import Approval
 from app.conversation.history import InMemoryHistory
@@ -21,7 +21,7 @@ from app.publishing.base import (
     PublishRetryable,
 )
 
-from .store import InMemoryPosts, Post
+from .store import APPROVABLE, InMemoryPosts, Post
 
 logger = logging.getLogger(__name__)
 
@@ -78,19 +78,34 @@ class PostPublisher:
         post = self._posts.get(sender, args.post_id)
         if post is None:
             return {"error": "unknown_post"}
-        if post.status != "pending_approval":
+        if post.status not in APPROVABLE:
             return {"error": "post_not_pending", "status": post.status}
         if approval.post_id != post.id:
             result: dict[str, Any] = {"error": approval.reason}
             if approval.pending:
                 result["pending"] = approval.pending
             return result
+        return self._start(post, channel)
+
+    def publish_approved(self, post: Post, channel: ChannelPort) -> dict[str, Any]:
+        """[Publicar ahora]: the tap is the Owner's explicit approval (ADR 0007)."""
+        if post.status != "approved":
+            return {"error": "post_not_approved", "status": post.status}
+        return self._start(post, channel)
+
+    def retry(self, post: Post, channel: ChannelPort) -> dict[str, Any]:
+        """[Reintentar] after a definite failure, under a new idempotency key."""
+        if post.status != "failed":
+            return {"error": "post_not_failed", "status": post.status}
+        return self._start(post, channel)
+
+    def _start(self, post: Post, channel: ChannelPort) -> dict[str, Any]:
         account_id = self._account_id
         if account_id is None:
             logger.warning("cannot publish post %s: ZERNIO_ACCOUNT_ID is not set", post.id)
             return {"error": "need_ig"}
-
         post.status = "publishing"  # before the task starts, so a second "subilo" finds it busy
+        post.publish_attempts += 1
         task = asyncio.create_task(self._publish(post, account_id, channel))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -128,7 +143,7 @@ class PostPublisher:
                 self._images.keep(image.path, image.data)
             try:
                 return await self._publisher.publish(
-                    account_id, post.caption, media, idempotency_key=post.id
+                    account_id, post.caption, media, idempotency_key=post.idempotency_key
                 )
             except PublishInProgress as exc:
                 uncertain = exc
@@ -160,8 +175,8 @@ class PostPublisher:
                 post.status = "failed"
                 text = messages_es.PUBLISH_FAILED
                 note = (
-                    f"[post {post.id} publish failed] The Owner was told Instagram didn't take it. "
-                    "It can't be published again: offer to make a new one."
+                    f"[post {post.id} publish failed] The Owner was told Instagram didn't take it "
+                    "and got a Reintentar button to publish it again."
                 )
             case _:  # pending (or scheduled): it may be live, so no failure and no re-publish
                 post.status = "publish_pending"
@@ -176,7 +191,11 @@ class PostPublisher:
         # and the note lands after that turn's own steps.
         async with self._history.lock(post.sender):
             try:
-                await channel.send_text(post.sender, text)
+                if post.status == "failed":
+                    retry = Button(id=f"post_retry:{post.id}", title=messages_es.BUTTON_RETRY)
+                    await channel.send_buttons(post.sender, text, [retry])
+                else:
+                    await channel.send_text(post.sender, text)
             except ChannelError:
                 logger.warning("could not tell %s about post %s", mask(post.sender), post.id)
             self._history.extend(post.sender, [user_step(note)])

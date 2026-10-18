@@ -1,4 +1,6 @@
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,14 +8,33 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.dev import router as dev_router
 from app.api.errors import install_error_handlers
 from app.api.onboarding import router as onboarding_router
+from app.channels.router import get_channel
 from app.channels.router import router as whatsapp_router
 from app.config import get_settings
+from app.jobs.setup import build_job_runner
 from app.media.public import router as media_router
 
 # uvicorn configures only its own loggers; without this, `app.*` INFO lines are dropped.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(name)s — %(message)s")
 
-app = FastAPI(title="build101")
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    try:
+        runner = build_job_runner(get_settings(), get_channel())
+    except ValueError:
+        logger.warning("job runner is off: no WhatsApp channel", exc_info=True)
+        runner = None
+    if runner:
+        await runner.start()
+    yield
+    if runner:
+        await runner.stop()
+
+
+app = FastAPI(title="build101", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

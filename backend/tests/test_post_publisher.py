@@ -3,6 +3,7 @@ from datetime import datetime
 
 import pytest
 
+from app.conversation.button_router import ButtonRouter
 from app.conversation.chat import ChatHandler
 from app.conversation.history import InMemoryHistory
 from app.conversation.photos import InMemoryPhotos
@@ -79,6 +80,7 @@ class Rig:
             maker,
             self.publishing,
             self.store,
+            ButtonRouter(self.store, maker, self.publishing, self.history, sessions=None),
             assistant_name="Mora",
             max_photo_mb=1,
             keep_alive_s=60.0,
@@ -310,7 +312,7 @@ async def test_pending_is_not_reported_as_a_failure_and_is_not_published_again()
     "outcome",
     [PublishResult(status="failed", error="rejected"), PublisherError("zernio 400: bad")],
 )
-async def test_a_definite_failure_tells_the_owner_and_is_terminal(
+async def test_a_definite_failure_tells_the_owner_and_offers_a_retry(
     outcome: PublishResult | Exception,
 ) -> None:
     rig = Rig(ScriptedModel(replies=[approve("p1"), STARTED]), FakePublisher(results=[outcome]))
@@ -319,7 +321,8 @@ async def test_a_definite_failure_tells_the_owner_and_is_terminal(
     await rig.say("subilo")
     await rig.finish()
 
-    assert rig.said == [STARTED.text, messages_es.PUBLISH_FAILED]
+    assert rig.said == [STARTED.text]
+    assert rig.channel.buttons == [(SENDER, messages_es.PUBLISH_FAILED, ["post_retry:p1"])]
     assert status(rig, "p1") == "failed"
     assert len(rig.publisher.calls) == 1
 

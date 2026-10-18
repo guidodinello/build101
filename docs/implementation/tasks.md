@@ -41,11 +41,13 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 
 - Build: `app/agents/asset_analyst.py` + prompt (photo and logo mode; a photo's WhatsApp caption is passed as the owner hint); Pillow palette extraction util `app/agents/palette.py` (5 colors, skip near-white/black/transparent). Product suggestions written to `asset_products` are Could (F8.5).
 - Done when: running it on 3 demo photos + logo returns sensible `AssetAnalysis`; palette of the demo logo looks right.
+- **Built (photo mode):** `app/agents/asset_analyst.py` + `prompts/asset_analyst.md`, run by the `analyze_asset` job (`app/jobs/asset.py`) on the photo's `{asset_id}-llm.jpg` copy, with the Owner's hint, the Catalog and the Product the Owner linked the photo to (step 2 of the wizard). Product ids outside the Catalog and colors that aren't hex are dropped in code; the suggested `product_ids` stay in the analysis and are not written to `asset_products` (F8.5, Could). Logos aren't analyzed: their Pillow palette is taken at upload (T24, `app/onboarding/uploads.py:logo_palette`, which skips transparent pixels), and only photos are queued. On the free tier one analysis took 33–90 s.
 
 ### T12: Brand Strategist · A · M
 
 - Build: `app/agents/brand_strategist.py` + prompt, create mode. Reads the 1–5 wizard Products from `products`; with "Todavía no tengo logo ni colores" it uses the neutral default palette and says in the summary that colors come later. Revise mode (F2.6) and palette proposals (F2.9) are Could (T54).
 - Done when: with the demo business inputs (fixture `tests/fixtures/demo_business.json`), it returns a BrandBrain whose `whatsapp_summary` the owner-teammate agrees with.
+- **Built:** `app/agents/brand_strategist.py` + `prompts/brand_strategist.md` (thinking `high`), run by `generate_brand` (`app/jobs/brand.py`), which waits up to 60 s for the photo analyses, saves a `brand_brains` version, sets `awaiting_brand_confirmation` and sends `brand_summary` with `brand_ok` / `brand_fix`. Enforced in code: featured Products only from the Catalog (with their Catalog names), the questionnaire's goal and posts per week, the "what to avoid" answer first in `constraints`, the Owner's colors over the model's (the neutral palette without colors), the logo's asset id; a summary over 600 characters gets one retry. Revise mode (F2.6, Could) is in too: after `[Corregir algo]` the Owner's next message runs it on the latest version (`reason = 'correction'`). The `BrandBrain` gained `visual_identity`, which agents.md defined but left out of the model. First live run (5 photos, 2 Products): 67 s and ~7,300 thought tokens for the brand, after the analyses.
 
 ### T13: Copywriter · A · M
 
@@ -94,6 +96,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 
 - Build: `app/jobs/runner.py` per [overview.md § Background jobs](../architecture/overview.md#background-jobs): `enqueue`, semaphore, `jobs` rows, failure → `job_failed` message with `retry:{job_id}` button, startup cleanup of stale `running` jobs.
 - Done when: a dummy job runs, a failing dummy job sends `job_failed` in the simulator.
+- **Built:** `app/jobs/runner.py` polls `jobs` every second instead of starting a task at enqueue time ([overview.md § Background jobs](../architecture/overview.md#background-jobs)); `app/jobs/setup.py` registers `analyze_asset` and `generate_brand` and is started by the app's lifespan when the database, Storage, Gemini and WhatsApp are configured. Only `generate_brand` sends `job_failed`; stale `running` jobs are failed at startup and every minute. `agent_runs` is still not written (T10).
 
 ### T17: Job pipelines · A · M
 
@@ -106,6 +109,7 @@ Legend: **A** = Track A (Brain), **B** = Track B (Surface), **AB** = together. P
 
 - Build: `app/conversation/button_router.py` with the Must IDs from [api.md § Button IDs](../architecture/api.md#button-ids) (`brand_ok`, `brand_fix`, `post_approve`, `post_change`, `post_discard`, `post_replace`, `post_publish`, `post_retry`, `photo_post`, `retry`, `noop`; `variation_pick` if the Owner picks with buttons, see T26), state guards (`post_approve` needs a picked variation), stale-button reply. `brand_ok` sends the post-onboarding message (T48). Plan and scheduling buttons come with their Should tasks; `reel_post` with T39.
 - Done when: unit tests cover each button's allowed/forbidden states.
+- **Built:** `app/conversation/button_router.py`, called by `ChatHandler` for every button reply (under the sender's lock). Brand and job buttons work on the database (`app/conversation/brand.py`, `app/jobs/queue.py:retry_failed`); post buttons on T56/T57's in-memory posts, which gained `approved` and `discarded`. Every post now ends with a `post_actions` message ([Aprobar] [Cambiar] [Descartar]), and photos sent without a word get `photo_saved` with `photo_post`. `post_approve` sends `publish_now_ask` (no "Programar" until T30); "subilo" still publishes a pending or approved post. `post_change` asks what to change and leaves a note so the orchestrator remakes the post with `create_post(replaces=…)`; `post_replace` remakes it from the same request; `post_retry` publishes again under a new idempotency key (`{id}-r{n}`). `variation_pick` (T26), `post_schedule` (T30) and the plan buttons (Should) answer `stale_button`.
 
 ### T56: Post on request in the chat, before the database · A · M
 

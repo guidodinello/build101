@@ -1,0 +1,400 @@
+import uuid
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.agents.schemas import AssetAnalysis
+from app.conversation.brand import BrandFlow
+from app.conversation.button_router import ButtonRouter
+from app.conversation.history import InMemoryHistory
+from app.copy import messages_es
+from app.db.models import (
+    AssetProduct,
+    BrandAsset,
+    BrandBrainVersion,
+    Business,
+    Job,
+    Product,
+)
+from app.jobs.asset import analyze_asset
+from app.jobs.brand import generate_brand
+from app.jobs.queue import enqueue, retry_failed
+from app.jobs.runner import JobContext, JobRunner
+from app.posts.store import InMemoryPosts
+from tests.conftest import make_image, requires_db
+from tests.fakes import FakeChannel, FakeStorage, SequenceModel, brand_brain
+
+pytestmark = requires_db
+
+PHONE = "59899123456"
+
+
+def photo_analysis() -> AssetAnalysis:
+    return AssetAnalysis(
+        description="Mesa de roble en un living.",
+        subjects=["mesa"],
+        product_ids=[],
+        quality="high",
+        orientation="portrait",
+        has_people=False,
+        has_text=False,
+        dominant_colors=[],
+        best_for=["hero"],
+        safe_crop_focus="center",
+    )
+
+
+async def add_business(
+    sessions: async_sessionmaker[AsyncSession], state: str = "generating_brand"
+) -> Business:
+    async with sessions() as db:
+        business = Business(
+            owner_phone=PHONE,
+            name="Katei",
+            category="Muebles y deco",
+            one_liner="Muebles restaurados",
+            location="Montevideo",
+            onboarding_state=state,
+            onboarding_data={
+                "brand": {"three_words": ["a", "b", "c"], "colors": ["#2f3e2c"]},
+                "preferences": {"goal": "sales", "posts_per_week": 3, "avoid": "precios"},
+            },
+        )
+        db.add(business)
+        await db.commit()
+        return business
+
+
+def runner(
+    sessions: async_sessionmaker[AsyncSession],
+    jobs: dict[str, Any],
+    channel: FakeChannel,
+    model: Any = None,
+    storage: FakeStorage | None = None,
+    **options: Any,
+) -> JobRunner:
+    return JobRunner(
+        sessions,
+        jobs,
+        storage or FakeStorage(),
+        channel,
+        model or SequenceModel([]),
+        notify_on_failure=frozenset({"generate_brand"}),
+        **options,
+    )
+
+
+async def queue(
+    sessions: async_sessionmaker[AsyncSession], kind: str, business: Business, **payload: Any
+) -> uuid.UUID:
+    async with sessions() as db:
+        job = enqueue(db, kind, business.id, payload)  # type: ignore[arg-type]
+        await db.commit()
+        return job.id
+
+
+async def job_row(sessions: async_sessionmaker[AsyncSession], job_id: uuid.UUID) -> Job:
+    async with sessions() as db:
+        return await db.get_one(Job, job_id)
+
+
+async def test_a_queued_job_runs_and_records_its_result(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business = await add_business(sessions)
+    seen: list[dict[str, Any]] = []
+
+    async def ok(context: JobContext, payload: dict[str, Any]) -> dict[str, Any]:
+        seen.append(payload)
+        return {"done": True}
+
+    job_id = await queue(sessions, "analyze_asset", business, n=1)
+    jobs = runner(sessions, {"analyze_asset": ok}, FakeChannel())
+
+    assert await jobs.run_due() == 1
+    await jobs.join()
+
+    job = await job_row(sessions, job_id)
+    assert (job.status, job.result, job.error) == ("succeeded", {"done": True}, None)
+    assert job.started_at and job.finished_at
+    assert seen == [{"n": 1}]
+
+
+async def test_a_failed_job_tells_the_owner_with_a_retry_button(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business = await add_business(sessions)
+
+    async def boom(context: JobContext, payload: dict[str, Any]) -> None:
+        raise RuntimeError("kaput")
+
+    job_id = await queue(sessions, "generate_brand", business)
+    channel = FakeChannel()
+    jobs = runner(sessions, {"generate_brand": boom}, channel)
+
+    await jobs.run_due()
+    await jobs.join()
+
+    job = await job_row(sessions, job_id)
+    assert job.status == "failed"
+    assert "kaput" in (job.error or "")
+    assert channel.buttons == [(PHONE, messages_es.JOB_FAILED, [f"retry:{job_id}"])]
+
+
+async def test_other_failures_are_only_logged(sessions: async_sessionmaker[AsyncSession]) -> None:
+    business = await add_business(sessions)
+    job_id = await queue(sessions, "generate_plan", business)
+    channel = FakeChannel()
+    jobs = runner(sessions, {}, channel)
+
+    await jobs.run_due()
+    await jobs.join()
+
+    assert (await job_row(sessions, job_id)).status == "failed"
+    assert channel.buttons == []
+
+
+async def test_only_free_slots_are_claimed(sessions: async_sessionmaker[AsyncSession]) -> None:
+    business = await add_business(sessions)
+
+    async def ok(context: JobContext, payload: dict[str, Any]) -> None:
+        return None
+
+    for _ in range(3):
+        await queue(sessions, "analyze_asset", business)
+    jobs = runner(sessions, {"analyze_asset": ok}, FakeChannel(), max_concurrent=2)
+
+    assert await jobs.run_due() == 2
+    await jobs.join()
+    assert await jobs.run_due() == 1
+    await jobs.join()
+
+
+async def test_jobs_left_running_by_a_restart_are_failed(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business = await add_business(sessions)
+    async with sessions() as db:
+        stale = Job(
+            business_id=business.id,
+            kind="analyze_asset",
+            status="running",
+            started_at=datetime.now(UTC) - timedelta(minutes=10),
+        )
+        fresh = Job(
+            business_id=business.id,
+            kind="analyze_asset",
+            status="running",
+            started_at=datetime.now(UTC),
+        )
+        db.add_all([stale, fresh])
+        await db.commit()
+
+    assert await runner(sessions, {}, FakeChannel()).fail_stale() == 1
+    assert (await job_row(sessions, stale.id)).status == "failed"
+    assert (await job_row(sessions, fresh.id)).status == "running"
+
+
+async def test_a_failed_job_is_retried_once_and_only_by_its_owner(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business = await add_business(sessions)
+    async with sessions() as db:
+        failed = Job(
+            business_id=business.id, kind="generate_brand", status="failed", payload={"a": 1}
+        )
+        db.add(failed)
+        await db.commit()
+
+    stranger = await retry_failed(sessions, "59800000000", str(failed.id))
+    first = await retry_failed(sessions, PHONE, str(failed.id))
+    second = await retry_failed(sessions, PHONE, str(failed.id))
+
+    assert stranger is None
+    assert first and (first.kind, first.payload, first.status) == (
+        "generate_brand",
+        {"a": 1},
+        "queued",
+    )
+    assert second is None
+    assert await retry_failed(sessions, PHONE, "not-a-uuid") is None
+
+
+async def add_photo(
+    sessions: async_sessionmaker[AsyncSession], business: Business, storage: FakeStorage
+) -> BrandAsset:
+    async with sessions() as db:
+        product = Product(business_id=business.id, name="Mesa", description="Roble")
+        asset = BrandAsset(
+            business_id=business.id,
+            kind="photo",
+            source="web",
+            status="ready",
+            storage_path=f"{business.id}/a.jpg",
+            mime_type="image/jpeg",
+            owner_hint="la nueva",
+        )
+        db.add_all([product, asset])
+        await db.flush()
+        db.add(AssetProduct(asset_id=asset.id, product_id=product.id, source="owner"))
+        await db.commit()
+    storage.put("assets", f"{business.id}/{asset.id}-llm.jpg", make_image((100, 100)))
+    return asset
+
+
+def context(
+    sessions: async_sessionmaker[AsyncSession],
+    business: Business,
+    model: Any,
+    storage: FakeStorage | None = None,
+    channel: FakeChannel | None = None,
+) -> JobContext:
+    return JobContext(
+        uuid.uuid4(),
+        business.id,
+        sessions,
+        storage or FakeStorage(),
+        channel or FakeChannel(),
+        model,
+    )
+
+
+async def test_analyze_asset_saves_the_analysis_of_the_agents_copy(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business, storage = await add_business(sessions), FakeStorage()
+    asset = await add_photo(sessions, business, storage)
+    model = SequenceModel([photo_analysis()])
+
+    await analyze_asset(context(sessions, business, model, storage), {"asset_id": str(asset.id)})
+    again = await analyze_asset(
+        context(sessions, business, model, storage), {"asset_id": str(asset.id)}
+    )
+
+    async with sessions() as db:
+        saved = await db.get_one(BrandAsset, asset.id)
+    assert saved.analysis and saved.analysis["description"] == "Mesa de roble en un living."
+    assert again == {"skipped": "already analyzed"}
+    assert "<owner_hint>la nueva</owner_hint>" in model.contents[0][0]["text"]
+
+
+async def test_analyze_asset_fails_without_the_agents_copy(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business, storage = await add_business(sessions), FakeStorage()
+    asset = await add_photo(sessions, business, storage)
+    storage.objects.clear()
+
+    with pytest.raises(FileNotFoundError):
+        await analyze_asset(
+            context(sessions, business, SequenceModel([]), storage), {"asset_id": str(asset.id)}
+        )
+
+
+async def test_generate_brand_saves_a_version_and_asks_the_owner(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business, channel = await add_business(sessions), FakeChannel()
+    model = SequenceModel([brand_brain(whatsapp_summary="• *Cómo hablamos:* cálidos")])
+
+    result = await generate_brand(context(sessions, business, model, channel=channel), {})
+
+    assert result == {"version": 1}
+    async with sessions() as db:
+        saved = await db.get_one(Business, business.id)
+        version = await db.scalar(select(BrandBrainVersion))
+    assert saved.onboarding_state == "awaiting_brand_confirmation"
+    assert version and (version.version, version.reason) == (1, "onboarding")
+    assert version.data["constraints"][0] == "precios"
+    assert channel.buttons == [
+        (
+            PHONE,
+            messages_es.brand_summary("Katei", "• *Cómo hablamos:* cálidos"),
+            ["brand_ok", "brand_fix"],
+        )
+    ]
+
+
+async def test_a_correction_makes_a_new_version_from_the_previous_one(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business = await add_business(sessions)
+    model = SequenceModel([brand_brain(), brand_brain(whatsapp_summary="• formales")])
+    await generate_brand(context(sessions, business, model), {})
+
+    await generate_brand(context(sessions, business, model), {"correction": "más formales"})
+
+    async with sessions() as db:
+        versions = (
+            await db.scalars(select(BrandBrainVersion).order_by(BrandBrainVersion.version))
+        ).all()
+    assert [(v.version, v.reason) for v in versions] == [(1, "onboarding"), (2, "correction")]
+    assert "<correction>más formales</correction>" in model.contents[1][0]["text"]
+
+
+def router(sessions: async_sessionmaker[AsyncSession]) -> ButtonRouter:
+    store, history = InMemoryPosts(), InMemoryHistory()
+    return ButtonRouter(store, maker=None, publisher=None, history=history, sessions=sessions)  # type: ignore[arg-type]
+
+
+async def test_brand_ok_activates_the_business_once(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business = await add_business(sessions, state="awaiting_brand_confirmation")
+    buttons = router(sessions)
+
+    first = await buttons.handle(PHONE, "brand_ok", FakeChannel())
+    second = await buttons.handle(PHONE, "brand_ok", FakeChannel())
+
+    assert (first, second) == (messages_es.READY_OPEN_CHAT, messages_es.STALE_BUTTON)
+    async with sessions() as db:
+        assert (await db.get_one(Business, business.id)).onboarding_state == "active"
+
+
+async def test_brand_fix_takes_the_next_message_as_the_correction(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business = await add_business(sessions, state="awaiting_brand_confirmation")
+    buttons = router(sessions)
+    flow = BrandFlow(sessions)
+
+    before = await flow.take_correction(PHONE, "somos más formales")
+    asked = await buttons.handle(PHONE, "brand_fix", FakeChannel())
+    taken = await flow.take_correction(PHONE, "somos más formales")
+    again = await flow.take_correction(PHONE, "y otra cosa")
+
+    assert (before, asked, taken, again) == (False, messages_es.BRAND_FIX_PROMPT, True, False)
+    async with sessions() as db:
+        jobs = (await db.scalars(select(Job).where(Job.business_id == business.id))).all()
+    assert [(job.kind, job.payload) for job in jobs] == [
+        ("generate_brand", {"correction": "somos más formales"})
+    ]
+
+
+async def test_brand_buttons_are_stale_in_another_state(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    await add_business(sessions, state="active")
+    buttons = router(sessions)
+
+    assert await buttons.handle(PHONE, "brand_ok", FakeChannel()) == messages_es.STALE_BUTTON
+    assert await buttons.handle(PHONE, "brand_fix", FakeChannel()) == messages_es.STALE_BUTTON
+
+
+async def test_retry_button_requeues_the_failed_job(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business = await add_business(sessions)
+    async with sessions() as db:
+        failed = Job(business_id=business.id, kind="generate_brand", status="failed")
+        db.add(failed)
+        await db.commit()
+    buttons = router(sessions)
+
+    first = await buttons.handle(PHONE, f"retry:{failed.id}", FakeChannel())
+    second = await buttons.handle(PHONE, f"retry:{failed.id}", FakeChannel())
+
+    assert (first, second) == (messages_es.RETRYING, messages_es.STALE_BUTTON)

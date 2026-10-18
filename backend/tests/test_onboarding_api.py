@@ -1,34 +1,27 @@
-import os
-import re
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.channels.router import get_channel
 from app.config import Settings, get_settings
 from app.copy import messages_es
 from app.db.models import BrandAsset, Business, Job, MagicLink
-from app.db.session import create_engine, get_session
+from app.db.session import get_session
 from app.main import app
 from app.storage import get_storage
-from tests.conftest import make_image
+from tests.conftest import make_image, requires_db
 from tests.fakes import FakeChannel, FakeStorage
 
-TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
-SCHEMA = Path(__file__).parents[1] / "migrations" / "versions" / "0001_initial.sql"
 DEV_TOKEN = "dev-secret"
 PHONE = "59899123456"
 
-pytestmark = pytest.mark.skipif(
-    not TEST_DATABASE_URL, reason="set TEST_DATABASE_URL to a Postgres the tests can wipe"
-)
+pytestmark = requires_db
 
 BUSINESS = {
     "name": "Muebles Ramírez",
@@ -47,20 +40,6 @@ PREFERENCES = {
     "avoid": None,
     "current_offer": "10% en mesas",
 }
-
-
-@pytest.fixture
-async def sessions() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    assert TEST_DATABASE_URL
-    engine = create_engine(TEST_DATABASE_URL)
-    async with engine.begin() as connection:
-        await connection.execute(text("drop schema public cascade"))
-        await connection.execute(text("create schema public"))
-        for statement in re.split(r";\s*$", SCHEMA.read_text(), flags=re.MULTILINE):
-            if statement.strip():
-                await connection.exec_driver_sql(statement)
-    yield async_sessionmaker(engine, expire_on_commit=False)
-    await engine.dispose()
 
 
 @pytest.fixture

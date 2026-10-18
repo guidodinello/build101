@@ -6,7 +6,9 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-from app.channels.base import ChannelError, ChannelPort, InboundMedia, InboundMessage
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.channels.base import Button, ChannelError, ChannelPort, InboundMedia, InboundMessage
 from app.channels.inbound import mask
 from app.copy import messages_es
 from app.llm.client import (
@@ -26,6 +28,7 @@ from app.posts.store import InMemoryPosts
 from app.prompts import load_prompt
 
 from .approval import Approval, decide
+from .button_router import ButtonRouter
 from .history import InMemoryHistory
 from .photos import InMemoryPhotos, Photo
 from .tools import TOOLS
@@ -58,9 +61,9 @@ class ChatHandler:
     """InboundHandler that answers text, voice notes and photos with the LLM.
 
     Orchestrator v0 (T56, T57): only `create_post` and `approve_post` are registered, and no
-    onboarding or button routing yet (T23, T18), so buttons and other kinds get fixed
-    messages. Photos wait `PHOTO_DEBOUNCE_S` after the last one and are answered together, with
-    any text that arrives meanwhile.
+    onboarding yet (T23). Buttons go to the `ButtonRouter` (T18); while the Owner corrects their
+    brand summary, their next message is the correction. Photos wait `PHOTO_DEBOUNCE_S` after the
+    last one and are answered together, with any text that arrives meanwhile.
     """
 
     def __init__(
@@ -71,6 +74,7 @@ class ChatHandler:
         posts: PostMaker,
         publisher: PostPublisher,
         store: InMemoryPosts,
+        buttons: ButtonRouter,
         assistant_name: str,
         max_photo_mb: int,
         photo_debounce_s: float = PHOTO_DEBOUNCE_S,
@@ -82,6 +86,7 @@ class ChatHandler:
         self._posts = posts
         self._publisher = publisher
         self._store = store
+        self._buttons = buttons
         self._system = system_prompt(assistant_name)
         self._max_photo_mb = max_photo_mb
         self._photo_debounce_s = photo_debounce_s
@@ -100,7 +105,8 @@ class ChatHandler:
         async with self._history.lock(message.sender):
             await mark_read(message.message_id, channel)
             reply = await self._answer(message, photos, channel)
-            await channel.send_text(message.sender, reply)
+            if reply:
+                await channel.send_text(message.sender, reply)
 
     async def join(self) -> None:
         """Wait for the pending photo batches (tests, shutdown); cancelled timers are fine."""
@@ -108,7 +114,12 @@ class ChatHandler:
 
     async def _answer(
         self, message: InboundMessage, photos: list[Photo], channel: ChannelPort
-    ) -> str:
+    ) -> str | None:
+        words = message.text if message.kind == "text" else None
+        if message.kind == "audio" and message.audio:
+            words = message.audio.provider_transcript
+        if words and await self._took_brand_correction(message.sender, words):
+            return messages_es.REVISING
         match message.kind:
             case "text" if message.text:
                 return await self._llm_turn(
@@ -133,8 +144,8 @@ class ChatHandler:
                 )
             case "audio":
                 return messages_es.AUDIO_UNCLEAR
-            case "button":
-                return messages_es.STALE_BUTTON
+            case "button" if message.button:
+                return await self._buttons.handle(message.sender, message.button.id, channel)
             case _:
                 return messages_es.UNSUPPORTED_MEDIA
 
@@ -193,10 +204,9 @@ class ChatHandler:
                         words=captions,
                         attached=True,
                     )
+                    await channel.send_text(sender, reply)
                 else:
-                    many = len(batch.photos) > 1
-                    reply = messages_es.PHOTOS_KEPT if many else messages_es.PHOTO_KEPT
-                await channel.send_text(sender, reply)
+                    await offer_photo_post(sender, batch.photos, channel)
         except Exception:
             # The task's boundary, like the webhook's run_handler: nobody awaits it.
             logger.exception("answering %d photos failed for %s", len(batch.photos), mask(sender))
@@ -254,6 +264,17 @@ class ChatHandler:
         self._history.extend(sender, [user, *turn])
         return reply.text
 
+    async def _took_brand_correction(self, sender: str, words: str) -> bool:
+        brand = self._buttons.brand
+        if brand is None:
+            return False
+        try:
+            return await brand.take_correction(sender, words)
+        except SQLAlchemyError:
+            # The database is down: answer as a normal turn rather than not at all.
+            logger.warning("brand correction check failed for %s", mask(sender), exc_info=True)
+            return False
+
     async def _keep_owner_posted(
         self, sender: str, message_id: str, looking_at_photos: bool, channel: ChannelPort
     ) -> None:
@@ -310,6 +331,23 @@ async def mark_read(message_id: str, channel: ChannelPort) -> None:
         await channel.mark_read(message_id, typing=True)
     except ChannelError:
         logger.warning("mark_read failed for %s", message_id, exc_info=True)
+
+
+async def offer_photo_post(sender: str, photos: list[Photo], channel: ChannelPort) -> None:
+    """`photo_saved` with [Sí, armalo] [No, guardala], for photos sent without a word."""
+    many = len(photos) > 1
+    buttons = [
+        Button(
+            id="photo_post:" + ",".join(photo.id for photo in photos),
+            title=messages_es.BUTTON_MAKE_POST,
+        ),
+        Button(
+            id="noop",
+            title=messages_es.BUTTON_KEEP_PHOTOS if many else messages_es.BUTTON_KEEP_PHOTO,
+        ),
+    ]
+    text = messages_es.PHOTOS_KEPT if many else messages_es.PHOTO_KEPT
+    await channel.send_buttons(sender, text, buttons)
 
 
 def request(photos: list[Photo], text: str) -> str:

@@ -5,7 +5,15 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.channels.base import ChannelError
+from app.agents.schemas import (
+    Audience,
+    BrandBrain,
+    ContentPillar,
+    PostingPrefs,
+    VisualIdentity,
+    Voice,
+)
+from app.channels.base import Button, ChannelError
 from app.imagegen.base import GeneratedImage
 from app.llm.client import Content, FunctionCall, LLMError, Reply, Step, Tool
 from app.publishing.base import PublishMedia, PublishResult
@@ -30,6 +38,7 @@ def call_reply(name: str, call_id: str = "call_1", **arguments: Any) -> Reply:
 class FakeChannel:
     sent: list[tuple[str, str]] = field(default_factory=list)
     images: list[tuple[str, str, str | None]] = field(default_factory=list)
+    buttons: list[tuple[str, str, list[str]]] = field(default_factory=list)
     read: list[tuple[str, bool]] = field(default_factory=list)
     downloads: list[str] = field(default_factory=list)
     media: bytes = field(default_factory=lambda: make_image((800, 1000)))
@@ -42,6 +51,17 @@ class FakeChannel:
     async def send_image(self, to: str, image_url: str, caption: str | None = None) -> str:
         self.images.append((to, image_url, caption))
         return "wamid.IMG"
+
+    async def send_buttons(
+        self,
+        to: str,
+        body: str,
+        buttons: list[Button],
+        header_image_url: str | None = None,
+        header_video_url: str | None = None,
+    ) -> str:
+        self.buttons.append((to, body, [button.id for button in buttons]))
+        return "wamid.BTN"
 
     async def mark_read(self, message_id: str, typing: bool = False) -> None:
         if self.fail_mark_read:
@@ -181,3 +201,61 @@ class FakeStorage:
             for path in paths
             if f"{bucket}/{path}" in self.objects
         }
+
+
+def brand_brain(**changes: Any) -> BrandBrain:
+    brain = BrandBrain(
+        business_name="Katei",
+        one_liner="Muebles restaurados",
+        description="Restauramos muebles antiguos.",
+        category="Muebles y deco",
+        location="Montevideo",
+        goal="sales",
+        audiences=[Audience(name="Familias", description="", pains=[], motivations=[])],
+        value_props=["Hecho a mano"],
+        voice=Voice(
+            descriptors=["cálido"],
+            formality=2,
+            humor=3,
+            emoji_policy="few",
+            do=[],
+            dont=[],
+            sample_phrases=[],
+        ),
+        pillars=[ContentPillar(id="taller", name="El taller", description="", example_ideas=[])],
+        featured_products=[],
+        ctas=["Escribinos"],
+        hashtags=["#muebles"],
+        posting=PostingPrefs(posts_per_week=2, preferred_days=["mon"], preferred_time="19:00"),
+        constraints=[],
+        visual_identity=VisualIdentity(
+            primary_color="#111111",
+            secondary_color="#222222",
+            accent_color="#333333",
+            background_color="#ffffff",
+            text_color="#000000",
+            logo_asset_id=None,
+            photo_style="luz natural",
+        ),
+        whatsapp_summary="• *Cómo hablamos:* cálidos",
+    )
+    return brain.model_copy(update=changes)
+
+
+@dataclass
+class SequenceModel:
+    """Structured answers in order, for agents that may call the model more than once."""
+
+    answers: list[BaseModel]
+    contents: list[list[Content]] = field(default_factory=list)
+
+    async def structured[T: BaseModel](
+        self,
+        agent: str,
+        system: str,
+        content: list[Content],
+        schema: type[T],
+        thinking_level: str,
+    ) -> T:
+        self.contents.append(list(content))
+        return self.answers.pop(0)  # type: ignore[return-value]
