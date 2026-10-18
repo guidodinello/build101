@@ -18,7 +18,7 @@ from .chat import mark_read
 logger = logging.getLogger(__name__)
 
 MAX_NAME_CHARS = 200
-# WhatsApp delivers an album as one message per photo: one reminder covers them all.
+# WhatsApp delivers an album as one message per photo: one welcome or reminder covers them all.
 REMINDER_COOLDOWN_S = 30.0
 
 
@@ -43,7 +43,7 @@ class OnboardingGate:
         self._reminder_cooldown_s = reminder_cooldown_s
         self._locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._welcomed_at: dict[str, float] = {}
-        self._last_link: dict[str, float] = {}
+        self._last_prompt: dict[str, float] = {}
 
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
         async with self._locks[message.sender]:
@@ -73,30 +73,33 @@ class OnboardingGate:
             if message.kind == "album":
                 return ""
 
+            name = business_name(message)
             if state == "new":
                 business.onboarding_state = "awaiting_name"
                 self._welcomed_at[message.sender] = time.time()
-                reply = messages_es.welcome(self._assistant_name)
+                reply = self._welcome(message.sender)
             elif state == "awaiting_name" and self._written_before_welcome(message):
                 return ""
-            elif state == "awaiting_name":
-                name = business_name(message)
-                if name is None:
-                    reply = messages_es.welcome(self._assistant_name)
-                else:
-                    business.name = name
-                    business.onboarding_state = "awaiting_web_form"
-                    reply = messages_es.name_ack_link(name, self._new_link(db, business))
-            elif self._sent_link_recently(message.sender):
+            elif state == "awaiting_name" and name is not None:
+                business.name = name
+                business.onboarding_state = "awaiting_web_form"
+                reply = messages_es.name_ack_link(name, self._new_link(db, business))
+            elif self._prompted_recently(message.sender):
                 return ""
+            elif state == "awaiting_name":
+                reply = self._welcome(message.sender)
             else:
                 reply = messages_es.link_reminder(self._new_link(db, business))
             await db.commit()
         return reply
 
+    def _welcome(self, sender: str) -> str:
+        self._last_prompt[sender] = time.monotonic()
+        return messages_es.welcome(self._assistant_name)
+
     def _new_link(self, db: AsyncSession, business: Business) -> str:
         # Only the token's hash is stored, so a reminder needs a new link.
-        self._last_link[business.owner_phone] = time.monotonic()
+        self._last_prompt[business.owner_phone] = time.monotonic()
         return onboarding_url(self._frontend_url, add_onboarding_link(db, business))
 
     def _written_before_welcome(self, message: InboundMessage) -> bool:
@@ -105,11 +108,11 @@ class OnboardingGate:
         return (
             welcomed_at is not None
             and message.timestamp is not None
-            and message.timestamp < int(welcomed_at)
+            and message.timestamp <= int(welcomed_at)
         )
 
-    def _sent_link_recently(self, sender: str) -> bool:
-        last = self._last_link.get(sender)
+    def _prompted_recently(self, sender: str) -> bool:
+        last = self._last_prompt.get(sender)
         return last is not None and time.monotonic() - last < self._reminder_cooldown_s
 
 

@@ -97,7 +97,7 @@ async def test_the_name_is_saved_and_the_link_sent(rig: Rig) -> None:
 
 
 async def test_a_message_written_before_the_welcome_is_not_the_name(rig: Rig) -> None:
-    sent_at = int(time.time()) - 1
+    sent_at = int(time.time())  # the same second as the welcome
     await rig.gate.handle(text("Hola", sent_at), rig.channel)
     await rig.gate.handle(text("¿Hay alguien?", sent_at), rig.channel)
 
@@ -124,6 +124,15 @@ async def test_a_photo_instead_of_the_name_asks_again(rig: Rig) -> None:
     assert rig.replies() == [messages_es.welcome(ASSISTANT)]
     assert (await rig.business()).onboarding_state == "awaiting_name"
     assert await rig.links() == 0
+
+
+async def test_an_album_instead_of_the_name_asks_again_once(rig: Rig) -> None:
+    await add_business(rig, "awaiting_name")
+
+    await rig.gate.handle(message("image", text=None), rig.channel)
+    await rig.gate.handle(message("image", text=None), rig.channel)
+
+    assert rig.replies() == [messages_es.welcome(ASSISTANT)]
 
 
 async def test_writing_before_the_form_resends_a_link_once(rig: Rig) -> None:
@@ -167,7 +176,7 @@ async def test_after_the_form_the_chat_answers(rig: Rig, state: str) -> None:
 
 
 async def test_two_first_messages_at_once_make_one_business(rig: Rig) -> None:
-    sent_at = int(time.time()) - 1
+    sent_at = int(time.time())
     await asyncio.gather(
         rig.gate.handle(text("Hola", sent_at), rig.channel),
         rig.gate.handle(text("¿Hay alguien?", sent_at), rig.channel),
