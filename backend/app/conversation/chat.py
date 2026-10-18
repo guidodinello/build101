@@ -237,37 +237,90 @@ class ChatHandler:
             text_content(context_block(recent, unseen, self._photos.library(sender))),
             *(image_content(photo.data, "image/jpeg") for photo in unseen),
         )
-        turn: list[Step] = []
         keep_alive = self._start(self._keep_owner_posted(sender, message_id, bool(unseen), channel))
         try:
-            for _ in range(MAX_STEPS):
-                reply = await self._model.reply(
-                    AGENT,
-                    self._system,
-                    [*self._history.get(sender), with_context, *turn],
-                    thinking_level="low",
-                    tools=TOOLS,
-                )
-                turn.extend(reply.steps)
-                if not reply.function_calls:
-                    break
-                turn.extend(
-                    function_result_step(call, self._run_tool(call, sender, channel, approval))
-                    for call in reply.function_calls
-                )
+            text, turn = await self._converse(sender, with_context, approval, True, channel)
         except LLMError:
             logger.warning("%s failed for %s", AGENT, mask(sender), exc_info=True)
             return messages_es.REPLY_FAILED
         finally:
             keep_alive.cancel()
-        if not reply.text:
+        if not text:
             logger.warning("%s still calling tools after %d steps", AGENT, MAX_STEPS)
             return messages_es.REPLY_FAILED
         for photo in unseen:
             photo.seen = True
         # Only a completed turn enters the history, so a failure leaves no dangling user step.
         self._history.extend(sender, [user, *turn])
-        return reply.text
+        return text
+
+    async def post_sent(self, sender: str, post_id: str, note: str, channel: ChannelPort) -> None:
+        """The model's own follow-up to a `[post ... sent to the Owner]` note, with the post's
+        [Aprobar] [Cambiar] [Descartar] buttons (T18).
+
+        Runs under the sender's lock, so it never interleaves with an Owner turn: if they wrote
+        meanwhile, their turn is answered first. When the model has nothing to say, the buttons
+        go with a fixed line; any other failure is logged: the post already arrived.
+        """
+        try:
+            async with self._history.lock(sender):
+                await self._follow_up(sender, post_id, note, channel)
+        except Exception:
+            # The task's boundary, like the photo batches: nobody awaits it.
+            logger.exception("follow-up for post %s failed for %s", post_id, mask(sender))
+
+    async def _follow_up(self, sender: str, post_id: str, note: str, channel: ChannelPort) -> None:
+        step = user_step(note)
+        post = self._store.get(sender, post_id)
+        if post is None or post.status != "pending_approval":
+            # Already approved or replaced while this waited for the lock: nothing to ask.
+            self._history.extend(sender, [step])
+            return
+        text, turn = "", []
+        try:
+            # No Owner words, so nothing may be approved (ADR 0007) and no post started; and
+            # no photo context: a photo batch waiting for its debounce must not be marked seen.
+            text, turn = await self._converse(sender, step, Approval(), False, channel)
+        except LLMError:
+            logger.warning("%s failed for %s", AGENT, mask(sender), exc_info=True)
+        if not text:
+            logger.warning("%s sent no follow-up for post %s", AGENT, post_id)
+            # The note still goes in, so a later "subilo" or a change knows the post id.
+            self._history.extend(sender, [step])
+            await self._posts.offer_actions(sender, post_id, messages_es.post_actions(), channel)
+            return
+        self._history.extend(sender, [step, *turn])
+        await self._posts.offer_actions(sender, post_id, text, channel)
+
+    async def _converse(
+        self,
+        sender: str,
+        current: Step,
+        approval: Approval,
+        owner_request: bool,
+        channel: ChannelPort,
+    ) -> tuple[str, list[Step]]:
+        """Run the model and tool steps on `current`: the reply text ("" if it kept calling tools
+        until MAX_STEPS) and the steps of the turn. Raises LLMError."""
+        turn: list[Step] = []
+        for _ in range(MAX_STEPS):
+            reply = await self._model.reply(
+                AGENT,
+                self._system,
+                [*self._history.get(sender), current, *turn],
+                thinking_level="low",
+                tools=TOOLS,
+            )
+            turn.extend(reply.steps)
+            if not reply.function_calls:
+                return reply.text, turn
+            turn.extend(
+                function_result_step(
+                    call, self._run_tool(call, sender, channel, approval, owner_request)
+                )
+                for call in reply.function_calls
+            )
+        return "", turn
 
     async def _refresh_library(self, sender: str) -> None:
         if self._library is None:
@@ -320,10 +373,18 @@ class ChatHandler:
         return approval
 
     def _run_tool(
-        self, call: FunctionCall, sender: str, channel: ChannelPort, approval: Approval
+        self,
+        call: FunctionCall,
+        sender: str,
+        channel: ChannelPort,
+        approval: Approval,
+        owner_request: bool,
     ) -> dict[str, Any]:
         logger.info("tool %s for %s: %s", call.name, mask(sender), call.arguments)
         match call.name:
+            case "create_post" if not owner_request:
+                # A note turn has no Owner words: a new post isn't their intent.
+                result = {"error": "not_owner_request"}
             case "create_post":
                 result = self._posts.create_post(sender, call.arguments, channel)
             case "approve_post":

@@ -63,6 +63,6 @@ def brand_summary(business_name: str, summary: str) -> str:
     return f"Esto es lo que entendí de *{business_name}* 👇\n\n{summary}\n\n¿Es así?"
 
 
-def post_actions(carousel: bool) -> str:
-    """The buttons message after a post's images, until `post_preview` carries them (T19)."""
-    return f"👆 ¿Qué hacemos con este {'carrusel' if carousel else 'post'}?"
+def post_actions() -> str:
+    """The post's buttons message when the model's own follow-up (#31) is not available."""
+    return "👆 ¿Te gusta? ¿Lo subo o le cambio algo?"

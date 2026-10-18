@@ -1,5 +1,7 @@
 import asyncio
 import json
+from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,7 +15,7 @@ from app.conversation.factory import build_inbound_handler
 from app.conversation.history import InMemoryHistory
 from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
-from app.llm.client import Step
+from app.llm.client import Step, user_step
 from app.media.public import PublicImages
 from app.posts.drafts import CarouselDraft, PostCopy, PostDrafter, SlideDraft
 from app.posts.maker import PostMaker
@@ -25,6 +27,7 @@ from tests.fakes import CountingImageGen, FakeChannel, ScriptedModel, call_reply
 
 SENDER = "59899000001"
 REPLY_TEXT = "¡Hola! ¿Qué vendés?"
+FOLLOW_UP = "¡Listo! ¿Te gusta? ¿Lo subo, o le cambio algo?"
 DRAFT = PostCopy(caption="Mesa de roble", hashtags=["#muebles"])
 # Long enough for photos handled one after the other to land in one batch.
 DEBOUNCE_S = 0.2
@@ -104,11 +107,16 @@ def build(
         photo_debounce_s=DEBOUNCE_S,
         keep_alive_s=keep_alive_s,
     )
+    posts.on_post_sent(chat.post_sent)
     return chat, posts
 
 
 def handler(model: ScriptedModel) -> ChatHandler:
     return build(model)[0]
+
+
+def step_text(step: Step) -> str:
+    return step["content"][0]["text"] if step["type"] == "user_input" else ""
 
 
 def last_user_text(history: list[Step]) -> str:
@@ -315,6 +323,7 @@ async def test_a_post_request_sends_one_ack_then_the_image_with_its_text() -> No
         replies=[
             call_reply("create_post", brief="mesa nueva", asset_ids=["f1"], style="photos"),
             text_reply("Dale, lo armo con la foto de la mesa ⏳"),
+            text_reply(FOLLOW_UP),
         ]
     )
     channel, image_gen = FakeChannel(), CountingImageGen()
@@ -325,6 +334,13 @@ async def test_a_post_request_sends_one_ack_then_the_image_with_its_text() -> No
     await posts.join()
 
     assert channel.sent == [(SENDER, "Dale, lo armo con la foto de la mesa ⏳")]
+    _, body, buttons = channel.buttons[-1]
+    assert body == FOLLOW_UP
+    assert [button.split(":")[0] for button in buttons] == [
+        "post_approve",
+        "post_change",
+        "post_discard",
+    ]
     assert len(channel.images) == 1
     _, url, caption = channel.images[0]
     assert url.startswith("https://backend.test/media/")
@@ -340,6 +356,7 @@ async def test_the_next_turn_sees_the_note_of_the_sent_post() -> None:
         replies=[
             call_reply("create_post", brief="mesa", asset_ids=["f1"], style="photos"),
             text_reply("Dale ⏳"),
+            text_reply(FOLLOW_UP),
             text_reply("Te lo rehago"),
         ]
     )
@@ -351,10 +368,10 @@ async def test_the_next_turn_sees_the_note_of_the_sent_post() -> None:
     await posts.join()
     await chat.handle(message("text", text="cambiale el texto"), channel)
 
-    *_, note, current = model.calls[-1]
-    assert note["content"][0]["text"].startswith("[post ")
-    assert 'Text: "Mesa de roble\n\n#muebles"' in note["content"][0]["text"]
-    assert current["content"][0]["text"] == "cambiale el texto"
+    history = model.calls[-1]
+    note = next(step for step in history if step_text(step).startswith("[post "))
+    assert 'Text: "Mesa de roble\n\n#muebles"' in step_text(note)
+    assert step_text(history[-1]) == "cambiale el texto"
 
 
 async def test_a_second_request_while_generating_gets_generation_in_progress() -> None:
@@ -379,8 +396,8 @@ async def test_a_second_request_while_generating_gets_generation_in_progress() -
 async def test_the_request_past_the_daily_limit_gets_daily_limit() -> None:
     request = call_reply("create_post", brief="mesa", asset_ids=["f1"], style="design")
     model = ScriptedModel(
-        replies=[request, text_reply("Dale ⏳"), request, text_reply("Dale ⏳"), request]
-        + [text_reply("Mañana")]
+        replies=[request, text_reply("Dale ⏳"), text_reply(FOLLOW_UP)] * 2
+        + [request, text_reply("Mañana")]
     )
     channel, image_gen = FakeChannel(), CountingImageGen()
     chat, posts = build(model, image_gen, max_posts_per_day=2)
@@ -515,3 +532,154 @@ async def test_a_post_can_use_a_wizard_photo() -> None:
 
     assert json.loads(model.calls[1][-1]["result"])["status"] == "generating"
     assert len(channel.images) == 1
+
+
+POST_ID = "abcdef12"
+CREATE = call_reply("create_post", brief="mesa", asset_ids=["f1"], style="design")
+
+
+async def start_gated_post(
+    model: ScriptedModel, monkeypatch: pytest.MonkeyPatch
+) -> tuple[ChatHandler, PostMaker, FakeChannel, asyncio.Event]:
+    """A design post asked for and generating: it is sent once the returned gate is set."""
+    monkeypatch.setattr(
+        "app.posts.maker.uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex=POST_ID * 2))
+    )
+    gate, channel = asyncio.Event(), FakeChannel()
+    chat, posts = build(model, CountingImageGen(gate=gate))
+    await chat.handle(message("image", text=None), channel)
+    await chat.handle(message("text", text="armame un post"), channel)
+    return chat, posts, channel, gate
+
+
+async def test_the_model_answers_the_sent_note_with_its_own_words(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳"), text_reply(FOLLOW_UP)])
+    chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
+
+    gate.set()
+    await posts.join()
+
+    assert len(model.calls) == 3
+    assert step_text(model.calls[2][-1]).startswith(f"[post {POST_ID} sent to the Owner]")
+    assert channel.buttons[-1][:2] == (SENDER, FOLLOW_UP)
+    assert [step_text(step) for step in chat._history.get(SENDER)][-1:] == [""]  # the reply
+    assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
+
+
+async def test_the_note_turn_cannot_approve_and_keeps_the_numbered_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    approve = call_reply("approve_post", post_id=POST_ID, next="publish_now")
+    model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳"), approve, text_reply("¿Lo subo?")])
+    chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
+    chat._store.set_listed(SENDER, ["other"])
+
+    gate.set()
+    await posts.join()
+
+    result = json.loads(model.calls[3][-1]["result"])
+    assert result == {"error": "approval_not_explicit"}
+    assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
+    assert chat._store.listed(SENDER) == ["other"]
+    assert channel.buttons[-1][:2] == (SENDER, "¿Lo subo?")
+
+
+async def test_the_note_turn_cannot_start_another_post(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳"), CREATE, text_reply("Listo")])
+    chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
+
+    gate.set()
+    await posts.join()
+
+    assert json.loads(model.calls[3][-1]["result"]) == {"error": "not_owner_request"}
+    assert len(channel.images) == 1
+    assert len(chat._store.pending(SENDER)) == 1
+
+
+async def test_the_follow_up_waits_for_an_owner_turn_in_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳"), text_reply(FOLLOW_UP)])
+    chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
+
+    async with chat._history.lock(SENDER):  # an Owner turn is being answered
+        gate.set()
+        for _ in range(100):
+            if channel.images:
+                break
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)
+        assert len(model.calls) == 2
+        assert channel.sent == [(SENDER, "Dale ⏳")]
+        chat._history.extend(SENDER, [user_step("gracias")])
+    await posts.join()
+
+    texts = [step_text(step) for step in chat._history.get(SENDER)]
+    assert texts.index("gracias") < texts.index(next(t for t in texts if t.startswith("[post ")))
+    assert channel.buttons[-1][:2] == (SENDER, FOLLOW_UP)
+
+
+async def test_a_post_approved_before_the_follow_up_gets_no_question(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳"), text_reply(FOLLOW_UP)])
+    chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
+
+    async with chat._history.lock(SENDER):
+        gate.set()
+        for _ in range(100):
+            if chat._store.get(SENDER, POST_ID):
+                break
+            await asyncio.sleep(0.01)
+        chat._store.get(SENDER, POST_ID).status = "publishing"
+    await posts.join()
+
+    assert len(model.calls) == 2
+    assert channel.sent == [(SENDER, "Dale ⏳")]
+    texts = [step_text(step) for step in chat._history.get(SENDER)]
+    assert any(text.startswith(f"[post {POST_ID} sent") for text in texts)
+
+
+async def test_a_failing_follow_up_sends_nothing_and_keeps_the_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳")])
+    chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
+    model.fail = True
+
+    gate.set()
+    await posts.join()
+
+    assert channel.sent == [(SENDER, "Dale ⏳")]  # no follow-up, no JOB_FAILED
+    assert len(channel.images) == 1
+    assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
+    texts = [step_text(step) for step in chat._history.get(SENDER)]
+    assert any(text.startswith(f"[post {POST_ID} sent") for text in texts)
+
+
+async def test_text_next_to_tool_calls_on_the_last_step_is_not_a_reply() -> None:
+    with_text = replace(call_reply("unknown_tool"), text="Un momento")
+    model, channel = ScriptedModel(replies=[with_text]), FakeChannel()
+
+    await handler(model).handle(message("text"), channel)
+
+    assert len(model.calls) == MAX_STEPS
+    assert channel.sent == [(SENDER, messages_es.REPLY_FAILED)]
+
+
+async def test_without_a_follow_up_the_buttons_go_with_a_fixed_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳"), text_reply("")])
+    _, posts, channel, gate = await start_gated_post(model, monkeypatch)
+
+    gate.set()
+    await posts.join()
+
+    assert channel.buttons[-1] == (
+        SENDER,
+        messages_es.post_actions(),
+        [f"post_approve:{POST_ID}", f"post_change:{POST_ID}", f"post_discard:{POST_ID}"],
+    )

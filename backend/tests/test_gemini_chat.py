@@ -1,12 +1,22 @@
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 import pytest
+from google import genai
 from google.genai._gaos.lib.compat_errors import APITimeoutError
 from pydantic import BaseModel
 
-from app.llm.client import FunctionCall, GeminiChat, LLMError, text_content, user_step
+from app.llm import client as client_module
+from app.llm.client import (
+    HTTP_OPTIONS,
+    FunctionCall,
+    GeminiChat,
+    LLMError,
+    text_content,
+    user_step,
+)
 
 
 class TimingOutInteractions:
@@ -113,3 +123,41 @@ async def test_structured_output_that_does_not_match_is_an_error() -> None:
 
     with pytest.raises(LLMError, match="Title"):
         await model.structured("drafter", "system", [text_content("hola")], Title, "medium")
+
+
+def quota_exhausted(_: httpx.Request) -> httpx.Response:
+    # Shape of the free-tier daily-quota 429 seen on 2026-10-18: Retry-After of ~19 h.
+    body = {"error": {"message": "Rate limit exceeded", "code": "too_many_requests"}}
+    return httpx.Response(429, headers={"retry-after": "69915"}, json=body)
+
+
+async def test_a_429_with_a_long_retry_after_fails_fast() -> None:
+    transport = httpx.AsyncClient(transport=httpx.MockTransport(quota_exhausted))
+    options = HTTP_OPTIONS.model_copy(update={"httpx_async_client": transport})
+    client = genai.Client(api_key="test-key", http_options=options).aio
+    model = GeminiChat(client, "gemini-3.8-flash")
+
+    with pytest.raises(LLMError, match="orchestrator"):
+        await asyncio.wait_for(
+            model.reply("orchestrator", "system", [user_step("hola")], thinking_level="low"),
+            timeout=5,
+        )
+
+
+class HangingInteractions:
+    async def create(self, **_: object) -> None:
+        await asyncio.sleep(3600)
+
+
+class HangingClient:
+    interactions = HangingInteractions()
+
+
+async def test_a_call_that_never_returns_hits_the_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(client_module, "REQUEST_TIMEOUT_S", 0.05)
+    model = GeminiChat(HangingClient(), "gemini-3.8-flash")  # type: ignore[arg-type]
+
+    with pytest.raises(LLMError, match="no answer within"):
+        await model.reply("orchestrator", "system", [user_step("hola")], thinking_level="low")

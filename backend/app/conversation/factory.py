@@ -64,7 +64,7 @@ def build_inbound_handler(
                 if sessions and settings.supabase_url and settings.supabase_service_role_key
                 else None
             )
-            return ChatHandler(
+            chat = ChatHandler(
                 model,
                 history,
                 photos,
@@ -76,5 +76,7 @@ def build_inbound_handler(
                 settings.assistant_name,
                 max_photo_mb=settings.max_photo_mb,
             )
+            posts.on_post_sent(chat.post_sent)
+            return chat
         case "echo":
             return EchoHandler()

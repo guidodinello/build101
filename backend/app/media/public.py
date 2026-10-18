@@ -3,7 +3,7 @@ from collections import OrderedDict
 from functools import cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 MAX_IMAGES = 200  # about 40 MB of post JPEGs
 
@@ -46,11 +46,15 @@ def get_public_images() -> PublicImages:
 router = APIRouter()
 
 
-@router.get("/media/{token}.jpg")
+# Kapso sends HEAD before it fetches an image. Starlette's Response doesn't drop the body for
+# HEAD (only FileResponse does), so HEAD gets the headers of the GET and an empty body here.
+@router.api_route("/media/{token}.jpg", methods=["GET", "HEAD"])
 async def public_image(
-    token: str, images: Annotated[PublicImages, Depends(get_public_images)]
+    request: Request, token: str, images: Annotated[PublicImages, Depends(get_public_images)]
 ) -> Response:
     data = images.get(token)
     if data is None:
         raise HTTPException(status_code=404)
+    if request.method == "HEAD":
+        return Response(headers={"content-length": str(len(data))}, media_type="image/jpeg")
     return Response(content=data, media_type="image/jpeg")
