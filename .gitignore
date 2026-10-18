@@ -33,3 +33,6 @@ backend/out/
 .claude/skills/integrate-whatsapp/
 .claude/skills/integrate-whatsapp-calling/
 .claude/skills/observe-whatsapp/
+
+# Supabase CLI local state
+supabase/.temp/
