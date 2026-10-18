@@ -145,6 +145,7 @@ The slice after T56 ([ADR 0007](../decisions/0007-approve-every-post.md), [ADR 0
 - Read: [agents.md § Orchestrator](../architecture/agents.md#orchestrator), conversation-design.md (system prompt skeleton, examples)
 - Build: `app/orchestrator/orchestrator.py` (manual loop, max 5 steps, starting from T56's `ChatHandler`), `tools.py` with the Must tools (`create_post` with `asset_ids`, `pick_variation`, `approve_post`, `publish_post` now, `discard_post`, `list_posts`, `get_brand_summary`, `cancel_pending`), strict schemas and guards, `prompts/system.md` with the [conversation rules](../architecture/agents.md#conversation-rules); context builder (incl. `<recent_photos>`); `awaiting` handling (free text routed with pending context). Only built tools are registered.
 - Done when: the example conversations in conversation-design.md work in the simulator; "publicalo" on a non-approved post does not publish.
+- **Started (with T18):** the chat reads the wizard's photos as `<brand_photos>` (`b1`, …) through `BrandLibrary`, so "hacé un post de la mesa nórdica" uses the photo the Owner linked to that Product instead of asking for it again. Posts, history and WhatsApp photos are still in memory.
 
 ### T48: Open chat after onboarding (F1.10) · A · M
 

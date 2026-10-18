@@ -81,6 +81,7 @@ class Rig:
             self.publishing,
             self.store,
             ButtonRouter(self.store, maker, self.publishing, self.history, sessions=None),
+            None,
             assistant_name="Mora",
             max_photo_mb=1,
             keep_alive_s=60.0,

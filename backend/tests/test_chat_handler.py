@@ -11,7 +11,7 @@ from app.conversation.button_router import ButtonRouter
 from app.conversation.chat import MAX_STEPS, ChatHandler
 from app.conversation.factory import build_inbound_handler
 from app.conversation.history import InMemoryHistory
-from app.conversation.photos import InMemoryPhotos
+from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
 from app.llm.client import Step
 from app.media.public import PublicImages
@@ -20,7 +20,7 @@ from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts
 from app.publishing.mock import MOCK_ACCOUNT_ID, MockPublisher
-from tests.conftest import FIXTURES
+from tests.conftest import FIXTURES, make_image
 from tests.fakes import CountingImageGen, FakeChannel, ScriptedModel, call_reply, text_reply
 
 SENDER = "59899000001"
@@ -49,11 +49,25 @@ def message(name: str, **changes: object) -> InboundMessage:
     return parse_message(body).model_copy(update=changes)
 
 
+class FakeLibrary:
+    """The wizard's photos, as `BrandLibrary` returns them."""
+
+    def __init__(self, *descriptions: str) -> None:
+        self._photos = [
+            Photo(f"b{n}", make_image((900, 1200)), text, local_now(), seen=True)
+            for n, text in enumerate(descriptions, start=1)
+        ]
+
+    async def photos(self, sender: str) -> list[Photo]:
+        return self._photos
+
+
 def build(
     model: ScriptedModel,
     image_gen: CountingImageGen | None = None,
     max_posts_per_day: int = 5,
     keep_alive_s: float = 60.0,
+    library: FakeLibrary | None = None,
 ) -> tuple[ChatHandler, PostMaker]:
     model.drafts.setdefault(PostCopy, DRAFT)
     model.drafts.setdefault(CarouselDraft, carousel_draft(1))
@@ -84,6 +98,7 @@ def build(
         publishing,
         store,
         ButtonRouter(store, posts, publishing, history, sessions=None),
+        library,
         assistant_name="Mora",
         max_photo_mb=MAX_PHOTO_MB,
         photo_debounce_s=DEBOUNCE_S,
@@ -466,3 +481,37 @@ def test_factory_builds_each_handler() -> None:
 
     assert isinstance(chat, ChatHandler)
     assert isinstance(echo, EchoHandler)
+
+
+async def test_the_wizard_photos_are_listed_for_the_model() -> None:
+    model = ScriptedModel()
+    chat, _ = build(model, library=FakeLibrary("Mesa nórdica: Mesa de roble en un living."))
+
+    await chat.handle(
+        message("text", text="hacé un post de la mesa nórdica"), channel := FakeChannel()
+    )
+
+    context = model.calls[0][-1]["content"][1]["text"]
+    assert (
+        "<brand_photos>\n- b1: Mesa nórdica: Mesa de roble en un living.\n</brand_photos>"
+        in context
+    )
+    assert [block["type"] for block in model.calls[0][-1]["content"]] == ["text", "text"]
+    assert channel.sent == [(SENDER, model.replies[0].text)]
+
+
+async def test_a_post_can_use_a_wizard_photo() -> None:
+    model = ScriptedModel(
+        replies=[
+            call_reply("create_post", brief="la mesa nórdica", asset_ids=["b1"], style="photos"),
+            text_reply("Dale, lo armo con la foto de la mesa ⏳"),
+        ]
+    )
+    channel = FakeChannel()
+    chat, posts = build(model, library=FakeLibrary("Mesa nórdica: Mesa de roble."))
+
+    await chat.handle(message("text", text="hacé un post de la mesa nórdica así nomás"), channel)
+    await posts.join()
+
+    assert json.loads(model.calls[1][-1]["result"])["status"] == "generating"
+    assert len(channel.images) == 1

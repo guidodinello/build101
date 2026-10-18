@@ -26,10 +26,12 @@ from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts
 from app.prompts import load_prompt
+from app.storage import StorageError
 
 from .approval import Approval, decide
 from .button_router import ButtonRouter
 from .history import InMemoryHistory
+from .library import BrandLibrary
 from .photos import InMemoryPhotos, Photo
 from .tools import TOOLS
 
@@ -75,6 +77,7 @@ class ChatHandler:
         publisher: PostPublisher,
         store: InMemoryPosts,
         buttons: ButtonRouter,
+        library: BrandLibrary | None,
         assistant_name: str,
         max_photo_mb: int,
         photo_debounce_s: float = PHOTO_DEBOUNCE_S,
@@ -87,6 +90,7 @@ class ChatHandler:
         self._publisher = publisher
         self._store = store
         self._buttons = buttons
+        self._library = library
         self._system = system_prompt(assistant_name)
         self._max_photo_mb = max_photo_mb
         self._photo_debounce_s = photo_debounce_s
@@ -223,13 +227,14 @@ class ChatHandler:
         """`text` is what the model reads; `words`, the Owner's own text, decides approval."""
         approval = self._approval(sender, words, attached)
         user = user_step(text)
+        await self._refresh_library(sender)
         recent = self._photos.recent(sender)
         unseen = [photo for photo in recent if not photo.seen]
         # The context (and the photos the model hasn't seen) ride on this turn's user step
         # only, so the system prompt and the stored history stay byte-identical across turns.
         with_context = user_step(
             text,
-            text_content(context_block(recent, unseen)),
+            text_content(context_block(recent, unseen, self._photos.library(sender))),
             *(image_content(photo.data, "image/jpeg") for photo in unseen),
         )
         turn: list[Step] = []
@@ -263,6 +268,15 @@ class ChatHandler:
         # Only a completed turn enters the history, so a failure leaves no dangling user step.
         self._history.extend(sender, [user, *turn])
         return reply.text
+
+    async def _refresh_library(self, sender: str) -> None:
+        if self._library is None:
+            return
+        try:
+            self._photos.set_library(sender, await self._library.photos(sender))
+        except (SQLAlchemyError, StorageError):
+            # Answer with the photos already loaded rather than not at all.
+            logger.warning("loading the wizard photos failed for %s", mask(sender), exc_info=True)
 
     async def _took_brand_correction(self, sender: str, words: str) -> bool:
         brand = self._buttons.brand
@@ -358,11 +372,17 @@ def request(photos: list[Photo], text: str) -> str:
     return f"[{label} {' '.join(photo.id for photo in photos)}] {text}"
 
 
-def context_block(recent: list[Photo], attached: list[Photo]) -> str:
+def context_block(
+    recent: list[Photo], attached: list[Photo], library: list[Photo] | None = None
+) -> str:
     lines = [describe_photo(photo) for photo in recent] or ["none"]
     if attached:
         lines.append(f"Attached below, in this order: {', '.join(photo.id for photo in attached)}")
-    return "<recent_photos>\n" + "\n".join(lines) + "\n</recent_photos>"
+    block = "<recent_photos>\n" + "\n".join(lines) + "\n</recent_photos>"
+    if library:
+        listed = "\n".join(f"- {photo.id}: {photo.caption}" for photo in library)
+        block += f"\n<brand_photos>\n{listed}\n</brand_photos>"
+    return block
 
 
 def describe_photo(photo: Photo) -> str:

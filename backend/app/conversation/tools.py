@@ -25,7 +25,10 @@ CREATE_POST: Tool = {
             "asset_ids": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Ids of the photos to use, from <recent_photos> (e.g. f1).",
+                "description": (
+                    "Ids of the photos to use, from <recent_photos> (e.g. f1) or "
+                    "<brand_photos> (e.g. b1)."
+                ),
             },
             "style": {
                 "type": "string",
