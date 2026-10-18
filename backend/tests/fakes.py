@@ -82,6 +82,8 @@ class ScriptedModel:
     replies: list[Reply] = field(default_factory=lambda: [text_reply("¡Hola! ¿Qué vendés?")])
     drafts: dict[type, BaseModel] = field(default_factory=dict)
     calls: list[list[Step]] = field(default_factory=list)
+    systems: list[str] = field(default_factory=list)
+    thinking: list[str] = field(default_factory=list)
     tools_seen: list[list[Tool] | None] = field(default_factory=list)
     structured_calls: list[list[Content]] = field(default_factory=list)
     structured_systems: list[str] = field(default_factory=list)
@@ -97,6 +99,8 @@ class ScriptedModel:
         tools: list[Tool] | None = None,
     ) -> Reply:
         self.calls.append(history)
+        self.systems.append(system)
+        self.thinking.append(thinking_level)
         self.tools_seen.append(tools)
         await asyncio.sleep(self.delay_s)
         if self.fail:
@@ -113,6 +117,8 @@ class ScriptedModel:
     ) -> T:
         self.structured_calls.append(content)
         self.structured_systems.append(system)
+        if schema not in self.drafts:
+            raise LLMError(f"no {schema.__name__} draft scripted")
         return self.drafts[schema]  # type: ignore[return-value]
 
 

@@ -10,6 +10,7 @@ from app.agents.schemas import AssetAnalysis
 from app.conversation.brand import BrandFlow
 from app.conversation.button_router import ButtonRouter
 from app.conversation.events import BrandConfirmed, BrandFixAsked, JobRetried, StaleButton
+from app.conversation.history import DbHistory
 from app.copy import messages_es
 from app.db.models import (
     AssetProduct,
@@ -20,9 +21,10 @@ from app.db.models import (
     Product,
 )
 from app.jobs.asset import analyze_asset
-from app.jobs.brand import generate_brand
+from app.jobs.brand import BRAND_SUMMARY_NOTE, generate_brand
 from app.jobs.queue import enqueue, retry_failed
 from app.jobs.runner import JobContext, JobRunner
+from app.llm.client import user_step
 from app.posts.store import InMemoryPosts
 from tests.conftest import make_image, requires_db
 from tests.fakes import FakeChannel, FakeStorage, SequenceModel, brand_brain
@@ -316,6 +318,8 @@ async def test_generate_brand_saves_a_version_and_asks_the_owner(
             ["brand_ok", "brand_fix"],
         )
     ]
+    # The orchestrator knows what the Owner was just shown (ADR 0028).
+    assert await DbHistory(sessions).get(PHONE) == [user_step(BRAND_SUMMARY_NOTE)]
 
 
 async def test_a_correction_makes_a_new_version_from_the_previous_one(
@@ -353,28 +357,41 @@ async def test_brand_ok_activates_the_business_once(
         assert (await db.get_one(Business, business.id)).onboarding_state == "active"
 
 
-async def test_brand_fix_takes_the_next_message_as_the_correction(
+async def test_a_brand_change_queues_revise_mode_once(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     business = await add_business(sessions, state="awaiting_brand_confirmation")
     buttons = router(sessions)
     flow = BrandFlow(sessions)
 
-    before = await flow.take_correction(PHONE, "somos más formales")
     asked = await buttons.handle(PHONE, "brand_fix", FakeChannel())
-    taken = await flow.take_correction(PHONE, "somos más formales")
-    again = await flow.take_correction(PHONE, "y otra cosa")
+    taken = await flow.revise(PHONE, "somos más formales")
+    again = await flow.revise(PHONE, "y otra cosa")
 
-    assert (before, asked, taken, again) == (False, BrandFixAsked(), True, False)
+    assert (asked, taken, again) == (BrandFixAsked(), True, False)
     async with sessions() as db:
         jobs = (await db.scalars(select(Job).where(Job.business_id == business.id))).all()
-        state = (await db.get_one(Business, business.id)).onboarding_state
+        updated = await db.get_one(Business, business.id)
     # The old summary's buttons go stale while the revised one is made.
-    assert state == "generating_brand"
+    assert (updated.onboarding_state, updated.conversation_state) == ("generating_brand", {})
     assert await buttons.handle(PHONE, "brand_ok", FakeChannel()) == StaleButton()
     assert [(job.kind, job.payload) for job in jobs] == [
         ("generate_brand", {"correction": "somos más formales"})
     ]
+
+
+async def test_an_active_brand_can_be_changed_but_not_before_onboarding(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    await add_business(sessions, state="awaiting_web_form")
+    flow = BrandFlow(sessions)
+    assert await flow.revise(PHONE, "más formales") is False
+
+    async with sessions() as db:
+        business = await db.scalar(select(Business).where(Business.owner_phone == PHONE))
+        business.onboarding_state = "active"
+        await db.commit()
+    assert await flow.revise(PHONE, "más formales") is True
 
 
 async def test_brand_buttons_are_stale_in_another_state(

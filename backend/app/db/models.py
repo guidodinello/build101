@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -40,6 +40,7 @@ class Business(Base):
     # SQLAlchemy only notices a new dict.
     onboarding_data: Mapped[dict[str, Any]] = mapped_column(server_default="{}")
     conversation_state: Mapped[dict[str, Any]] = mapped_column(server_default="{}")
+    conversation_summary: Mapped[str | None]
     channel: Mapped[str] = mapped_column(server_default="whatsapp")
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
@@ -126,3 +127,22 @@ class Job(Base):
     started_at: Mapped[datetime | None]
     finished_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class ConversationStep(Base):
+    __tablename__ = "conversation_steps"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    business_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("businesses.id"))
+    step: Mapped[dict[str, Any]]
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class OwnerNote(Base):
+    __tablename__ = "owner_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    business_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("businesses.id"))
+    text: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    archived_at: Mapped[datetime | None]

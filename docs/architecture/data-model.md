@@ -54,6 +54,7 @@ create table businesses (
   onboarding_state   text not null default 'new',
   onboarding_data    jsonb not null default '{}',    -- raw wizard answers: questionnaire, 3 words, colors (products live in `products`)
   conversation_state jsonb not null default '{}',    -- {"awaiting": "post_feedback", "post_id": "..."}
+  conversation_summary text,                         -- the orchestrator's summary of the steps compacted out of conversation_steps (ADR 0028, migration 0002)
   channel            text not null default 'whatsapp',
   plan               text not null default 'free',   -- future billing
   monthly_post_quota int  not null default 30,       -- future billing, not enforced
@@ -328,6 +329,26 @@ create table messages (
 );
 create index ix_messages_business_id_created_at on messages (business_id, created_at desc);
 
+-- The orchestrator's history, one Interactions API step per row, resent unchanged (ADR 0028, migration 0002)
+create table conversation_steps (
+  id           bigint generated always as identity primary key,
+  business_id  uuid not null constraint conversation_steps_business_id_fkey references businesses(id) on delete cascade,
+  step         jsonb not null,
+  created_at   timestamptz not null default now()
+);
+create index ix_conversation_steps_business_id_id on conversation_steps (business_id, id);
+
+-- Facts and standing preferences the Owner asked the orchestrator to keep (ADR 0028, migration 0002)
+create table owner_notes (
+  id           uuid primary key default gen_random_uuid(),
+  business_id  uuid not null constraint owner_notes_business_id_fkey references businesses(id) on delete cascade,
+  text         text not null,
+  created_at   timestamptz not null default now(),
+  archived_at  timestamptz,
+  constraint ck_owner_notes_text_not_blank check (length(trim(text)) > 0)
+);
+create index ix_owner_notes_business_id on owner_notes (business_id) where archived_at is null;
+
 create table jobs (
   id           uuid primary key default gen_random_uuid(),
   business_id  uuid constraint jobs_business_id_fkey references businesses(id) on delete cascade,
@@ -380,4 +401,5 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 - **Carousel slides** ([ADR 0022](../decisions/0022-carousels-in-mvp.md)): a carousel (`posts.format = 'carousel'`) has no Variations and leaves `posts.image_path` / `image_url` / `variation_n` null. `generate_post` writes one `post_slides` row per slide at `posts.revision`; `redo_slides` bumps the revision, writes the redone slides and copies the unchanged rows, so each revision is a complete carousel. The publisher reads the current revision's rows in `idx` order. Images are stored at `renders/{business_id}/{post_id}-r{revision}-s{idx}.jpg`. `text_check` keeps the Text Checker's result; a slide that still fails after its one regeneration is kept with `matches = false`.
 - **Video frames**: the Asset Analyst saves the best frames of a video as `photo` assets with `derived_from_asset_id` and `frame_offset_ms` set, so the Art Director can use them like any photo.
 - **Build priority** ([ADR 0016](../decisions/0016-demo-scope-one-post.md)): the first migration creates the whole schema, including the Catalog, Offer, video and Reel columns from [ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md), because a column costs nothing and a later migration mid-hackathon does. The Must scope only writes businesses, magic links, photos and logos (wizard and chat), Brand Brains, ad-hoc posts and the conversation tables; `products` holds the 1–5 wizard Products. The rest stays empty until its Could feature is built.
+- **The orchestrator's memory** ([ADR 0028](../decisions/0028-orchestrator-memory-and-context.md)): `conversation_steps` holds the model's own history (thought signatures included), which `messages` can't: `messages` is the normalized log of what crossed the channel. Old steps are deleted once folded into `businesses.conversation_summary`. Chat photos become `brand_assets` rows with `source = 'whatsapp'` and the Asset Analyst's `analysis`.
 - **Seed**: `backend/app/db/seed.py` creates the demo business with a pre-generated Brand Brain and plan (see the demo fallbacks in [../product/mvp.md](../product/mvp.md#demo-fallbacks)).

@@ -18,7 +18,7 @@ from app.db.session import create_engine
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
-SCHEMA = Path(__file__).parents[1] / "migrations" / "versions" / "0001_initial.sql"
+MIGRATIONS = sorted((Path(__file__).parents[1] / "migrations" / "versions").glob("*.sql"))
 
 requires_db = pytest.mark.skipif(
     not TEST_DATABASE_URL, reason="set TEST_DATABASE_URL to a Postgres the tests can wipe"
@@ -51,14 +51,15 @@ def sign(raw: bytes, secret: str) -> str:
 
 @pytest.fixture
 async def sessions() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    """A fresh schema per test, from the first migration's SQL."""
+    """A fresh schema per test, from the migrations' SQL in order."""
     assert TEST_DATABASE_URL
     engine = create_engine(TEST_DATABASE_URL)
     async with engine.begin() as connection:
         await connection.execute(text("drop schema public cascade"))
         await connection.execute(text("create schema public"))
-        for statement in re.split(r";\s*$", SCHEMA.read_text(), flags=re.MULTILINE):
-            if statement.strip():
-                await connection.exec_driver_sql(statement)
+        for migration in MIGRATIONS:
+            for statement in re.split(r";\s*$", migration.read_text(), flags=re.MULTILINE):
+                if statement.strip():
+                    await connection.exec_driver_sql(statement)
     yield async_sessionmaker(engine, expire_on_commit=False)
     await engine.dispose()

@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 
 class BrandLibrary:
-    """The photos the Owner uploaded in the wizard, offered to the chat as `b1`, `b2`, ...,
-    and their logo.
+    """The photos the Owner uploaded in the wizard or sent in the chat, offered to the chat as
+    `b1`, `b2`, ..., and their logo.
 
     Until T19 moves the chat onto the database. Ids follow upload order over every photo of the
     Business, archived ones included, so a photo keeps its id. Each agents' copy, and the logo's
@@ -65,6 +65,7 @@ class BrandLibrary:
                 describe(asset, products.get(asset.id)),
                 asset.created_at,
                 seen=True,
+                asset_id=asset.id,
             )
             for photo_id, asset in numbered
             if asset.id in self._images

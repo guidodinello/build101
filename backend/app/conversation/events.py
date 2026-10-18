@@ -139,17 +139,6 @@ class BrandFixAsked:
 
 
 @dataclass(frozen=True, slots=True)
-class BrandRevising:
-    correction: str
-
-    def note(self) -> str:
-        return (
-            f'[brand revising] The correction "{self.correction}" was taken; a new brand summary '
-            "will arrive in a minute."
-        )
-
-
-@dataclass(frozen=True, slots=True)
 class JobRetried:
     kind: str
 
@@ -175,7 +164,7 @@ class PostChangeAsked:
     def note(self) -> str:
         return (
             f"[post {self.post_id} change asked] The Owner tapped Cambiar. Their next message says "
-            f"what to change: remake it with create_post, replaces={self.post_id}."
+            f"what to change: revise_post with post_id={self.post_id}."
         )
 
 
@@ -241,7 +230,6 @@ Event = (
     | StaleButton
     | BrandConfirmed
     | BrandFixAsked
-    | BrandRevising
     | JobRetried
     | PostApproved
     | PostChangeAsked
@@ -319,8 +307,6 @@ def fallback(event: Event) -> str | None:
             return messages_es.READY_OPEN_CHAT
         case BrandFixAsked():
             return messages_es.BRAND_FIX_PROMPT
-        case BrandRevising():
-            return messages_es.REVISING
         case JobRetried():
             return messages_es.RETRYING
         case PostApproved():

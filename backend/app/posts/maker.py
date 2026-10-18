@@ -22,7 +22,7 @@ from app.imagegen.base import ImageGenPort
 from app.media.images import add_logo, to_post_image
 from app.media.public import PublicImages
 
-from .drafts import PostDrafter
+from .drafts import PostDrafter, PreviousPost
 from .store import APPROVABLE, InMemoryPosts, Post, PostImage
 
 logger = logging.getLogger(__name__)
@@ -46,11 +46,28 @@ class CreatePostArgs(BaseModel):
     replaces: str | None = None
 
 
+class RevisePostArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    post_id: str = Field(min_length=1)
+    change: str = Field(min_length=1)
+    part: Literal["caption", "images"]
+
+
 @dataclass(frozen=True, slots=True)
 class RenderedPost:
     images: list[bytes]
     text: str  # caption + hashtags, as the Owner receives it
     headlines: list[str]  # one per slide of a design; empty for photos as they are
+    style_prompt: str | None = None  # a design's shared look, kept by its revisions
+
+
+@dataclass(frozen=True, slots=True)
+class Remake:
+    """What a remake keeps from the post it replaces."""
+
+    previous: PreviousPost
+    images: list[bytes] | None = None  # set when only the caption changes
 
 
 class PostMaker:
@@ -73,6 +90,7 @@ class PostMaker:
         max_posts_per_day: int,
         brand_of: Callable[[str], Awaitable[BrandBrain | None]] | None = None,
         now: Callable[[], datetime] = local_now,
+        notes_of: Callable[[str], Awaitable[list[str]]] | None = None,
     ) -> None:
         self._drafter = drafter
         self._image_gen = image_gen
@@ -82,6 +100,7 @@ class PostMaker:
         self._public_base_url = public_base_url.rstrip("/")
         self._max_posts_per_day = max_posts_per_day
         self._brand_of = brand_of
+        self._notes_of = notes_of
         self._now = now
         self._generating: set[str] = set()
         self._designs_today: dict[str, tuple[date, int]] = {}
@@ -105,7 +124,37 @@ class PostMaker:
             return {"error": "unknown_asset", "asset_ids": unknown}
         if not photos:
             return {"error": "no_photos"}
-        return self._start(sender, args, photos, channel)
+        old = self._posts.get(sender, args.replaces) if args.replaces else None
+        remake = Remake(previous_post(old, change=None)) if old else None
+        return self._start(sender, args, photos, channel, remake)
+
+    def revise_post(
+        self, sender: str, arguments: dict[str, Any], channel: ChannelPort
+    ) -> dict[str, Any]:
+        """Remake a sent post with one change, keeping the rest; a caption change keeps the
+        images, so it generates nothing."""
+        try:
+            args = RevisePostArgs.model_validate(arguments)
+        except ValidationError as exc:
+            return {"error": "invalid_arguments", "detail": str(exc)}
+        old = self._posts.get(sender, args.post_id)
+        if old is None:
+            return {"error": "unknown_post"}
+        if old.status not in APPROVABLE:
+            return {"error": "post_not_pending", "status": old.status}
+        if args.part == "images" and old.style == "photos":
+            return {"error": "photos_as_they_are"}
+        create = CreatePostArgs(
+            brief=f"{old.brief}\nCambio: {args.change}",
+            asset_ids=[photo.id for photo in old.source_photos],
+            style=old.style,
+            slide_count=old.slide_count,
+            with_logo=old.with_logo,
+            replaces=old.id,
+        )
+        kept = [image.data for image in old.images] if args.part == "caption" else None
+        remake = Remake(previous_post(old, change=args.change), kept)
+        return self._start(sender, create, old.source_photos, channel, remake)
 
     def remake(self, post: Post, channel: ChannelPort) -> dict[str, Any]:
         """Another post from the same request as `post` ([Sí, otro] after [Descartar])."""
@@ -119,27 +168,37 @@ class PostMaker:
         return self._start(post.sender, args, post.source_photos, channel)
 
     def _start(
-        self, sender: str, args: CreatePostArgs, photos: list[Photo], channel: ChannelPort
+        self,
+        sender: str,
+        args: CreatePostArgs,
+        photos: list[Photo],
+        channel: ChannelPort,
+        remake: Remake | None = None,
     ) -> dict[str, Any]:
         if sender in self._generating:
             return {"error": "generation_in_progress"}
-        logo = self._photos.logo(sender) if args.with_logo else None
-        if args.with_logo and logo is None:
+        keeps_images = remake is not None and remake.images is not None
+        # Kept images already carry the logo.
+        logo = self._photos.logo(sender) if args.with_logo and not keeps_images else None
+        if args.with_logo and not keeps_images and logo is None:
             return {"error": "no_logo"}
         # Only a design generates images, which is what the daily limit caps.
+        generates = args.style == "design" and not keeps_images
         today = self._now().date()
         day, started = self._designs_today.get(sender, (today, 0))
         designs_today = started if day == today else 0
-        if args.style == "design" and designs_today >= self._max_posts_per_day:
+        if generates and designs_today >= self._max_posts_per_day:
             return {"error": "daily_limit"}
 
         self._generating.add(sender)
-        if args.style == "design":
+        if generates:
             self._designs_today[sender] = (today, designs_today + 1)
         for photo in photos:
             photo.used = True
         post_id = uuid.uuid4().hex[:8]
-        task = asyncio.create_task(self._generate(sender, post_id, args, photos, logo, channel))
+        task = asyncio.create_task(
+            self._generate(sender, post_id, args, photos, logo, channel, remake)
+        )
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return {"post_id": post_id, "status": "generating"}
@@ -156,12 +215,14 @@ class PostMaker:
         photos: list[Photo],
         logo: bytes | None,
         channel: ChannelPort,
+        remake: Remake | None = None,
     ) -> None:
         started = time.monotonic()
         event: Event
         try:
             brand = await self._brand(sender, post_id)
-            post = await self._render(args, photos, brand, logo)
+            notes = await self._notes(sender, post_id)
+            post = await self._render(args, photos, brand, logo, notes, remake)
             paths = await self._send(sender, post.images, post.text, channel)
             self._keep(sender, post_id, args, photos, paths, post)
             event = PostSent(
@@ -202,6 +263,18 @@ class PostMaker:
             )
             return None
 
+    async def _notes(self, sender: str, post_id: str) -> list[str]:
+        """The Owner's notes; without them when the database fails, rather than no post."""
+        if self._notes_of is None:
+            return []
+        try:
+            return await self._notes_of(sender)
+        except SQLAlchemyError:
+            logger.warning(
+                "post %s for %s goes without the notes", post_id, mask(sender), exc_info=True
+            )
+            return []
+
     async def _announce(
         self, sender: str, post_id: str, event: Event, channel: ChannelPort
     ) -> None:
@@ -218,11 +291,22 @@ class PostMaker:
         photos: list[Photo],
         brand: BrandBrain | None,
         logo: bytes | None,
+        notes: list[str] | None = None,
+        remake: Remake | None = None,
     ) -> RenderedPost:
         """The post's images in order (one per photo, unless a design asks for a slide count)."""
         references = [photo.data for photo in photos]
+        previous = remake.previous if remake else None
+        if remake is not None and remake.images is not None:
+            copy = await self._drafter.recaption(references, remake.previous, brand, notes)
+            return RenderedPost(
+                remake.images,
+                post_text(copy.caption, copy.hashtags),
+                headlines=remake.previous.headlines,
+                style_prompt=remake.previous.style_prompt,
+            )
         if args.style == "photos":
-            copy = await self._drafter.copy(args.brief, references, brand)
+            copy = await self._drafter.copy(args.brief, references, brand, notes, previous)
             images = [await asyncio.to_thread(to_post_image, data) for data in references]
             return RenderedPost(
                 await with_logo(images, logo), post_text(copy.caption, copy.hashtags), headlines=[]
@@ -230,8 +314,9 @@ class PostMaker:
 
         count = args.slide_count or len(photos)
         copy, brief = await self._drafter.design(
-            args.brief, references, [photo.id for photo in photos], count, brand
+            args.brief, references, [photo.id for photo in photos], count, brand, notes, previous
         )
+        style_prompt = brief.style_prompt
         if logo:
             brief = brief.model_copy(
                 update={"style_prompt": f"{brief.style_prompt}\n{LOGO_SPACE_NOTE}"}
@@ -249,6 +334,7 @@ class PostMaker:
             await with_logo([slide.image for slide in slides], logo),
             post_text(copy.caption, copy.hashtags),
             headlines=[slide.headline for slide in copy.slides],
+            style_prompt=style_prompt,
         )
 
     def _keep(
@@ -273,6 +359,8 @@ class PostMaker:
                 slide_count=args.slide_count,
                 with_logo=args.with_logo,
                 source_photos=photos,
+                headlines=post.headlines,
+                style_prompt=post.style_prompt,
             )
         )
         if args.replaces is None:
@@ -309,6 +397,10 @@ class PostMaker:
             logger.warning("post text is %d chars, over the image caption limit", len(caption))
             await channel.send_text(sender, caption)
         return paths
+
+
+def previous_post(post: Post, change: str | None) -> PreviousPost:
+    return PreviousPost(post.brief, post.caption, post.headlines, post.style_prompt, change)
 
 
 async def with_logo(images: list[bytes], logo: bytes | None) -> list[bytes]:

@@ -46,3 +46,4 @@ When an ADR is superseded, set its Status to `superseded`, add `- Superseded by:
 | [0025](0025-weekly-niche-report.md) | Weekly Niche Report from the niche's websites and Google Search | proposed | 2026-10-18 |
 | [0026](0026-owner-messages-from-the-orchestrator.md) | Owner messages are written by the orchestrator, from typed events | proposed | 2026-10-18 |
 | [0027](0027-owner-logo-stamped-in-code.md) | The Owner's logo is stamped on post images in code | proposed | 2026-10-18 |
+| [0028](0028-orchestrator-memory-and-context.md) | The orchestrator's memory and context | proposed | 2026-10-18 |

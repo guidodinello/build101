@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -41,6 +42,17 @@ class CarouselDraft(BaseModel):
     slides: list[SlideDraft]
 
 
+@dataclass(frozen=True, slots=True)
+class PreviousPost:
+    """The version the Owner saw, for a remake that changes only what they asked."""
+
+    brief: str
+    text: str  # caption + hashtags
+    headlines: list[str]
+    style_prompt: str | None
+    change: str | None  # the Owner's change, when it isn't already in the new brief
+
+
 class PostDrafter:
     """Brief + photos + Brand Brain → the post's copy, and for a design the generator's input.
 
@@ -53,14 +65,44 @@ class PostDrafter:
         self._trend_notes = trend_notes
 
     async def copy(
-        self, brief: str, photos: list[bytes], brand: BrandBrain | None = None
+        self,
+        brief: str,
+        photos: list[bytes],
+        brand: BrandBrain | None = None,
+        notes: list[str] | None = None,
+        previous: PreviousPost | None = None,
     ) -> PostCopy:
         request = (
             f"Write the caption for a post of {len(photos)} photo(s), posted as they are, "
-            f"without a design.\n\nBrief: {brief}{self._trend_section()}"
+            f"without a design.\n\nBrief: {brief}{revision_section(previous)}"
+            f"{self._trend_section()}"
         )
         return await self._model.structured(
-            AGENT, system_prompt(brand), request_content(request, photos), PostCopy, "medium"
+            AGENT,
+            system_prompt(brand, notes),
+            request_content(request, photos),
+            PostCopy,
+            "medium",
+        )
+
+    async def recaption(
+        self,
+        photos: list[bytes],
+        previous: PreviousPost,
+        brand: BrandBrain | None = None,
+        notes: list[str] | None = None,
+    ) -> PostCopy:
+        """New caption and hashtags for a post whose images stay exactly as they are."""
+        request = (
+            "Rewrite only the caption and the hashtags of this post: its images stay exactly as "
+            f"they are.\n\nBrief: {previous.brief}{revision_section(previous)}"
+        )
+        return await self._model.structured(
+            AGENT,
+            system_prompt(brand, notes),
+            request_content(request, photos),
+            PostCopy,
+            "medium",
         )
 
     async def design(
@@ -70,6 +112,8 @@ class PostDrafter:
         photo_ids: list[str],
         slide_count: int,
         brand: BrandBrain | None = None,
+        notes: list[str] | None = None,
+        previous: PreviousPost | None = None,
     ) -> tuple[CarouselCopy, CarouselBrief]:
         one_per_photo = (
             " Each slide is built from its own photo, in order."
@@ -78,10 +122,14 @@ class PostDrafter:
         )
         request = (
             f"A design of exactly {slide_count} slide(s) (4:5).{one_per_photo}\n\n"
-            f"Brief: {brief}{self._trend_section()}"
+            f"Brief: {brief}{revision_section(previous)}{self._trend_section()}"
         )
         draft = await self._model.structured(
-            AGENT, system_prompt(brand), request_content(request, photos), CarouselDraft, "medium"
+            AGENT,
+            system_prompt(brand, notes),
+            request_content(request, photos),
+            CarouselDraft,
+            "medium",
         )
         slides = fit_slides(draft.slides, slide_count)
         copy = CarouselCopy(
@@ -109,16 +157,41 @@ class PostDrafter:
         return f"\n\nTrend notes (what works in the niche this week):\n{self._trend_notes}"
 
 
-def system_prompt(brand: BrandBrain | None) -> str:
-    """The instructions, then the Business's Brand Brain (agents.md § Brand Brain).
+def system_prompt(brand: BrandBrain | None, notes: list[str] | None = None) -> str:
+    """The instructions, then the Business's Brand Brain (agents.md § Brand Brain) and the
+    Owner's notes (ADR 0028).
 
-    The Brand Brain goes in the system prompt, not the request, so the prefix stays the same
-    for every post of a Business and caches.
+    They go in the system prompt, not the request, so the prefix stays the same for every post
+    of a Business and caches.
     """
-    if brand is None:
-        return SYSTEM_PROMPT
-    data = brand.model_dump_json(exclude=BRAND_FIELDS_NOT_FOR_POSTS)
-    return f"{SYSTEM_PROMPT}\n<brand_brain>\n{data}\n</brand_brain>\n"
+    prompt = SYSTEM_PROMPT
+    if brand is not None:
+        data = brand.model_dump_json(exclude=BRAND_FIELDS_NOT_FOR_POSTS)
+        prompt += f"\n<brand_brain>\n{data}\n</brand_brain>\n"
+    if notes:
+        listed = "\n".join(f"- {note}" for note in notes)
+        prompt += f"\n<owner_notes>\n{listed}\n</owner_notes>\n"
+    return prompt
+
+
+def revision_section(previous: PreviousPost | None) -> str:
+    if previous is None:
+        return ""
+    lines = [f"Brief: {previous.brief}", f'Text: "{previous.text}"']
+    if previous.headlines:
+        lines.append(
+            "Slide headlines: "
+            + "; ".join(f'{n} "{h}"' for n, h in enumerate(previous.headlines, start=1))
+        )
+    if previous.style_prompt:
+        lines.append(f"style_prompt: {previous.style_prompt}")
+    change = (
+        f'The Owner asked for this change: "{previous.change}".'
+        if previous.change
+        else "The brief above says what the Owner wants changed."
+    )
+    body = "\n".join(lines)
+    return f"\n\n<previous_version>\n{body}\n</previous_version>\n{change}"
 
 
 def request_content(request: str, photos: list[bytes]) -> list[Content]:

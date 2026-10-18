@@ -39,6 +39,22 @@ ORDINALS = {
     "quinta": 5,
 }
 LAST_WORDS = frozenset({"ultimo", "ultima"})
+# A whole reply made of these answers yes to the publish question the Owner was just asked.
+YES_WORDS = frozenset(
+    {"si", "dale", "ok", "okay", "oka", "okey", "va", "joya", "perfecto", "listo", "genial"}
+    | {"buenisimo", "barbaro", "excelente", "mandale", "metele", "adelante", "claro", "obvio"}
+    | {"bueno", "bien", "seguro", "sale", "anda", "andale"}
+)
+YES_FILLER = frozenset(
+    {"de", "una", "nomas", "ya", "ahora", "porfa", "por", "favor", "gracias", "para", "che"}
+    | {"esta", "asi", "todo", "que", "lo", "la", "re", "mil", "muy"}
+)
+YES_EMOJI = frozenset({"👍", "👌", "✅", "🙌", "💪"})
+# The question a reply ends on when it offers to publish: "¿Lo subo?", "¿Lo publico ya?".
+PUBLISH_QUESTION = re.compile(
+    r"\b(lo|la|los|las) (subo|publico|subimos|publicamos)\b"
+    r"|\b(subirlo|subirla|subirlos|subirlas|publicarlo|publicarla|publicarlos|publicarlas)\b"
+)
 ORDINAL_FILLER = frozenset({"el", "la", "lo", "los", "las", "numero", "opcion", "subi", "subo"})
 CAPTION_START_CHARS = 60
 
@@ -65,6 +81,23 @@ def classify(text: str) -> Intent:
     return "approve_later" if wants_later and not NOW_WORDS.intersection(words) else "approve"
 
 
+def is_yes(text: str) -> bool:
+    """A reply that is only a yes: "sí", "dale!", "ok, de una", "👍"."""
+    if "?" in text:
+        return False
+    words = normalize(text)
+    if not words:
+        return any(emoji in text for emoji in YES_EMOJI)
+    return bool(YES_WORDS.intersection(words)) and all(
+        word in YES_WORDS or word in YES_FILLER for word in words
+    )
+
+
+def asks_to_publish(text: str) -> bool:
+    """Whether the assistant's message asks the Owner if it should publish a post."""
+    return "?" in text and PUBLISH_QUESTION.search(plain(text)) is not None
+
+
 def ordinal(text: str, count: int) -> int | None:
     """The 1-based post number a short reply names ("2", "la segunda", "el último"), if any."""
     words = [word for word in normalize(text) if word not in ORDINAL_FILLER]
@@ -88,7 +121,11 @@ class Approval:
 
 
 def decide(
-    text: str, pending: list[Post], listed: list[str] | None, has_photos: bool
+    text: str,
+    pending: list[Post],
+    listed: list[str] | None,
+    has_photos: bool,
+    offered: str | None = None,
 ) -> tuple[Approval, list[str] | None]:
     """The Approval for one turn and the post ids the next turn may name by number.
 
@@ -96,16 +133,18 @@ def decide(
     resolved against it, not against `pending`, which may have changed since: a post that is no
     longer pending is not approved, and the number never slides to another post.
 
-    `has_photos`: photos came with this turn or none are used yet, so "subilas así" is a post
-    request, not an approval of an older post.
+    `has_photos`: photos came with this turn or arrived after the pending posts, so "subilas
+    así" is a post request, not an approval of an older post.
+
+    `offered`: the post the assistant's last message asked to publish ("¿Lo subo?"), so a bare
+    "sí" or "dale" is an explicit answer to that question.
     """
     if has_photos:
         return Approval(), None
     if listed and (number := ordinal(text, len(listed))):
-        chosen = listed[number - 1]
-        if any(post.id == chosen for post in pending):
-            return Approval(post_id=chosen), None
-        return Approval(reason="post_not_pending"), None
+        return approve_if_pending(listed[number - 1], pending), None
+    if offered and is_yes(text):
+        return approve_if_pending(offered, pending), None
     match classify(text):
         case "approve" if len(pending) == 1:
             return Approval(post_id=pending[0].id), None
@@ -120,6 +159,12 @@ def decide(
             return Approval(reason="scheduling_not_available"), None
         case _:
             return Approval(), None
+
+
+def approve_if_pending(post_id: str, pending: list[Post]) -> Approval:
+    if any(post.id == post_id for post in pending):
+        return Approval(post_id=post_id)
+    return Approval(reason="post_not_pending")
 
 
 def numbered(pending: list[Post]) -> list[dict[str, Any]]:

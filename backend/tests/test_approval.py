@@ -1,6 +1,6 @@
 import pytest
 
-from app.conversation.approval import Approval, classify, decide, ordinal
+from app.conversation.approval import Approval, asks_to_publish, classify, decide, is_yes, ordinal
 from app.posts.store import Post, PostImage
 
 
@@ -169,3 +169,53 @@ def test_a_listed_post_that_is_gone_is_never_replaced_by_a_neighbour() -> None:
     assert approval.post_id is None
     assert approval.reason == "post_not_pending"
     assert listed is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["sí", "Si", "dale!", "ok, de una", "👍", "sí, ahora", "listo, andá nomás", "buenísimo, dale"],
+)
+def test_a_bare_yes_is_a_yes(text: str) -> None:
+    assert is_yes(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["sí pero cambiale el título", "no", "si querés", "dale mañana", "¿sí?", "me encanta", ""],
+)
+def test_a_yes_with_anything_else_is_not(text: str) -> None:
+    assert not is_yes(text)
+
+
+@pytest.mark.parametrize(
+    ("text", "asks"),
+    [
+        ("¡Listo! ¿Te gusta? ¿Lo subo, o le cambio algo?", True),
+        ("¿Lo publico ya?", True),
+        ("Quedó lindo. ¿Querés subirlo ahora?", True),
+        ("¡Dale, lo subo! ⏳", False),
+        ("¿Querés que le cambie el título?", False),
+    ],
+)
+def test_asks_to_publish_spots_the_publish_question(text: str, asks: bool) -> None:
+    assert asks_to_publish(text) is asks
+
+
+def test_a_yes_to_the_publish_question_approves_the_offered_post() -> None:
+    pending = [pending_post("p1"), pending_post("p2")]
+
+    approval, _ = decide("dale", pending, None, has_photos=False, offered="p2")
+
+    assert approval.post_id == "p2"
+
+
+def test_a_yes_without_the_question_approves_nothing() -> None:
+    approval, _ = decide("sí", [pending_post("p1")], None, has_photos=False)
+
+    assert approval == Approval()
+
+
+def test_a_yes_to_a_post_no_longer_pending_is_refused() -> None:
+    approval, _ = decide("sí", [pending_post("p1")], None, has_photos=False, offered="gone")
+
+    assert approval.reason == "post_not_pending"

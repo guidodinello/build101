@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta
 from io import BytesIO
 
@@ -574,3 +575,127 @@ async def test_a_post_with_the_logo_without_one_is_refused(photos: InMemoryPhoto
     assert result == {"error": "no_logo"}
     assert channel.images == []
     assert model.structured_calls == []
+
+
+def sent_design(store: InMemoryPosts, photos: InMemoryPhotos) -> Post:
+    found, _ = photos.find(SENDER, ["f1", "f2"])
+    post = Post(
+        "old",
+        SENDER,
+        [PostImage("/media/a.jpg", make_image((1080, 1350))), PostImage("/media/b.jpg", b"")],
+        "Mesa de roble\n\n#muebles",
+        brief="mesa nueva",
+        style="design",
+        source_photos=found,
+        headlines=["Roble macizo", "Hecha a mano"],
+        style_prompt="warm, beige",
+    )
+    store.add(post)
+    return post
+
+
+async def test_a_caption_change_keeps_the_images_and_generates_nothing(
+    photos: InMemoryPhotos,
+) -> None:
+    store, image_gen, channel = InMemoryPosts(), CountingImageGen(), FakeChannel()
+    events: list[Event] = []
+    old = sent_design(store, photos)
+    posts = maker(
+        photos_model(), image_gen, photos, store=store, max_posts_per_day=0, events=events
+    )
+
+    result = posts.revise_post(
+        SENDER, {"post_id": "old", "change": "más corto", "part": "caption"}, channel
+    )
+    await posts.join()
+
+    assert result["status"] == "generating"
+    assert image_gen.calls == []  # not even the daily limit applies
+    [new] = store.pending(SENDER)
+    assert [image.data for image in new.images] == [image.data for image in old.images]
+    assert (new.headlines, new.style_prompt) == (old.headlines, old.style_prompt)
+    assert new.brief == "mesa nueva\nCambio: más corto"
+    assert old.status == "replaced"
+    assert isinstance(events[0], PostSent)
+
+
+async def test_an_image_change_regenerates_the_design_from_the_previous_one(
+    photos: InMemoryPhotos,
+) -> None:
+    store, image_gen = InMemoryPosts(), CountingImageGen()
+    sent_design(store, photos)
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(2)})
+    posts = maker(model, image_gen, photos, store=store)
+
+    posts.revise_post(
+        SENDER, {"post_id": "old", "change": "fondo verde", "part": "images"}, FakeChannel()
+    )
+    await posts.join()
+
+    request = model.structured_calls[0][0]["text"]
+    assert "<previous_version>" in request
+    assert "style_prompt: warm, beige" in request
+    assert request.count('The Owner asked for this change: "fondo verde".') == 1
+    assert len(image_gen.calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("arguments", "error"),
+    [
+        ({"post_id": "nope", "change": "x", "part": "caption"}, "unknown_post"),
+        ({"post_id": "mine", "change": "x", "part": "images"}, "photos_as_they_are"),
+        ({"post_id": "done", "change": "x", "part": "caption"}, "post_not_pending"),
+        ({"post_id": "mine", "change": "", "part": "caption"}, "invalid_arguments"),
+    ],
+)
+async def test_bad_revisions_start_nothing(
+    photos: InMemoryPhotos, arguments: dict[str, str], error: str
+) -> None:
+    store, image_gen = InMemoryPosts(), CountingImageGen()
+    store.add(Post("mine", SENDER, [PostImage("/media/x.jpg", b"x")], "caption"))
+    store.add(Post("done", SENDER, [PostImage("/media/y.jpg", b"y")], "caption", "published"))
+    posts = maker(photos_model(), image_gen, photos, store=store)
+
+    assert posts.revise_post(SENDER, arguments, FakeChannel())["error"] == error
+
+
+async def test_a_remake_by_create_post_shows_the_old_version(photos: InMemoryPhotos) -> None:
+    store, model = InMemoryPosts(), photos_model()
+    store.add(Post("old", SENDER, [PostImage("/media/x.jpg", b"x")], "Texto viejo", brief="mesa"))
+    posts = maker(model, CountingImageGen(), photos, store=store)
+
+    posts.create_post(
+        SENDER,
+        {"brief": "con la otra foto", "asset_ids": ["f2"], "style": "photos", "replaces": "old"},
+        FakeChannel(),
+    )
+    await posts.join()
+
+    request = model.structured_calls[0][0]["text"]
+    assert 'Text: "Texto viejo"' in request
+    assert request.endswith("The brief above says what the Owner wants changed.")
+
+
+async def test_the_owners_notes_reach_the_post_writer(photos: InMemoryPhotos) -> None:
+    model = photos_model()
+
+    async def notes_of(sender: str) -> list[str]:
+        return ["Siempre mencionar el envío gratis"]
+
+    posts = PostMaker(
+        PostDrafter(model),
+        CountingImageGen(),
+        photos,
+        PublicImages(),
+        InMemoryPosts(),
+        "https://backend.test/",
+        max_posts_per_day=5,
+        now=lambda: NOON,
+        notes_of=notes_of,
+    )
+    posts.on_event(lambda *_: asyncio.sleep(0))
+    arguments = {"brief": "mesa", "asset_ids": ["f1"], "style": "photos"}
+    posts.create_post(SENDER, arguments, FakeChannel())
+    await posts.join()
+
+    assert "- Siempre mencionar el envío gratis" in model.structured_systems[0]

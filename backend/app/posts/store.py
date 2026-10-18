@@ -46,6 +46,9 @@ class Post:
     with_logo: bool = False
     source_photos: list[Photo] = field(default_factory=list)
     publish_attempts: int = 0
+    # What a revision keeps unless the Owner asks otherwise.
+    headlines: list[str] = field(default_factory=list)
+    style_prompt: str | None = None
 
     @property
     def idempotency_key(self) -> str:
@@ -66,6 +69,8 @@ class InMemoryPosts:
         # Set when "subilo" met several pending posts: the ids of the numbered list the Owner was
         # shown, which the next turn may name by number.
         self._listed: dict[str, list[str]] = {}
+        # The post the assistant's last message asked to publish, which a bare "sí" approves.
+        self._offered: dict[str, str] = {}
 
     def add(self, post: Post) -> None:
         posts = self._posts[post.sender]
@@ -76,6 +81,9 @@ class InMemoryPosts:
             if droppable is None:
                 break
             posts.remove(droppable)
+
+    def all(self, sender: str) -> list[Post]:
+        return list(self._posts[sender])
 
     def get(self, sender: str, post_id: str) -> Post | None:
         return next((post for post in self._posts[sender] if post.id == post_id), None)
@@ -92,3 +100,12 @@ class InMemoryPosts:
             self._listed[sender] = post_ids
         else:
             self._listed.pop(sender, None)
+
+    def offered(self, sender: str) -> str | None:
+        return self._offered.get(sender)
+
+    def set_offered(self, sender: str, post_id: str | None) -> None:
+        if post_id:
+            self._offered[sender] = post_id
+        else:
+            self._offered.pop(sender, None)

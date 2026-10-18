@@ -30,7 +30,6 @@ PUBLISH_FAILED = "Uy, Instagram no me dejó publicarlo 🙈 ¿Lo intento de nuev
 BRAND_GENERATING = "¡Gracias! Estoy estudiando tu marca, en un minuto te cuento lo que entendí ⏳"
 BRAND_FIX_PROMPT = "Contame qué cambio, con tus palabras."
 READY_OPEN_CHAT = "¡Listo, ya conozco tu marca! ¿En qué te puedo ayudar hoy?"
-REVISING = "Va, lo ajusto ⏳"
 RETRYING = "Dale, lo intento de nuevo ⏳"
 POST_GENERATING = "¡Dale! Lo armo ⏳"
 PUBLISHING = "¡Dale, lo subo! ⏳"

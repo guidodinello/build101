@@ -96,7 +96,7 @@ Redeploy the previous deployment from the Railway dashboard (service, Deployment
 
 ### One instance
 
-State kept in memory is lost on every deploy or restart: running jobs (the job runner marks jobs stuck for more than 5 minutes as failed), the webhook dedupe store, served post images (`/media/*.jpg`) and the in-memory photo, history and post stores. Keep one replica ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)).
+State kept in memory is lost on every deploy or restart: running jobs (the job runner marks jobs stuck for more than 5 minutes as failed), the webhook dedupe store, served post images (`/media/*.jpg`) and the in-memory photo and post stores. The orchestrator's history, its conversation summary and the Owner's notes are in Postgres ([ADR 0028](../docs/decisions/0028-orchestrator-memory-and-context.md)), and so are the chat photos once kept as Brand assets. Keep one replica ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)).
 
 ### Switching WhatsApp between Railway and local development
 

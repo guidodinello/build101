@@ -48,6 +48,16 @@ Everything the Agency knows about one Business's brand (voice, audience, content
 _Avoid_: Brand profile, brand kit, context
 _Status_: draft
 
+**Owner note**:
+A fact about the Business or a standing preference the Owner asked the Agency to keep ("no poner precios", "abrimos sábados"); every agent follows it, and it wins over the Brand Brain when they conflict. See [ADR 0028](decisions/0028-orchestrator-memory-and-context.md).
+_Avoid_: Memory, preference, setting
+_Status_: draft
+
+**Conversation summary**:
+What the Orchestrator keeps of the older part of its conversation with the Owner, once those messages leave its view. See [ADR 0028](decisions/0028-orchestrator-memory-and-context.md).
+_Avoid_: Memory, recap, context
+_Status_: draft
+
 **Niche Report**:
 A weekly summary of what is working on social media in the Business's niche (themes, formats, hooks), with sources; it shapes the angle and look of Posts, never their facts. See [ADR 0025](decisions/0025-weekly-niche-report.md).
 _Avoid_: Trend report, market research, insights
@@ -106,6 +116,6 @@ _Avoid_: Video post, clip, story
 _Status_: draft
 
 **Approval**:
-The Owner's explicit yes to a specific Post; nothing is published without it.
+The Owner's explicit yes to a specific Post (a tap, "subilo", or a "sí" to the question about publishing it); nothing is published without it.
 _Avoid_: Confirmation, sign-off
 _Status_: draft

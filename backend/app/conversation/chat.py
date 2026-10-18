@@ -1,7 +1,8 @@
 import asyncio
 import logging
-from collections.abc import Coroutine
-from dataclasses import dataclass, field
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass, field, replace
+from datetime import datetime
 from functools import cache
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from app.llm.client import (
     FunctionCall,
     LLMError,
     Step,
+    ThinkingLevel,
     function_result_step,
     image_content,
     text_content,
@@ -24,19 +26,20 @@ from app.llm.client import (
 from app.media.images import prepare_reference
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
-from app.posts.store import InMemoryPosts
+from app.posts.store import InMemoryPosts, Post
 from app.prompts import load_prompt
 from app.storage import StorageError
 
-from .approval import Approval, decide
+from .approval import CAPTION_START_CHARS, Approval, asks_to_publish, decide
 from .button_router import ButtonRouter
+from .context import BusinessContexts, OwnerContext, render
 from .events import (
     AudioUnclear,
-    BrandRevising,
     Event,
     PhotosReceived,
     PhotoTooBig,
     PhotoUnreadable,
+    PostApproved,
     PostSent,
     Published,
     StaleButton,
@@ -44,9 +47,11 @@ from .events import (
     buttons,
     fallback,
 )
-from .history import InMemoryHistory
+from .history import Compactor, History
 from .library import BrandLibrary
-from .photos import InMemoryPhotos, Photo
+from .notes import InMemoryNotes, OwnerNotes
+from .photo_keeper import PhotoKeeper
+from .photos import InMemoryPhotos, Photo, local_now
 from .tools import TOOLS
 
 logger = logging.getLogger(__name__)
@@ -60,6 +65,13 @@ PHOTO_DEBOUNCE_S = 5.0
 # WhatsApp hides the typing indicator after about 25 s, and as soon as we send a message.
 KEEP_ALIVE_S = 20.0
 WHATSAPP_BODY_MAX = 1024
+# The Owner's turns resolve references and decide on paid generations; events are one-liners.
+OWNER_THINKING: ThinkingLevel = "medium"
+EVENT_THINKING: ThinkingLevel = "low"
+LOGGED_REPLY_CHARS = 300
+WEEKDAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+# Tools that act on the Owner's words: an event turn has none.
+OWNER_TOOLS = frozenset({"create_post", "revise_post", "remember", "forget", "update_brand"})
 
 
 @cache
@@ -77,16 +89,16 @@ class _PhotoBatch:
 class ChatHandler:
     """InboundHandler that answers text, voice notes and photos with the LLM.
 
-    Orchestrator v0 (T56, T57): only `create_post` and `approve_post` are registered, and no
-    onboarding or button routing yet (T23, T18), so buttons and other kinds are answered as
-    events (`notify`, ADR 0026). Photos wait `PHOTO_DEBOUNCE_S` after the last one and are
-    answered together, with any text that arrives meanwhile.
+    Photos wait `PHOTO_DEBOUNCE_S` after the last one and are answered together, with any text
+    that arrives meanwhile. Buttons and other kinds are answered as events (`notify`, ADR 0026).
+    The model sees the Business, its Brand Brain, the Owner's notes and the conversation summary
+    in its system prompt (ADR 0028).
     """
 
     def __init__(
         self,
         model: ChatModel,
-        history: InMemoryHistory,
+        history: History,
         photos: InMemoryPhotos,
         posts: PostMaker,
         publisher: PostPublisher,
@@ -97,6 +109,13 @@ class ChatHandler:
         max_photo_mb: int,
         photo_debounce_s: float = PHOTO_DEBOUNCE_S,
         keep_alive_s: float = KEEP_ALIVE_S,
+        *,
+        notes: OwnerNotes | None = None,
+        contexts: BusinessContexts | None = None,
+        keeper: PhotoKeeper | None = None,
+        compactor: Compactor | None = None,
+        trend_notes: str | None = None,
+        now: Callable[[], datetime] = local_now,
     ) -> None:
         self._model = model
         self._history = history
@@ -110,6 +129,12 @@ class ChatHandler:
         self._max_photo_mb = max_photo_mb
         self._photo_debounce_s = photo_debounce_s
         self._keep_alive_s = keep_alive_s
+        self._notes = notes or InMemoryNotes()
+        self._contexts = contexts
+        self._keeper = keeper
+        self._compactor = compactor or Compactor(history, model)
+        self._trend_notes = trend_notes
+        self._now = now
         self._batches: dict[str, _PhotoBatch] = {}
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -123,24 +148,23 @@ class ChatHandler:
         photos = self._take_batch(message.sender)
         async with self._history.lock(message.sender):
             await mark_read(message.message_id, channel)
-            reply = await self._answer(message, photos, channel)
+            try:
+                reply = await self._answer(message, photos, channel)
+            except SQLAlchemyError:
+                logger.warning("database failed for %s", mask(message.sender), exc_info=True)
+                reply = messages_es.REPLY_FAILED
             if reply is not None:
                 await channel.send_text(message.sender, reply)
 
     async def join(self) -> None:
-        """Wait for the pending photo batches (tests, shutdown); cancelled timers are fine."""
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        """Wait for the pending photo batches and compactions (tests, shutdown)."""
+        while self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
 
     async def _answer(
         self, message: InboundMessage, photos: list[Photo], channel: ChannelPort
     ) -> str | None:
         """The reply to send, or None when an event turn already answered."""
-        words = message.text if message.kind == "text" else None
-        if message.kind == "audio" and message.audio:
-            words = message.audio.provider_transcript
-        if words and await self._took_brand_correction(message.sender, words):
-            await self._event_turn(message.sender, BrandRevising(words), channel)
-            return None
         match message.kind:
             case "text" if message.text:
                 return await self._llm_turn(
@@ -193,8 +217,11 @@ class ChatHandler:
             logger.warning("could not read photo %s", media.media_id, exc_info=True)
             await self.notify(message.sender, PhotoUnreadable(), channel)
             return
+        photo = self._photos.add(message.sender, reference, message.text)
+        if self._keeper:
+            self._start(keep_photo(self._keeper, message.sender, photo))
         batch = self._batches.setdefault(message.sender, _PhotoBatch())
-        batch.photos.append(self._photos.add(message.sender, reference, message.text))
+        batch.photos.append(photo)
         batch.last_message_id = message.message_id
         if batch.timer:
             batch.timer.cancel()
@@ -252,11 +279,19 @@ class ChatHandler:
         recent = self._photos.recent(sender)
         unseen = [photo for photo in recent if not photo.seen]
         with_context = step_with_photos(
-            text, recent, unseen, self._photos.library(sender), self._photos.logo(sender)
+            text,
+            recent,
+            unseen,
+            self._photos.library(sender),
+            self._photos.logo(sender),
+            now=self._now(),
         )
+        past = await self._history.get(sender)
         keep_alive = self._start(self._keep_owner_posted(sender, message_id, bool(unseen), channel))
         try:
-            text, turn = await self._converse(sender, with_context, approval, True, channel)
+            text, turn = await self._converse(
+                sender, past, with_context, approval, True, channel, OWNER_THINKING
+            )
         except LLMError:
             logger.warning("%s failed for %s", AGENT, mask(sender), exc_info=True)
             return messages_es.REPLY_FAILED
@@ -268,7 +303,9 @@ class ChatHandler:
         for photo in unseen:
             photo.seen = True
         # Only a completed turn enters the history, so a failure leaves no dangling user step.
-        self._history.extend(sender, [user, *turn])
+        await self._remember_turn(sender, past, [user, *turn])
+        self._offer(sender, text)
+        log_reply(sender, text)
         return text
 
     async def notify(self, sender: str, event: Event, channel: ChannelPort) -> None:
@@ -290,17 +327,18 @@ class ChatHandler:
         """Answer `event` with one model turn; the caller holds the sender's lock.
 
         No Owner words, so the `Approval` is empty (nothing can be published, ADR 0007) and,
-        except for photos with no text, `create_post` is refused: a new post isn't their intent.
+        except for photos with no text, the tools that act on the Owner's words are refused.
         Photos with no text are the exception: the Owner may have asked for a post before
         sending them, so they get the photo context and the keep-alive like an Owner turn.
         """
         note = event.note()
         step = user_step(note)
+        past = await self._history.get(sender)
         if isinstance(event, PostSent):
             post = self._store.get(sender, event.post_id)
             if post is None or post.status != "pending_approval":
                 # Already approved or replaced while this waited for the lock: nothing to ask.
-                self._history.extend(sender, [step])
+                await self._remember_turn(sender, past, [step])
                 return
         with_photos = isinstance(event, PhotosReceived)
         # Only these turns attach the photos, so only they may mark them seen.
@@ -308,76 +346,115 @@ class ChatHandler:
         unseen = [photo for photo in recent if not photo.seen]
         if with_photos:
             await self._refresh_library(sender)
-        library = self._photos.library(sender) if with_photos else []
-        logo = self._photos.logo(sender) if with_photos else None
-        current = step_with_photos(note, recent, unseen, library, logo) if with_photos else step
+            current = step_with_photos(
+                note,
+                recent,
+                unseen,
+                self._photos.library(sender),
+                self._photos.logo(sender),
+                now=self._now(),
+            )
+        else:
+            current = step
         keep_alive = (
             self._start(self._keep_owner_posted(sender, message_id, bool(unseen), channel))
             if with_photos
             else None
         )
         text, turn = "", []
+        thinking = OWNER_THINKING if with_photos else EVENT_THINKING
         try:
-            text, turn = await self._converse(sender, current, Approval(), with_photos, channel)
+            text, turn = await self._converse(
+                sender, past, current, Approval(), with_photos, channel, thinking
+            )
         except LLMError:
             logger.warning("%s failed for %s", AGENT, mask(sender), exc_info=True)
         finally:
             if keep_alive:
                 keep_alive.cancel()
         if not text:
-            await self._send_fallback(sender, event, step, channel)
+            await self._send_fallback(sender, past, event, step, channel)
             return
         for photo in unseen:
             photo.seen = True
         if isinstance(event, Published) and event.permalink and event.permalink not in text:
             # The link is data, not copy: it reaches the Owner exactly, whatever the model wrote.
             text = f"{text}\n{event.permalink}"
-        self._history.extend(sender, [step, *turn])
+        await self._remember_turn(sender, past, [step, *turn])
+        self._offer(sender, text, offered_post(event))
+        log_reply(sender, text)
         await send_with_buttons(sender, text, buttons(event), channel)
 
     async def _send_fallback(
-        self, sender: str, event: Event, step: Step, channel: ChannelPort
+        self, sender: str, past: list[Step], event: Event, step: Step, channel: ChannelPort
     ) -> None:
         """The LLM couldn't answer: the fixed text for this event, or nothing."""
         text = fallback(event)
         logger.warning("no %s reply for %s, fallback: %s", AGENT, mask(sender), bool(text))
         if text is None:
             # The note still goes in, so a later "subilo" or a change knows the post id.
-            self._history.extend(sender, [step])
+            await self._remember_turn(sender, past, [step])
             return
         told = user_step(f'{event.note()}\nThe Owner was told: "{text}"')
-        self._history.extend(sender, [told])
+        await self._remember_turn(sender, past, [told])
+        self._offer(sender, text, offered_post(event))
         await send_with_buttons(sender, text, buttons(event), channel)
 
     async def _converse(
         self,
         sender: str,
+        past: list[Step],
         current: Step,
         approval: Approval,
         owner_request: bool,
         channel: ChannelPort,
+        thinking: ThinkingLevel,
     ) -> tuple[str, list[Step]]:
         """Run the model and tool steps on `current`: the reply text ("" if it kept calling tools
         until MAX_STEPS) and the steps of the turn. Raises LLMError."""
+        system = await self._system_for(sender)
         turn: list[Step] = []
         for _ in range(MAX_STEPS):
             reply = await self._model.reply(
-                AGENT,
-                self._system,
-                [*self._history.get(sender), current, *turn],
-                thinking_level="low",
-                tools=TOOLS,
+                AGENT, system, [*past, current, *turn], thinking_level=thinking, tools=TOOLS
             )
             turn.extend(reply.steps)
             if not reply.function_calls:
                 return reply.text, turn
-            turn.extend(
-                function_result_step(
-                    call, self._run_tool(call, sender, channel, approval, owner_request)
-                )
-                for call in reply.function_calls
-            )
+            for call in reply.function_calls:
+                result = await self._run_tool(call, sender, channel, approval, owner_request)
+                turn.append(function_result_step(call, result))
         return "", turn
+
+    async def _system_for(self, sender: str) -> str:
+        """The instructions, then what the model knows about this Business (ADR 0028)."""
+        context = OwnerContext()
+        try:
+            if self._contexts:
+                context = await self._contexts.load(sender)
+            context = replace(
+                context,
+                notes=await self._notes.list(sender),
+                summary=await self._history.summary(sender),
+            )
+        except SQLAlchemyError:
+            # Answer with what was loaded rather than not at all.
+            logger.warning("loading the context failed for %s", mask(sender), exc_info=True)
+        known = render(context, self._trend_notes)
+        return f"{self._system}\n\n{known}" if known else self._system
+
+    async def _remember_turn(self, sender: str, past: list[Step], steps: list[Step]) -> None:
+        await self._history.extend(sender, steps)
+        if self._compactor.needed(past, steps):
+            self._start(self._compact(sender))
+
+    async def _compact(self, sender: str) -> None:
+        try:
+            async with self._history.lock(sender):
+                await self._compactor.compact(sender)
+        except Exception:
+            # The task's boundary: the next turn tries again.
+            logger.exception("compacting the history failed for %s", mask(sender))
 
     async def _refresh_library(self, sender: str) -> None:
         if self._library is None:
@@ -387,21 +464,10 @@ class ChatHandler:
             logo = await self._library.logo(sender)
         except (SQLAlchemyError, StorageError):
             # Answer with the photos and logo already loaded rather than not at all.
-            logger.warning("loading the wizard photos failed for %s", mask(sender), exc_info=True)
+            logger.warning("loading the brand photos failed for %s", mask(sender), exc_info=True)
             return
         self._photos.set_library(sender, photos)
         self._photos.set_logo(sender, logo)
-
-    async def _took_brand_correction(self, sender: str, words: str) -> bool:
-        brand = self._buttons.brand
-        if brand is None:
-            return False
-        try:
-            return await brand.take_correction(sender, words)
-        except SQLAlchemyError:
-            # The database is down: answer as a normal turn rather than not at all.
-            logger.warning("brand correction check failed for %s", mask(sender), exc_info=True)
-            return False
 
     async def _keep_owner_posted(
         self, sender: str, message_id: str, looking_at_photos: bool, channel: ChannelPort
@@ -421,19 +487,31 @@ class ChatHandler:
     def _approval(self, sender: str, words: str, attached: bool) -> Approval:
         """What this turn's message allows `approve_post` to publish, computed in code (ADR 0007).
 
-        Photos came with it, or are waiting unused: the Owner is asking for a post, not
-        approving one.
+        Photos came with it, or arrived after the pending posts: the Owner is asking for a post,
+        not approving one.
         """
+        pending = self._store.pending(sender)
         approval, listed = decide(
             words,
-            self._store.pending(sender),
+            pending,
             self._store.listed(sender),
-            has_photos=attached or bool(self._photos.recent(sender)),
+            has_photos=attached or bool(photos_after(self._photos.recent(sender), pending)),
+            offered=self._store.offered(sender),
         )
         self._store.set_listed(sender, listed)
         return approval
 
-    def _run_tool(
+    def _offer(self, sender: str, text: str, post_id: str | None = None) -> None:
+        """Remember which post the reply asked to publish, so the next "sí" approves it.
+
+        `post_id` is the post an event was about; otherwise it is the only pending post.
+        """
+        pending = [post.id for post in self._store.pending(sender)]
+        target = post_id or (pending[0] if len(pending) == 1 else None)
+        asked = target in pending and asks_to_publish(text)
+        self._store.set_offered(sender, target if asked else None)
+
+    async def _run_tool(
         self,
         call: FunctionCall,
         sender: str,
@@ -442,18 +520,58 @@ class ChatHandler:
         owner_request: bool,
     ) -> dict[str, Any]:
         logger.info("tool %s for %s: %s", call.name, mask(sender), call.arguments)
-        match call.name:
-            case "create_post" if not owner_request:
-                # A note turn has no Owner words: a new post isn't their intent.
-                result = {"error": "not_owner_request"}
-            case "create_post":
-                result = self._posts.create_post(sender, call.arguments, channel)
-            case "approve_post":
-                result = self._publisher.approve(sender, call.arguments, approval, channel)
-            case _:
-                result = {"error": "unknown_tool"}
+        try:
+            result = await self._tool_result(call, sender, channel, approval, owner_request)
+        except SQLAlchemyError:
+            logger.warning("tool %s failed for %s", call.name, mask(sender), exc_info=True)
+            result = {"error": "action_failed"}
         logger.info("tool %s result: %s", call.name, result)
         return result
+
+    async def _tool_result(
+        self,
+        call: FunctionCall,
+        sender: str,
+        channel: ChannelPort,
+        approval: Approval,
+        owner_request: bool,
+    ) -> dict[str, Any]:
+        arguments = call.arguments
+        if call.name in OWNER_TOOLS and not owner_request:
+            # A note turn has no Owner words: acting on them isn't their intent.
+            return {"error": "not_owner_request"}
+        match call.name:
+            case "create_post":
+                return self._posts.create_post(sender, arguments, channel)
+            case "revise_post":
+                return self._posts.revise_post(sender, arguments, channel)
+            case "approve_post":
+                return self._publisher.approve(sender, arguments, approval, channel)
+            case "list_posts":
+                return {"posts": [describe_post(post) for post in self._store.all(sender)]}
+            case "remember":
+                text = str(arguments.get("note", "")).strip()
+                if not text:
+                    return {"error": "invalid_arguments"}
+                note = await self._notes.add(sender, text)
+                return {"saved": note.id} if note else {"error": "action_failed"}
+            case "forget":
+                forgotten = await self._notes.archive(sender, str(arguments.get("note_id", "")))
+                return {"forgotten": True} if forgotten else {"error": "unknown_note"}
+            case "update_brand":
+                return await self._update_brand(sender, str(arguments.get("change", "")).strip())
+            case _:
+                return {"error": "unknown_tool"}
+
+    async def _update_brand(self, sender: str, change: str) -> dict[str, Any]:
+        brand = self._buttons.brand
+        if brand is None:
+            return {"error": "not_available"}
+        if not change:
+            return {"error": "invalid_arguments"}
+        if not await brand.revise(sender, change):
+            return {"error": "brand_not_ready"}
+        return {"status": "revising"}
 
     def _start(self, coroutine: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
         task = asyncio.create_task(coroutine)
@@ -467,6 +585,45 @@ async def mark_read(message_id: str, channel: ChannelPort) -> None:
         await channel.mark_read(message_id, typing=True)
     except ChannelError:
         logger.warning("mark_read failed for %s", message_id, exc_info=True)
+
+
+async def keep_photo(keeper: PhotoKeeper, sender: str, photo: Photo) -> None:
+    try:
+        await keeper.keep(sender, photo)
+    except Exception:
+        # The task's boundary: the photo is still usable without its description.
+        logger.exception("keeping photo %s failed for %s", photo.id, mask(sender))
+
+
+def log_reply(sender: str, text: str) -> None:
+    logger.info("%s replied to %s: %s", AGENT, mask(sender), text[:LOGGED_REPLY_CHARS])
+
+
+def offered_post(event: Event) -> str | None:
+    """The post an event's message may ask to publish."""
+    match event:
+        case PostSent(post_id=post_id) | PostApproved(post_id=post_id):
+            return post_id
+        case _:
+            return None
+
+
+def photos_after(photos: list[Photo], pending: list[Post]) -> list[Photo]:
+    """The photos sent after every pending post: with them, "subilas" asks for a new post."""
+    latest = max((post.created_at for post in pending), default=None)
+    return [photo for photo in photos if latest is None or photo.received_at > latest]
+
+
+def describe_post(post: Post) -> dict[str, Any]:
+    return {
+        "post_id": post.id,
+        "status": post.status,
+        "format": post.format,
+        "style": post.style,
+        "sent_at": f"{post.created_at:%d/%m %H:%M}",
+        "caption_start": post.caption[:CAPTION_START_CHARS],
+        "permalink": post.permalink,
+    }
 
 
 def request(photos: list[Photo], text: str) -> str:
@@ -497,12 +654,13 @@ def step_with_photos(
     unseen: list[Photo],
     library: list[Photo] | None = None,
     logo: bytes | None = None,
+    now: datetime | None = None,
 ) -> Step:
     """The context (and the photos the model hasn't seen) ride on this turn's user step only,
     so the system prompt and the stored history stay byte-identical across turns."""
     return user_step(
         text,
-        text_content(context_block(recent, unseen, library, has_logo=logo is not None)),
+        text_content(context_block(recent, unseen, library, has_logo=logo is not None, now=now)),
         *(image_content(photo.data, "image/jpeg") for photo in unseen),
     )
 
@@ -513,19 +671,32 @@ def context_block(
     library: list[Photo] | None = None,
     *,
     has_logo: bool = False,
+    now: datetime | None = None,
 ) -> str:
     lines = [describe_photo(photo) for photo in recent] or ["none"]
     if attached:
         lines.append(f"Attached below, in this order: {', '.join(photo.id for photo in attached)}")
-    block = "<recent_photos>\n" + "\n".join(lines) + "\n</recent_photos>"
-    if library:
-        listed = "\n".join(f"- {photo.id}: {photo.caption}" for photo in library)
-        block += f"\n<brand_photos>\n{listed}\n</brand_photos>"
+    block = f"<now>{local_time(now)}</now>\n" if now else ""
+    block += "<recent_photos>\n" + "\n".join(lines) + "\n</recent_photos>"
+    # A photo sent in the chat is also a Brand asset: list it once, as recent.
+    listed = {photo.asset_id for photo in recent if photo.asset_id}
+    kept = [photo for photo in library or [] if photo.asset_id not in listed]
+    if kept:
+        described = "\n".join(f"- {photo.id}: {photo.caption}" for photo in kept)
+        block += f"\n<brand_photos>\n{described}\n</brand_photos>"
     if has_logo:
         block += "\n<brand_logo>uploaded</brand_logo>"
     return block
 
 
+def local_time(now: datetime) -> str:
+    return f"{WEEKDAYS[now.weekday()]} {now:%d/%m/%Y %H:%M}"
+
+
 def describe_photo(photo: Photo) -> str:
     line = f"- {photo.id} sent {photo.received_at:%H:%M}"
-    return f'{line}, caption "{photo.caption}"' if photo.caption else line
+    if photo.caption:
+        line += f', caption "{photo.caption}"'
+    if photo.description:
+        line += f": {photo.description}"
+    return line

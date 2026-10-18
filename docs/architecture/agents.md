@@ -316,7 +316,7 @@ A prompt can be composed from several files: a line that is only `{{include <pat
 
 ### Feedback Classifier
 
-Should (revisions, F4.4).
+Should (revisions, F4.4). Not built: for now the orchestrator itself picks the target when it calls `revise_post` (`part = caption | images`, [ADR 0028](../decisions/0028-orchestrator-memory-and-context.md)).
 
 - Input: feedback text, post `format`, current copy, current image brief summary (`style_notes`, image Posts) or current video + cover summary (Reel).
 - Output: `{"target": ..., "instruction": str}` (instruction = normalized, explicit version of the feedback, e.g. "Acortar el caption a 2 líneas y mencionar envío gratis en Montevideo").
@@ -372,6 +372,15 @@ run_turn(business, inbound_text):
 - Tools are function declarations (`{"type": "function", "name", "description", "parameters"}`) with `additionalProperties: false` in every object. The model decides whether to call one; we never force a call.
 - If the model returns text **and** a long-running tool, send the text (the acknowledgement) and let the job send the result.
 
+### Memory and context (built, [ADR 0028](../decisions/0028-orchestrator-memory-and-context.md))
+
+- **System prompt** = the static instructions, then `<business>`, `<brand_brain>`, `<brand_summary_sent>`, `<catalog>`, `<owner_notes>`, `<trend_notes>` and `<conversation_summary>` (`app/conversation/context.py`). They change only when the data does, so the prefix still caches.
+- **History** in `conversation_steps` (`DbHistory`), in memory without a database. Past about 40,000 estimated tokens the oldest whole turns are folded into `businesses.conversation_summary` by `conversation_summarizer` and deleted (`Compactor`, after the turn, under the sender's lock).
+- **Thinking**: `medium` for the Owner's turns, `low` for event turns.
+- **Out-of-band messages**: the brand summary job adds a `[brand summary sent]` note to the history.
+- **Approval**: a bare "sí" / "dale" / "👍" approves the post the assistant's last message asked to publish, detected in code (`approval.asks_to_publish`, `is_yes`).
+- **Chat photos**: `PhotoKeeper` runs the Asset Analyst on each one and, with the database, stores it as a Brand asset (`source = 'whatsapp'`).
+
 ### When image generation runs
 
 Image generation costs money and takes time (first paid run: a 3-slide carousel at 1K took 38 s and about $0.14, PR #19, recorded in [research/image-generation-providers.md](../research/image-generation-providers.md)), so it runs **only when the Owner asks for a post**, and the orchestrator model is what decides that:
@@ -392,8 +401,8 @@ From the second design pass ([../design/mockups/](../design/mockups/README.md), 
 - **A post from photos and a request (Must, F4.5).** The Owner sends one or more photos and asks for a post in their own words ("me llegó esta mesa ratona nueva, armame algo para subir"), or only writes the request. Photos the Owner just sent appear in `<recent_photos>`; the model passes them to `create_post` as `asset_ids`. One photo makes a single-image post; several make a carousel with one slide per photo (product decision, 2026-10-17).
 - **Photos as they are, or a design (Must, 2026-10-17).** `create_post` takes a `style`: `photos` posts the Owner's photos cropped to 4:5 with a caption (no image generation); `design` makes new images from them with text on them. When the Owner hasn't said which, the bot's one question offers both, plus 3–5 numbered ideas for the post based on the photos (the orchestrator sees each photo once, attached to the turn it arrives in); the Owner's pick becomes the brief.
 - **Delivery (2026-10-17).** The finished post arrives as its images in order, numbered "1/3", "2/3"… on a carousel, with the caption and hashtags as the first image's caption, so no separate text can arrive before the images (a text WhatsApp's 1024-character caption can't hold follows the images).
-- **At most one question (Must).** Before `create_post`, ask **one** short question only when the answer changes the result: the angle (novedad, promo, detrás de escena), a price or condition the Owner hasn't given, or what to highlight. Otherwise create right away and say so ("Dale, lo armo con la foto del detalle de la veta ⏳"). Never a second question for the same post; missing details become a neutral choice.
-- **Approve and publish by writing (Must, F5.6).** While a post is `pending_approval`, an explicit approval in text maps to the same handlers as the buttons: "subilo", "publicalo", "dale, subila" → `approve_post(next = "publish_now")`. Praise without an instruction ("me encanta", "está lindo") is not approval: the bot asks "¿Lo subo?". An approval with a time ("subilo mañana a la tarde") → `approve_post(next = "schedule", when = ...)` (Should, F5.3); until scheduling exists the bot publishes only on an explicit "ahora". If more than one post is pending, the bot asks which one.
+- **At most one question (Must).** Before `create_post`, ask **one** short question only when the answer changes the result: the angle (novedad, promo, detrás de escena), a price or condition the Owner hasn't given, or what to highlight. Otherwise create right away and say so ("Dale, lo armo con la foto del detalle de la veta ⏳"). Never ask again what the Owner already answered, here or in their notes; missing details become a neutral choice.
+- **Approve and publish by writing (Must, F5.6).** While a post is `pending_approval`, an explicit approval in text maps to the same handlers as the buttons: "subilo", "publicalo", "dale, subila" → `approve_post(next = "publish_now")`. Praise without an instruction ("me encanta", "está lindo") is not approval: the bot asks "¿Lo subo?". A bare "sí" or "dale" right after that question approves the post it asked about ([ADR 0028](../decisions/0028-orchestrator-memory-and-context.md)). An approval with a time ("subilo mañana a la tarde") → `approve_post(next = "schedule", when = ...)` (Should, F5.3); until scheduling exists the bot publishes only on an explicit "ahora". If more than one post is pending, the bot asks which one.
 - **Match the Owner's style (Should, F1.9).** Replies mirror how the Owner writes: short and casual when they write two words ("subila" → "arriba ✅"), fuller when they write long messages. `<owner_style>` in the context block gives the hint. Post captions keep the Brand Brain voice regardless.
 - **Carousels (Must, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)).** "Armame un carrusel con estas fotos" → `create_post(format = "carousel", slide_count)`, with `slide_count` only when the Owner gave a number (up to 10). One carousel per request, no Variations. While its preview is pending, "cambiá la 3" or "la portada más clara" → `redo_slides(post_id, slides, feedback)`; approval works as for image Posts.
 - **Ideas on request (Should, F3.5).** "¿Se te ocurre algo?" → `suggest_ideas`; the bot lists the 3 ideas as a short numbered message. When the Owner picks one ("la del taller, pero sin mostrar caras"), the model calls `create_post` with that idea as the brief and the Owner's extra instructions in it.
@@ -408,16 +417,17 @@ From the second design pass ([../design/mockups/](../design/mockups/README.md), 
 | `approve_post` | Must | `post_id`, `next?: "ask" \| "publish_now" \| "schedule"`, `when?: datetime` | Same handler as the `[Aprobar]` button. `next = "ask"` (default) sends `publish_when`; `"publish_now"` approves and enqueues `publish_post(now)` in one step ("subilo"); `"schedule"` (Should) approves and schedules at `when`. Until T18 and T30, T57 registers only `publish_now` | `{status, job_id?}` |
 | `publish_post` | Must (`now`), Should (datetime) | `post_id`, `when: "now" \| ISO datetime` | Guard: status must be `approved`; enqueue `publish_post` | `{job_id}` or error |
 | `discard_post` | Must | `post_id` | Status → `discarded` | `{status}` |
-| `list_posts` | Must | `statuses?: list[str]`, `limit?: int` | Query posts ("¿cuándo sale lo de la mesa ratona?") | `[{id, title, status, scheduled_for, permalink}]` |
-| `get_brand_summary` | Must | — | Read latest Brand Brain (+ active Offers, Could) | `{whatsapp_summary, pillars, featured_products, offers, constraints}` |
+| `list_posts` | Must | — (built without filters) | The Owner's posts and their status ("¿ya se subió?") | `{posts: [{post_id, status, format, style, sent_at, caption_start, permalink}]}` |
+| `get_brand_summary` | Must | — | Not needed: the Brand Brain and its summary ride in the system prompt ([ADR 0028](../decisions/0028-orchestrator-memory-and-context.md)) | — |
+| `remember` / `forget` | Must (built) | `note: str` / `note_id: str` | Keep or archive a standing preference or fact in `owner_notes`; the orchestrator and the post writer read them ([ADR 0028](../decisions/0028-orchestrator-memory-and-context.md)) | `{saved: id}` / `{forgotten: true}` |
 | `cancel_pending` | Must | — | Clear `conversation_state.awaiting` | `{ok}` |
-| `revise_post` | Should | `post_id`, `feedback` | Enqueue `revise_post` | `{job_id}` |
+| `revise_post` | Should (built) | `post_id`, `change`, `part: "caption" \| "images"` | Remake a sent post from its previous version, changing only what was asked; `caption` keeps the images and generates nothing ([ADR 0028](../decisions/0028-orchestrator-memory-and-context.md)) | `{post_id, status: "generating"}` |
 | `plan_week` | Should | `notes?: str`, `week_start?: date` | Enqueue `generate_plan`, only when the Owner asks for a plan | `{job_id, status: "started"}` |
-| `suggest_ideas` | Should | `request: str` | Content Strategist ideas mode (synchronous); stores the 3 ideas in `conversation_state.ideas` so "la 2" or "la del taller" can be resolved | `{ideas: [{n, title, idea, suggested_asset_ids}]}` |
+| `suggest_ideas` | Should | `request: str` | Not built: the orchestrator writes ideas from the pillars and trend notes in its prompt. Planned: Content Strategist ideas mode (synchronous); stores the 3 ideas in `conversation_state.ideas` so "la 2" or "la del taller" can be resolved | `{ideas: [{n, title, idea, suggested_asset_ids}]}` |
 | `niche_report` | Should | — | Return the latest Niche Report, or enqueue `generate_niche_report` when there is none from this week ([ADR 0025](../decisions/0025-weekly-niche-report.md)) | `{summary, insights}` or `{job_id, status: "started"}` |
 | `send_dashboard_link` | Should | — | Create a `dashboard` magic link (7 days) and send it as a CTA URL button ("Abrí tu panel") | `{sent: true}` |
 | `revise_plan` | Could | `plan_id`, `feedback` | Enqueue `generate_plan` (revise mode) | `{job_id}` |
-| `update_brand_brain` | Could | `change: str` | Enqueue `generate_brand` revise mode (silent: no summary message unless asked) | `{job_id}` |
+| `update_brand` | Must (built) | `change: str` | Enqueue `generate_brand` revise mode; the new summary goes to the Owner to confirm. Also takes the correction after [Corregir algo] ([ADR 0028](../decisions/0028-orchestrator-memory-and-context.md)) | `{status: "revising"}` |
 | `propose_palettes` | Could | `asset_id` | Palette proposals from one photo (F2.9, see [Brand Strategist](#brand-strategist)); the bot shows them as numbered swatches | `{palettes: [{name, colors}]}` |
 | `save_brand_colors` | Could | `colors: list[str]`, `confirmed: bool` | Save owner-confirmed colors and create a new Brand Brain version (same confirm rule as `save_product`) | `{saved}` |
 | `list_catalog` | Could | `query?: str` | Search active Products by name/category | `[{id, name, price, category}]` |

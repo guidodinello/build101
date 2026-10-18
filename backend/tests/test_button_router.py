@@ -170,7 +170,7 @@ async def test_change_tells_the_model_which_post_to_remake(rig: Rig) -> None:
     event = await rig.tap("post_change:p1")
 
     assert event == PostChangeAsked("p1")
-    assert "replaces=p1" in event.note()
+    assert "revise_post with post_id=p1" in event.note()
 
 
 async def test_photo_post_makes_a_post_from_the_photos_as_they_are(rig: Rig) -> None:

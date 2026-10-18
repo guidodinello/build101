@@ -2,6 +2,7 @@ import asyncio
 import json
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -16,7 +17,6 @@ from app.conversation.events import (
     AudioUnclear,
     BrandConfirmed,
     BrandFixAsked,
-    BrandRevising,
     Event,
     JobRetried,
     PhotosReceived,
@@ -116,6 +116,7 @@ def build(
     max_posts_per_day: int = 5,
     keep_alive_s: float = 60.0,
     library: FakeLibrary | None = None,
+    **options: Any,
 ) -> tuple[ChatHandler, PostMaker]:
     model.drafts.setdefault(PostCopy, DRAFT)
     model.drafts.setdefault(CarouselDraft, carousel_draft(1))
@@ -150,6 +151,7 @@ def build(
         max_photo_mb=MAX_PHOTO_MB,
         photo_debounce_s=DEBOUNCE_S,
         keep_alive_s=keep_alive_s,
+        **options,
     )
     posts.on_event(chat.notify)
     publishing.on_event(chat.notify)
@@ -205,7 +207,7 @@ async def test_the_context_block_is_sent_but_not_stored() -> None:
 
     stored_user, *_, current_user = model.calls[1]
     assert len(stored_user["content"]) == 1
-    assert current_user["content"][1]["text"] == "<recent_photos>\nnone\n</recent_photos>"
+    assert current_user["content"][1]["text"].endswith("<recent_photos>\nnone\n</recent_photos>")
 
 
 async def test_a_slow_reply_sends_one_holding_message_and_typing_again() -> None:
@@ -302,7 +304,7 @@ async def test_photos_without_text_attach_the_images_but_store_only_the_note() -
     assert step_text(current) == "[photos f1 f2 received, no text]"
     assert "Attached below, in this order: f1, f2" in current["content"][1]["text"]
     assert [part["type"] for part in current["content"][2:]] == ["image"] * 2
-    stored = chat._history.get(SENDER)[0]
+    stored = (await chat._history.get(SENDER))[0]
     assert len(stored["content"]) == 1
     assert all(photo.seen for photo in chat._photos.recent(SENDER))
 
@@ -578,16 +580,6 @@ async def test_messages_from_one_sender_are_answered_in_order() -> None:
     assert len(model.calls[1]) == 4
 
 
-def test_history_is_trimmed_to_start_with_a_user_turn() -> None:
-    history = InMemoryHistory(max_steps=3)
-    user: Step = {"type": "user_input"}
-    model_step: Step = {"type": "model_output"}
-
-    history.extend(SENDER, [user, model_step, user, model_step])
-
-    assert history.get(SENDER) == [user, model_step]
-
-
 def test_chat_handler_needs_a_gemini_key_and_a_public_url() -> None:
     with pytest.raises(ValueError, match="GEMINI_API_KEY"):
         build_inbound_handler(
@@ -650,7 +642,7 @@ async def test_the_model_answers_the_sent_note_with_its_own_words(
     assert len(model.calls) == 3
     assert step_text(model.calls[2][-1]).startswith(f"[post {POST_ID} sent to the Owner]")
     assert channel.sent[-1] == (SENDER, FOLLOW_UP)
-    assert [step_text(step) for step in chat._history.get(SENDER)][-1:] == [""]  # the reply
+    assert [step_text(step) for step in (await chat._history.get(SENDER))][-1:] == [""]  # the reply
     assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
 
 
@@ -699,10 +691,10 @@ async def test_the_follow_up_waits_for_an_owner_turn_in_progress(
         await asyncio.sleep(0.05)
         assert len(model.calls) == 2
         assert channel.sent == [(SENDER, "Dale ⏳")]
-        chat._history.extend(SENDER, [user_step("gracias")])
+        await chat._history.extend(SENDER, [user_step("gracias")])
     await posts.join()
 
-    texts = [step_text(step) for step in chat._history.get(SENDER)]
+    texts = [step_text(step) for step in (await chat._history.get(SENDER))]
     assert texts.index("gracias") < texts.index(next(t for t in texts if t.startswith("[post ")))
     assert channel.sent[-1] == (SENDER, FOLLOW_UP)
 
@@ -724,7 +716,7 @@ async def test_a_post_approved_before_the_follow_up_gets_no_question(
 
     assert len(model.calls) == 2
     assert channel.sent == [(SENDER, "Dale ⏳")]
-    texts = [step_text(step) for step in chat._history.get(SENDER)]
+    texts = [step_text(step) for step in (await chat._history.get(SENDER))]
     assert any(text.startswith(f"[post {POST_ID} sent") for text in texts)
 
 
@@ -742,7 +734,7 @@ async def test_a_failing_follow_up_sends_only_the_buttons_and_keeps_the_post(
     assert channel.sent == [(SENDER, "Dale ⏳"), (SENDER, messages_es.post_actions())]
     assert len(channel.images) == 1
     assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
-    texts = [step_text(step) for step in chat._history.get(SENDER)]
+    texts = [step_text(step) for step in (await chat._history.get(SENDER))]
     assert any(text.startswith(f"[post {POST_ID} sent") for text in texts)
 
 
@@ -764,7 +756,6 @@ SENT = PostSent(POST_ID, 1, "photos", ("f1",), (), "Texto")
 BUTTON_EVENTS: list[Event] = [
     BrandConfirmed(),
     BrandFixAsked(),
-    BrandRevising("somos más formales"),
     JobRetried("generate_brand"),
     PostApproved(POST_ID),
     PostChangeAsked(POST_ID),
@@ -806,7 +797,7 @@ async def test_every_event_is_one_model_turn_that_cannot_approve(event: Event) -
     assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
     assert chat._store.listed(SENDER) == ["other"]
     assert channel.sent[0][1].startswith("Ok")
-    history = chat._history.get(SENDER)
+    history = (await chat._history.get(SENDER))
     assert step_text(history[0]) == event.note()
     assert history[-1]["type"] == "model_output"
 
@@ -872,7 +863,6 @@ FALLBACKS = [
     (StaleButton(), messages_es.STALE_BUTTON),
     (BrandConfirmed(), messages_es.READY_OPEN_CHAT),
     (BrandFixAsked(), messages_es.BRAND_FIX_PROMPT),
-    (BrandRevising("x"), messages_es.REVISING),
     (JobRetried("generate_brand"), messages_es.RETRYING),
     (PostApproved(POST_ID), messages_es.PUBLISH_NOW_ASK),
     (PostChangeAsked(POST_ID), messages_es.POST_CHANGE_PROMPT),
@@ -896,7 +886,7 @@ async def test_when_the_model_is_down_each_event_sends_its_fixed_text(
 
     assert channel.sent == [(SENDER, expected)]
     # The next turn knows what the Owner was told.
-    [note] = chat._history.get(SENDER)
+    [note] = (await chat._history.get(SENDER))
     assert f'{event.note()}\nThe Owner was told: "{expected}"' == step_text(note)
 
 
@@ -924,7 +914,7 @@ async def test_a_sent_post_event_with_the_model_down_still_sends_its_buttons() -
             [f"post_approve:{POST_ID}", f"post_change:{POST_ID}", f"post_discard:{POST_ID}"],
         )
     ]
-    assert [step_text(step) for step in chat._history.get(SENDER)] == [
+    assert [step_text(step) for step in (await chat._history.get(SENDER))] == [
         f'{SENT.note()}\nThe Owner was told: "{body}"'
     ]
 

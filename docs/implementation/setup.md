@@ -119,7 +119,7 @@ uv run pytest                   # unit tests (no network); the onboarding API te
 docker run -d --name build101-pg -p 54329:5432 -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=build101_test postgres:17-alpine
 TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:54329/build101_test uv run pytest
-uv run pytest -m live           # hits Gemini (text, images, transcription) and Kapso; needs GEMINI_API_KEY
+uv run pytest -m live           # hits Gemini (text, images, transcription, conversation evals) and Kapso; needs GEMINI_API_KEY
 uv run ruff check . && uv run ruff format --check .
 
 cd frontend

@@ -156,7 +156,7 @@ async def test_the_outcome_message_waits_for_the_turn_that_started_the_publish()
     assert rig.said == [STARTED.text, f"{LIVE.text}\n{PERMALINK}"]
     texts = [
         step["content"][0]["text"]
-        for step in rig.history.get(SENDER)
+        for step in await rig.history.get(SENDER)
         if "content" in step and step["type"] == "user_input"
     ]
     note = next(i for i, text in enumerate(texts) if text.startswith("[post p1 published]"))
@@ -485,7 +485,7 @@ async def test_when_the_model_is_down_the_owner_still_hears_how_it_ended(
     assert rig.said == [STARTED.text, fallback]
     texts = [
         step["content"][0]["text"]
-        for step in rig.history.get(SENDER)
+        for step in await rig.history.get(SENDER)
         if step["type"] == "user_input"
     ]
     assert f'The Owner was told: "{fallback}"' in texts[-1]

@@ -1,3 +1,4 @@
+import uuid
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -22,6 +23,8 @@ class Photo:
     received_at: datetime
     used: bool = False
     seen: bool = False  # sent to the orchestrator as an image at least once
+    description: str | None = None  # the Asset Analyst's, once it has looked at the photo
+    asset_id: uuid.UUID | None = None  # the Brand asset it is stored as, when it is one
 
 
 @dataclass(slots=True)

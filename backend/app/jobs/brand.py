@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.brand_strategist import BrandInputs, write_brand_brain
 from app.agents.schemas import BrandBrain
 from app.channels.base import Button, ChannelPort
+from app.conversation.history import record_note
 from app.copy import messages_es
 from app.db.models import BrandAsset, BrandBrainVersion, Business, Job, Product
 
@@ -21,6 +22,10 @@ logger = logging.getLogger(__name__)
 ANALYSES_WAIT_S = 60.0
 ANALYSES_POLL_S = 2.0
 WHATSAPP_BODY_MAX = 1024
+BRAND_SUMMARY_NOTE = (
+    "[brand summary sent] The Owner got the summary of their brand (<brand_summary_sent>) with "
+    "the buttons Sí, es mi marca and Corregir algo."
+)
 
 
 async def generate_brand(context: JobContext, payload: dict[str, Any]) -> dict[str, Any]:
@@ -67,6 +72,7 @@ async def generate_brand(context: JobContext, payload: dict[str, Any]) -> dict[s
 
     if channel_kind == "whatsapp":
         await send_brand_summary(context.channel, owner_phone, name or brain.business_name, brain)
+        await record_note(context.sessions, business_id, BRAND_SUMMARY_NOTE)
     return {"version": version}
 
 
