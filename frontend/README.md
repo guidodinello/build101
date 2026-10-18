@@ -1,6 +1,6 @@
 # Frontend
 
-Next.js app: the onboarding wizard opened from WhatsApp (`/o/[token]`), the read-only dashboard (`/b/[token]`) and the WhatsApp simulator used for development and as the demo fallback (`/dev/chat`).
+Next.js app: the Neitor AI landing page (`/`), the onboarding wizard opened from WhatsApp (`/o/[token]`), the read-only dashboard (`/b/[token]`) and the WhatsApp simulator used for development and as the demo fallback (`/dev/chat`).
 
 - Design: [docs/design/web-app.md](../docs/design/web-app.md)
 - API contract: [docs/architecture/api.md](../docs/architecture/api.md)
@@ -20,6 +20,7 @@ Until the backend serves the onboarding endpoints (T24), set `ENABLE_MOCK_API=tr
 
 ## Layout
 
+- `app/page.tsx` + `components/landing/`: the English landing page, built as one WhatsApp-style thread with Neitor (design: [canvas](https://claude.ai/artifact/4ghMvD3UL9q5x3E4P1Fbai), Option A). Server components except `approval-demo.tsx`, the hero's working Approve / Change buttons. Its colors are the `ld-*` tokens in `app/globals.css`; every CTA opens `NEXT_PUBLIC_WHATSAPP_URL` with "Hi Neitor" typed in (`lib/whatsapp.ts`).
 - `app/o/[token]/`: the onboarding wizard route (loads `OnboardingState` on the server, `?step=` picks the screen).
 - `components/onboarding/`: wizard shell, one file per step under `steps/`, the photo upload queue.
 - `lib/api.ts`: REST client and types, written by hand from `api.md`. `lib/upload.ts`: signed-URL uploads.
