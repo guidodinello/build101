@@ -16,6 +16,12 @@ async def test_publish_returns_a_fake_permalink() -> None:
     assert result.external_post_id.startswith("mock-")
 
 
+async def test_publish_accepts_and_ignores_an_idempotency_key() -> None:
+    result = await MockPublisher(delay_s=0).publish("acc", "hola", IMAGE, idempotency_key="post-7")
+
+    assert result.status == "published"
+
+
 async def test_each_publish_gets_its_own_id() -> None:
     publisher = MockPublisher(delay_s=0)
 
