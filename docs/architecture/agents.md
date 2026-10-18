@@ -14,7 +14,7 @@ The "agency" is one **orchestrator** (the account manager the owner talks to) pl
 | **Content Strategist** | Single call, structured | `generate_plan` job; `suggest_ideas` tool | Brand Brain + Catalog + active Offers + assets + recent posts + date + notes + trend notes → weekly plan (images and Reels), or 3 ideas | `medium` |
 | **Copywriter** | Single call, structured | `generate_post` job | Brand Brain + brief + the Owner's own words + trend notes (+ feedback, previous version) → copy; for a carousel: + slide count → caption + the text of each slide | `medium` |
 | **Art Director** | Single call, vision, structured | `generate_post` job | Brand Brain + brief + copy + candidate photos (the ones the Owner sent with the request, if any) + trend notes → image brief (reference photos + image prompt); for a Reel: candidate videos (keyframes) → video + cover frame; for a carousel: → reference photos + shared style + one scene per slide | `medium` |
-| **Niche Analyst** | Single call, grounded search, structured | `generate_niche_report` job; `niche_report` tool | Business category + location + Brand Brain + niche search themes → Niche Report with source links ([ADR 0025](../decisions/0025-weekly-niche-report.md)) | `medium` |
+| **Niche Analyst** (Claude) | Single call, web search + web fetch, structured | `generate_niche_report` job; `niche_report` tool | Business category + location + Brand Brain + reference websites + niche search themes → Niche Report with source links ([ADR 0025](../decisions/0025-weekly-niche-report.md)) | `medium` |
 | **Feedback Classifier** | Single call, structured | `revise_post` job | Feedback text → `copy` / `image` / `both` (Reel: `copy` / `cover` / `video`) + normalized instruction | `low` |
 | **Text Checker** | Single call, vision, structured | `CarouselGenerator` (carousel slides) | Slide image + expected `SlideCopy` → `TextCheck` | `low` |
 
@@ -288,8 +288,9 @@ Prompts are written in English (instructions) and require output content in Riop
 
 **Purpose:** tell the Agency what is working in the Business's niche this week (Should, F3.6, [ADR 0025](../decisions/0025-weekly-niche-report.md)). Sources compared in [research/niche-trend-sources.md](../research/niche-trend-sources.md); first niche: [research/furniture-decor-uruguay.md](../research/furniture-decor-uruguay.md).
 
-- Input: `businesses.category`, `location`, the Brand Brain (products, audience, pillars), the niche's search themes (a static list per niche in `app/agents/data/`), today's date.
-- Call: one Gemini call with the Google Search tool (grounding), through `app/llm/client.py`; the source links come from the response's grounding metadata, not from the model's text.
+- The only agent on **Claude**; every other agent runs on Gemini ([ADR 0023](../decisions/0023-gemini-text-llm.md)). It writes the analysis; the Gemini agents use it.
+- Input: `businesses.category`, `location`, the Brand Brain (products, audience, pillars), the niche's reference websites and search themes (a static list per niche in `app/agents/data/`), reference websites the Owner named, today's date.
+- Call: one Claude request (`claude-opus-5-5`, effort `medium`, Anthropic Python SDK) with the `web_search_20260209` and `web_fetch_20260209` server tools (capped with `max_uses` and `max_content_tokens`) and structured output, through its own adapter in `app/llm/`. Web fetch only opens URLs already in the conversation, so the reference websites go in the prompt. Source links come from the search and fetch result blocks, not from the model's text.
 - Output (`NicheReport`):
 
   ```python
@@ -297,7 +298,7 @@ Prompts are written in English (instructions) and require output content in Riop
       kind: Literal["theme", "format", "hook", "visual"]
       insight: str                 # Spanish, one or two sentences
       post_idea: str | None        # how this Business could use it
-      source_urls: list[str]       # at least one, from the grounding metadata
+      source_urls: list[str]       # at least one, from the web search / fetch results
 
   class NicheReport(BaseModel):
       week_start: date
@@ -305,8 +306,8 @@ Prompts are written in English (instructions) and require output content in Riop
       insights: list[NicheInsight] # 3–8
   ```
 
-- Rules: describe what works, never copy a reference post's image or caption; no prices, discounts or dates in `post_idea` (commercial dates come from the Content Strategist's static list); drop an insight with no source.
-- Downstream: the latest report's insights are the **trend notes** of the Content Strategist, Copywriter and Art Director. Trend notes change angle, format and styling, never facts.
+- Rules: describe what works, never copy a reference store's photos, product names or copy; no prices, discounts or dates in `post_idea` (commercial dates come from the Content Strategist's static list); drop an insight with no source.
+- Downstream: the latest report's insights are the **trend notes** of the Gemini agents: Content Strategist, Copywriter and Art Director (`visual` insights shape the Art Director's image and carousel prompts). Trend notes change angle, format and styling, never facts.
 
 ### Feedback Classifier
 
