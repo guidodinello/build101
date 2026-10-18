@@ -7,7 +7,9 @@ from app.agents.schemas import BrandBrain
 from app.carousel.schemas import SlideRole, TemplateFamily
 from app.media.images import Tone
 
-HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+HEX_COLOR = re.compile(r"#[0-9a-fA-F]{6}")
+# The renderer rejects a longer brand name (frontend/lib/post-render/spec.ts)
+MAX_BRAND_NAME = 80
 
 
 class BrandColors(BaseModel):
@@ -66,5 +68,8 @@ def render_brand(brand: BrandBrain | None) -> RenderBrand:
         "background": identity.background_color,
         "text": identity.text_color,
     }
-    colors = BrandColors(**{key: value for key, value in given.items() if HEX_COLOR.match(value)})
-    return RenderBrand(name=brand.business_name or None, colors=colors)
+    colors = BrandColors(
+        **{key: value for key, value in given.items() if HEX_COLOR.fullmatch(value)}
+    )
+    name = brand.business_name.strip()[:MAX_BRAND_NAME].rstrip()
+    return RenderBrand(name=name or None, colors=colors)

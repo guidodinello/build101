@@ -8,7 +8,13 @@ from app.carousel.generator import GeneratedSlide
 from app.carousel.schemas import CarouselBrief, CarouselCopy
 from app.config import Settings
 from app.media.images import image_mime
-from app.rendering.base import BrandColors, RendererError, SlideRender, render_brand
+from app.rendering.base import (
+    MAX_BRAND_NAME,
+    BrandColors,
+    RendererError,
+    SlideRender,
+    render_brand,
+)
 from app.rendering.factory import build_renderer
 from app.rendering.mock import MockRenderer
 from app.rendering.slides import render_slides
@@ -87,6 +93,16 @@ def test_brand_tokens_take_the_brand_brain_and_keep_defaults_for_bad_colors() ->
     assert tokens.name == "Katei"
     assert tokens.colors.primary == "#111111"
     assert tokens.colors.accent == BrandColors().accent
+
+
+def test_brand_tokens_drop_a_color_with_a_trailing_newline_and_cut_a_long_name() -> None:
+    brand = brand_brain(business_name="Muebles " * 20)
+    brand.visual_identity.primary_color = "#C8833B\n"
+
+    tokens = render_brand(brand)
+
+    assert tokens.colors.primary == BrandColors().primary
+    assert tokens.name is not None and len(tokens.name) <= MAX_BRAND_NAME
 
 
 def scenes(count: int) -> list[GeneratedSlide]:
