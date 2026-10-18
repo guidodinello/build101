@@ -19,7 +19,7 @@ def _compose(path: Path, including: tuple[Path, ...]) -> str:
         chain = " -> ".join(p.name for p in (*including, path))
         raise ValueError(f"include cycle: {chain}")
     lines: list[str] = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         match = INCLUDE.match(line.strip())
         if match:
             target = (path.parent / match["path"].strip()).resolve()
