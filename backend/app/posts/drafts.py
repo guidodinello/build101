@@ -16,6 +16,7 @@ from app.llm.client import ChatModel, Content, image_content, text_content
 logger = logging.getLogger(__name__)
 
 AGENT = "post_drafter"
+MAX_HASHTAGS = 5
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "draft.md").read_text()
 
 
@@ -54,9 +55,10 @@ class PostDrafter:
             f"Write the caption for a post of {len(photos)} photo(s), posted as they are, "
             f"without a design.\n\nBrief: {brief}"
         )
-        return await self._model.structured(
+        copy = await self._model.structured(
             AGENT, SYSTEM_PROMPT, request_content(request, photos), PostCopy, "medium"
         )
+        return copy.model_copy(update={"hashtags": clean_hashtags(copy.hashtags)})
 
     async def design(
         self, brief: str, photos: list[bytes], photo_ids: list[str], slide_count: int
@@ -75,7 +77,7 @@ class PostDrafter:
         slides = fit_slides(draft.slides, slide_count)
         copy = CarouselCopy(
             caption=draft.caption,
-            hashtags=draft.hashtags,
+            hashtags=clean_hashtags(draft.hashtags),
             slides=[
                 SlideCopy(role=slide.role, headline=slide.headline, body=slide.body or None)
                 for slide in slides
@@ -95,6 +97,16 @@ class PostDrafter:
 
 def request_content(request: str, photos: list[bytes]) -> list[Content]:
     return [text_content(request), *(image_content(photo, "image/jpeg") for photo in photos)]
+
+
+def clean_hashtags(hashtags: list[str]) -> list[str]:
+    """Instagram allows 5 hashtags a post: add the `#`, drop spaces and duplicates, keep 5."""
+    seen: dict[str, str] = {}
+    for raw in hashtags:
+        tag = "#" + "".join(raw.split()).lstrip("#")
+        if len(tag) > 1:
+            seen.setdefault(tag.lower(), tag)
+    return list(seen.values())[:MAX_HASHTAGS]
 
 
 def fit_slides(slides: list[SlideDraft], count: int) -> list[SlideDraft]:

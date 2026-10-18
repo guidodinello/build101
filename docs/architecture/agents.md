@@ -90,7 +90,7 @@ class BrandBrain(BaseModel):
     pillars: list[ContentPillar]      # 3–5
     featured_products: list[FeaturedProduct]   # ≤ 5, chosen from the Catalog; the full Catalog lives in `products`
     ctas: list[str]                   # "Escribinos por WhatsApp", "Visitá el showroom"
-    hashtags: list[str]               # 10–20, mix of niche + local
+    hashtags: list[str]               # a pool of 10–20, mix of niche + local; a post uses at most 5 of them
     posting: PostingPrefs             # posts_per_week, preferred_days, preferred_time ("19:00")
     constraints: list[str]            # hard "never" rules from the owner
     visual_identity: VisualIdentity   # Owner colors win; neutral palette when they have none
@@ -219,7 +219,7 @@ A prompt can be composed from several files: a line that is only `{{include <pat
       title: str                       # internal title, ≤ 40 chars
       caption: str                     # 150–900 chars, Instagram-ready, line breaks allowed
       cta: str                         # included at the end of the caption too
-      hashtags: list[str]              # 5–10, without '#' duplicates, lowercase, no spaces
+      hashtags: list[str]              # 3–5 (Instagram's cap), '#' added, no duplicates, no spaces; the code keeps the first 5
   ```
 
 - Rules: voice from the Brand Brain; first line must hook (≤ 80 chars); no invented facts (prices, discounts, dates only if in a referenced Product or Offer, or in an ad-hoc brief from the Owner); respect emoji policy; Rioplatense *vos*; never mention AI. Keep the angle and the concrete details the Owner asked for in `owner_words` ("que se luzca la madera", "que se note que es a medida", "sin nombrar al cliente"); the caption's voice still comes from the Brand Brain, not from how the Owner writes in the chat. In revise mode, apply the feedback literally and change as little else as possible.
@@ -481,7 +481,7 @@ Posts from an approved plan are generated **sequentially** in plan order, so pre
 
 Run after every agent call, before saving:
 
-- Caption length 150–900 chars for images, 80–400 for Reels; hashtags 5–10, no duplicates.
+- Caption length 150–900 chars for images, 80–400 for Reels; hashtags 3–5 (code-enforced cap of 5), no duplicates.
 - Carousels: 3–10 slides (the Owner's number when given), `slides[0].role == "cover"`, headline ≤ 6 words, body ≤ 20 words; the price/discount rule below applies to slide text too.
 - No phrase from `constraints` appears in the caption (case-insensitive substring).
 - No price/discount numbers in copy unless they appear in a referenced Product or active Offer, or in the Owner's own ad-hoc brief (regex for `%`, `$`, `USD`, `UYU`).

@@ -71,7 +71,7 @@ Deeper comparison of data sources for a weekly niche analysis: [niche-trend-sour
 
 ## Implications for build101
 
-- **Copywriter hashtags**: the Copy contract asks for "10–20, mix of niche + local" ([agents.md](../architecture/agents.md)); Instagram now caps posts at 5 and hashtags correlate with lower reach. Should drop to ≤ 5 plus a keyword-rich first line. Open question below.
+- **Copywriter hashtags**: the Copy contract asks for "10–20, mix of niche + local" ([agents.md](../architecture/agents.md)); Instagram now caps posts at 5 and hashtags correlate with lower reach. Done (2026-10-18): the post drafter writes 3–5 and caps at 5 in code, with a keyword-rich first line.
 - **Copywriter CTAs**: prefer "comment / save / send to someone" over "like"; end with a question when it fits.
 - **Content Strategist mix**: Reels for reach, carousels for saves; carousels are in the MVP since [ADR 0022](../decisions/0022-carousels-in-mvp.md).
 - **Originality rule favors our approach**: the Owner's own photos and videos ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)) count as original; stock or reposted images would risk recommendations.
@@ -80,5 +80,4 @@ Deeper comparison of data sources for a weekly niche analysis: [niche-trend-sour
 
 ## Open questions
 
-- Adjust the Copywriter hashtag rule (10–20 → ≤ 5)? Tracked in [open-questions.md](../open-questions.md).
 - Buffer's original 2026 report not read; figures above are from secondary sources.
