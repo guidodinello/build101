@@ -4,7 +4,8 @@
 
 - [ ] **Product name and assistant name.** Needed for the welcome message, the wizard header and the pitch (`ASSISTANT_NAME`).
 - [ ] **Hackathon rules:** is pre-written code allowed? If not, only accounts, materials and these docs are prepared in advance (see [implementation/plan.md](implementation/plan.md#before-the-hackathon-checklist)).
-- [x] **Backend host:** Railway, Trial first and Hobby if needed ([ADR 0017](decisions/0017-backend-host-railway.md)). Tenki is only the PR reviewer.
+- [x] **Backend host:** Railway, Trial first and Hobby if needed ([ADR 0017](decisions/0017-backend-host-railway.md)). Tenki is only the PR reviewer. Deployed 2026-10-18 in `us-east4-eqdc4a` (Railway has no South America region, so each Supabase round trip crosses continents) on the full Trial.
+- [ ] **Kapso webhook and local dev:** when the Kapso webhook moves to Railway, inbound WhatsApp stops reaching a local backend, and the `simulator` channel is not built yet (T21). Decide the timing of the repoint and how local development keeps working (temporary repoint to a tunnel, a second webhook or number if Kapso allows it, or the simulator once T21 lands).
 - [ ] **Demo materials** from the furniture business (logo, photos, products, questionnaire answers, promo, permission to publish).
 
 ## Channel / platform risk

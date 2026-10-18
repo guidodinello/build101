@@ -1,7 +1,7 @@
 # 0017: Backend hosted on Railway
 
 - Date: 2026-10-17
-- Status: proposed
+- Status: accepted
 
 ## Context
 
@@ -31,3 +31,10 @@ Start on the **Trial**, with the account verified through GitHub (the Limited Tr
 - Deploys on every push to `main`; no infrastructure code to maintain.
 - The deploy must be verified in hour 1: `/health` over HTTPS and the WhatsApp webhook reaching the backend.
 - Moving to AWS or another container host later is cheap: the app is a plain Docker image configured by environment variables.
+
+## As built (2026-10-18, T03)
+
+- **Region: `us-east4-eqdc4a` (Virginia), one replica.** Railway has no South America region; the options are `us-west2`, `us-east4-eqdc4a`, `europe-west4-drams3a` and `asia-southeast1-eqsg3a` ([Railway docs](https://docs.railway.com/deployments/regions), read 2026-10-18). Virginia is the closest to Supabase `sa-east-1`, so every database round trip pays a cross-continent hop.
+- **Settings live in Railway, not in a config file.** Config as Code (`railway.json` / `railway.toml`) is deprecated: new services cannot opt into it and existing files stop being read on 2026-12-01 ([Railway docs](https://docs.railway.com/config-as-code), read 2026-10-18). The replacement, Infrastructure as Code (`.railway/railway.ts`), would add a Node dependency for one service, so the settings are applied with the Railway CLI or dashboard and recorded as a table in the [backend README](../../backend/README.md#deploy).
+- **Migrations run as the pre-deploy command** (`alembic upgrade head`); a failing migration stops the deploy.
+- **Plan:** the account is on the full Trial (verified through GitHub, no Limited Trial banner). The pre-deploy migration reached the Supabase session pooler from Railway, so outbound traffic works at least for the database; calls to Kapso, Gemini and Zernio from the container were not exercised in T03.
