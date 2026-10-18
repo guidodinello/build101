@@ -9,6 +9,19 @@ class Settings(BaseSettings):
 
     env: Literal["local", "prod"] = "local"
 
+    # ADR 0003. DATABASE_URL is Supabase's session pooler: postgresql+asyncpg://...
+    database_url: str | None = None
+    supabase_url: str | None = None
+    supabase_service_role_key: str | None = None
+
+    # The web wizard (T24): magic links point here, and the browser calls the API from these
+    frontend_url: str = "http://localhost:3000"
+    frontend_origins: str = "http://localhost:3000"
+    whatsapp_bot_number: str | None = None  # for wa.me links, digits only
+
+    enable_dev_endpoints: bool = False
+    dev_token: str | None = None
+
     image_gen: Literal["gemini", "openai", "mock"] = "mock"
     gemini_api_key: str | None = None
     gemini_image_model: str = "gemini-nano-banana-2.1"
@@ -38,6 +51,10 @@ class Settings(BaseSettings):
     zernio_base_url: str = "https://zernio.com/api/v1"
     zernio_profile_id: str | None = None
     zernio_account_id: str | None = None
+
+    @property
+    def whatsapp_url(self) -> str:
+        return f"https://wa.me/{self.whatsapp_bot_number or ''}"
 
 
 @lru_cache

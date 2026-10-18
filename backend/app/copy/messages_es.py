@@ -16,6 +16,7 @@ PHOTOS_KEPT = "¡Buenísimas! 📸 ¿Armo un post con estas fotos?"
 PHOTO_UNREADABLE = "No pude abrir la foto 🙈 ¿Me la mandás de nuevo?"
 PUBLISH_PENDING = "Instagram lo está procesando, en un ratito aparece en tu cuenta ⏳"
 PUBLISH_FAILED = "Uy, Instagram no me dejó publicarlo 🙈 ¿Probamos armándolo de nuevo?"
+BRAND_GENERATING = "¡Gracias! Estoy estudiando tu marca, en un minuto te cuento lo que entendí ⏳"
 
 
 def photo_too_big(max_mb: int) -> str:

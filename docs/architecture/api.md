@@ -53,7 +53,9 @@ All under `/api/o/{token}`. The token is the onboarding magic link. Must, except
 | POST | `/api/o/{token}/instagram/import` | `{}` | `202 {"job_id"}`: **Could (F2.8)**, only once a way to read the account's media exists ([integrations.md](integrations.md#reading-the-owners-existing-instagram-media-could)). Lists the recent media and creates `InstagramMedia` candidates |
 | GET | `/api/o/{token}/instagram/media` | — | **Could.** `{status: "importing" \| "done" \| "unavailable", done, total, items: InstagramMedia[]}` for the progress bar and the grid on step 6b |
 | PUT | `/api/o/{token}/instagram/media/selection` | `{excluded_ids: [str]}` | **Could.** The Owner unticks what we shouldn't use; the rest is downloaded as Brand assets (`source = 'instagram'`) by `import_instagram_media` |
-| POST | `/api/o/{token}/complete` | — | `202 {"status": "generating_brand"}`. Validates required fields (name, category, 1–5 products, 3–15 photos, logo optional but recommended), sets state, enqueues `generate_brand`, sends `brand_generating` on WhatsApp |
+| POST | `/api/o/{token}/complete` | — | `202 {"status": "generating_brand"}`. Validates required fields (name, category, 1–5 products, 3–15 photos, logo optional but recommended), sets state, enqueues `generate_brand`, sends `brand_generating` on WhatsApp. Calling it again after it succeeded returns `202` and does nothing |
+
+Link errors: an unknown token is `404 link_not_found`, an expired one `410 link_expired`, and every write after `/complete` succeeded is `409 onboarding_completed` (`GET` still works and shows `completed: true`). A body that doesn't validate is `422 invalid_request`; a Supabase Storage failure is `502 storage_unavailable`.
 
 ```ts
 type OnboardingState = {
@@ -110,10 +112,10 @@ The wizard (`/api/o/{token}`, Must, photos and logo only) and the dashboard (`/a
 | Method | Path | Body | Response |
 |---|---|---|---|
 | POST | `/api/{o\|b}/{token}/uploads` | `UploadRequest` | `UploadTicket`. Validates type and size, creates a `brand_assets` row with `status = 'uploading'`, returns a signed upload URL for `assets/{business_id}/{asset_id}.{ext}` |
-| POST | `/api/{o\|b}/{token}/assets/{asset_id}/complete` | — | `Asset`. Checks the object exists in Storage (else `409 upload_missing`), sets `status = 'ready'` and `size_bytes`, converts HEIC to JPEG (`pillow-heif`), runs logo palette extraction synchronously, enqueues `analyze_asset` for photos and videos |
+| POST | `/api/{o\|b}/{token}/assets/{asset_id}/complete` | — | `Asset`. Checks the object exists in Storage (else `409 upload_missing`), sets `status = 'ready'` and `size_bytes`, converts HEIC to JPEG (`pillow-heif`), writes the copy the agents read (`{asset_id}-llm.jpg`, ≤ 1536 px), runs logo palette extraction synchronously, enqueues `analyze_asset` for photos and videos. A file that isn't an image, or is over the limit once uploaded, is `422 unsupported_file` and the asset `failed` |
 
 1. `POST .../uploads` → `UploadTicket`.
-2. The browser uploads to `upload_url`: a single `PUT` when `resumable = false`, or TUS with `x-signature: upload_token` when `resumable = true` (files over 6 MB).
+2. The browser uploads to `upload_url`: a single `PUT` when `resumable = false`, or TUS with `x-signature: upload_token` when `resumable = true`. Photos and logos (≤ 10 MB) are always `resumable = false`; TUS is only for videos (Could).
 3. `POST .../assets/{asset_id}/complete`. A ticket never completed stays `uploading` and is ignored; a nightly cleanup can mark it `failed`.
 
 Accepted files:
@@ -157,6 +159,7 @@ Used by `/dev/chat` (the WhatsApp simulator) and for local testing. The simulato
 
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
+| POST | `/dev/onboarding-link` | `{phone: str, business_name?: str}` | `{business_id, token, url}`: the Business for that phone (created if new) and a new onboarding magic link. Stands in for the WhatsApp onboarding (T23) while testing the wizard |
 | POST | `/dev/sim/businesses` | `{phone?: str}` | `{business_id, phone}`: creates or resets a simulator business (`sim-<random>`) |
 | POST | `/dev/sim/{phone}/messages` | `{type: "text", text}` or `{type: "button_reply", button_id, title}` or `{type: "image" \| "video", url}` or `{type: "audio", transcript}` (a voice note with a provider transcript; empty to exercise the fallback) | `202` |
 | GET | `/dev/sim/{phone}/messages?after=<iso>` | — | `[SimMessage]` (both directions, ascending) |

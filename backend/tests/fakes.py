@@ -9,6 +9,7 @@ from app.channels.base import ChannelError
 from app.imagegen.base import GeneratedImage
 from app.llm.client import Content, FunctionCall, LLMError, Reply, Step, Tool
 from app.publishing.base import PublishMedia, PublishResult
+from app.storage import SignedUpload
 from tests.conftest import make_image
 
 
@@ -150,3 +151,33 @@ class FakePublisher:
         if isinstance(item, Exception):
             raise item
         return item
+
+
+@dataclass
+class FakeStorage:
+    """Supabase Storage in memory. `put` is what the browser does with the signed upload URL."""
+
+    objects: dict[str, bytes] = field(default_factory=dict)
+    content_types: dict[str, str] = field(default_factory=dict)
+
+    def put(self, bucket: str, path: str, data: bytes) -> None:
+        self.objects[f"{bucket}/{path}"] = data
+
+    async def create_signed_upload_url(self, bucket: str, path: str) -> SignedUpload:
+        return SignedUpload(url=f"https://storage.test/upload/{bucket}/{path}?token=t", token="t")
+
+    async def download(self, bucket: str, path: str) -> bytes | None:
+        return self.objects.get(f"{bucket}/{path}")
+
+    async def upload(self, bucket: str, path: str, data: bytes, content_type: str) -> None:
+        self.objects[f"{bucket}/{path}"] = data
+        self.content_types[f"{bucket}/{path}"] = content_type
+
+    async def create_signed_urls(
+        self, bucket: str, paths: list[str], expires_in_s: int
+    ) -> dict[str, str]:
+        return {
+            path: f"https://storage.test/sign/{bucket}/{path}"
+            for path in paths
+            if f"{bucket}/{path}" in self.objects
+        }

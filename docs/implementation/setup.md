@@ -6,7 +6,8 @@
 - Node.js 20+ and npm
 - Docker (to test the production image)
 - `ffmpeg` (includes `ffprobe`): only for the Could video work (video analysis, Reels); not needed for the Must scope
-- A tunnel for local WhatsApp testing: `cloudflared` or `ngrok` (optional; the simulator doesn't need it)
+- A tunnel for local WhatsApp testing: `cloudflared` or `ngrok` (optional; the simulator doesn't need it). `PUBLIC_BACKEND_URL` must be a `cloudflared` tunnel (or Railway), not free ngrok: see [Run locally](#run-locally)
+- Docker, or any local Postgres: for the onboarding API tests ([Tests and lint](#tests-and-lint))
 - Accounts and keys: see the checklist in [plan.md](plan.md#before-the-hackathon-checklist)
 
 ## Environment variables
@@ -32,7 +33,6 @@
 | `KAPSO_PHONE_NUMBER_ID` | `...` | The connected number we send from: the sandbox now, the free US number later |
 | `KAPSO_BASE_URL` | `https://api.kapso.ai/meta/whatsapp/v24.0` | Optional; this is the default |
 | `KAPSO_TEST_RECIPIENT`, `KAPSO_TEST_MEDIA_ID` | `...` | Only for `uv run pytest -m live`: a verified recipient phone, and a media id taken from an inbound message |
-| `WHATSAPP_BOT_NUMBER` | `15551234567` | For `wa.me` links |
 | `IMAGE_GEN` | `gemini` \| `openai` \| `mock` | Image service ([ADR 0019](../decisions/0019-image-provider-gemini.md)); `openai` is the fallback, `mock` the dev and stage fallback |
 | `GEMINI_API_KEY` | `...` | From a Google project with billing linked: unpaid use trains on the images |
 | `GEMINI_IMAGE_MODEL` | `gemini-nano-banana-2.1` | |
@@ -45,9 +45,10 @@
 | `PUBLISHER` | `zernio` \| `mock` | Default `mock`, so a missing env never posts for real. Demo fallback switch |
 | `ZERNIO_API_KEY` | `sk_...` | |
 | `ZERNIO_BASE_URL` | `https://zernio.com/api/v1` | Optional; this is the default |
-| `ZERNIO_PROFILE_ID`, `ZERNIO_ACCOUNT_ID` | `...` | The single demo Instagram account's Zernio profile and account ids. Temporary: they stand in for `social_accounts` until T02 exists ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). With `PUBLISHER=zernio`, publishing from the chat (T57) needs `ZERNIO_ACCOUNT_ID` and an HTTPS `PUBLIC_BACKEND_URL` (ngrok or Railway) that Zernio can fetch the post images from; without the account id the bot says publishing isn't connected |
+| `ZERNIO_PROFILE_ID`, `ZERNIO_ACCOUNT_ID` | `...` | The single demo Instagram account's Zernio profile and account ids. Temporary: they stand in for `social_accounts` until T02 exists ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). With `PUBLISHER=zernio`, publishing from the chat (T57) needs `ZERNIO_ACCOUNT_ID` and an HTTPS `PUBLIC_BACKEND_URL` (a `cloudflared` tunnel or Railway, not free ngrok) that Zernio can fetch the post images from; without the account id the bot says publishing isn't connected |
 | `ZERNIO_TEST_IMAGE_URL` | `https://raw.githubusercontent.com/guidodinello/build101/main/backend/tests/fixtures/zernio-live-test.jpg` | Only for `uv run pytest -m live`: a public HTTPS URL serving the fixture JPEG with no redirect. Before the PR merges, put the branch name in place of `main` (the branch is deleted after the squash merge). The live publish posts to the real demo Instagram: delete the post by hand |
 | `ZERNIO_WEBHOOK_SECRET` | random | |
+| `WHATSAPP_BOT_NUMBER` | `15551234567` | Digits only. The `wa.me` link on the wizard's last screen (`OnboardingState.whatsapp_url`) |
 | `ENABLE_DEV_ENDPOINTS` | `true` | `/dev/*` |
 | `DEV_TOKEN` | random | Header `X-Dev-Token` |
 | `MAX_CONCURRENT_JOBS` | `4` | |
@@ -79,7 +80,7 @@ Plan B only (Meta Cloud API direct, if Kapso fails its first-hour test; [integra
 
 - **Free** plan is enough for the Must scope ([ADR 0016](../decisions/0016-demo-scope-one-post.md)): the wizard and the chat only store photos and logos (≤ 10 MB each).
 - Only if the Could video work starts: switch to **Pro** (Free caps files at 50 MB, [research/media-uploads.md](../research/media-uploads.md#storage-supabase)) and set Storage settings → global file size limit **300 MB** (same as `MAX_VIDEO_MB`).
-- Buckets: `assets` (private; photos and logos, plus videos and derived frames later) and `renders` (public; the generated post images). The browser uploads straight to `assets` with signed upload URLs issued by the backend; files over 6 MB use resumable (TUS) uploads.
+- Buckets: `assets` (private; photos and logos, plus videos and derived frames later) and `renders` (public; the generated post images). The browser uploads straight to `assets` with signed upload URLs issued by the backend; photos and logos (≤ 10 MB) go in a single request, and only videos (Could) would need resumable (TUS) uploads. Create both buckets by hand in the dashboard (Storage → New bucket) before the first upload.
 
 ## Run locally
 
@@ -98,13 +99,26 @@ npm install
 npm run dev                     # http://localhost:3000/dev/chat
 ```
 
-Real WhatsApp against a local backend: `cloudflared tunnel --url http://localhost:8000` and point the Kapso webhook to `<tunnel>/webhooks/whatsapp` (remember to point it back to prod afterwards).
+Real WhatsApp against a local backend: `cloudflared tunnel --url http://localhost:8000` and point the Kapso webhook to `<tunnel>/webhooks/whatsapp` (remember to point it back to prod afterwards). Use the same `cloudflared` URL as `PUBLIC_BACKEND_URL`: free ngrok answers browser-like clients with an HTML warning page instead of the file, so Zernio gets HTML instead of the post image and Instagram rejects the post (`Failed to validate Instagram image: unrecognized file format`, seen 2026-10-18). ngrok is fine for the Kapso webhook alone.
+
+The onboarding wizard against the local backend: set `ENABLE_DEV_ENDPOINTS=true` and a `DEV_TOKEN`, point `NEXT_PUBLIC_API_URL` at `http://localhost:8000` (with `ENABLE_MOCK_API=false`), then ask for a link (it stands in for the WhatsApp onboarding, T23):
+
+```bash
+curl -s -X POST localhost:8000/dev/onboarding-link \
+  -H "X-Dev-Token: $DEV_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"phone": "59899123456", "business_name": "Muebles Ramírez"}'
+# {"business_id": "...", "token": "...", "url": "http://localhost:3000/o/<token>"}
+```
 
 ## Tests and lint
 
 ```bash
 cd backend
-uv run pytest                   # unit tests (no network)
+uv run pytest                   # unit tests (no network); the onboarding API tests skip without TEST_DATABASE_URL
+# the onboarding API tests need a Postgres they can wipe (CI runs one as a service)
+docker run -d --name build101-pg -p 54329:5432 -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=build101_test postgres:17-alpine
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:54329/build101_test uv run pytest
 uv run pytest -m live           # hits Gemini (text, images, transcription) and Kapso; needs GEMINI_API_KEY
 uv run ruff check . && uv run ruff format --check .
 

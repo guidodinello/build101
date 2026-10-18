@@ -1,0 +1,543 @@
+import os
+import re
+import uuid
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+import httpx
+import pytest
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.channels.router import get_channel
+from app.config import Settings, get_settings
+from app.copy import messages_es
+from app.db.models import BrandAsset, Business, Job, MagicLink
+from app.db.session import create_engine, get_session
+from app.main import app
+from app.storage import get_storage
+from tests.conftest import make_image
+from tests.fakes import FakeChannel, FakeStorage
+
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
+SCHEMA = Path(__file__).parents[1] / "migrations" / "versions" / "0001_initial.sql"
+DEV_TOKEN = "dev-secret"
+PHONE = "59899123456"
+
+pytestmark = pytest.mark.skipif(
+    not TEST_DATABASE_URL, reason="set TEST_DATABASE_URL to a Postgres the tests can wipe"
+)
+
+BUSINESS = {
+    "name": "Muebles Ramírez",
+    "category": "Muebles y deco",
+    "one_liner": "Restauramos muebles de roble",
+    "location": "Montevideo",
+    "instagram_handle": "@mueblesramirez",
+}
+PREFERENCES = {
+    "goal": "sales",
+    "audiences": ["Familias"],
+    "formality": 4,
+    "humor": 2,
+    "posts_per_week": 3,
+    "emoji_policy": "few",
+    "avoid": None,
+    "current_offer": "10% en mesas",
+}
+
+
+@pytest.fixture
+async def sessions() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    assert TEST_DATABASE_URL
+    engine = create_engine(TEST_DATABASE_URL)
+    async with engine.begin() as connection:
+        await connection.execute(text("drop schema public cascade"))
+        await connection.execute(text("create schema public"))
+        for statement in re.split(r";\s*$", SCHEMA.read_text(), flags=re.MULTILINE):
+            if statement.strip():
+                await connection.exec_driver_sql(statement)
+    yield async_sessionmaker(engine, expire_on_commit=False)
+    await engine.dispose()
+
+
+@pytest.fixture
+def storage() -> FakeStorage:
+    return FakeStorage()
+
+
+@pytest.fixture
+def channel() -> FakeChannel:
+    return FakeChannel()
+
+
+@pytest.fixture
+async def client(
+    sessions: async_sessionmaker[AsyncSession], storage: FakeStorage, channel: FakeChannel
+) -> AsyncIterator[httpx.AsyncClient]:
+    async def session() -> AsyncIterator[AsyncSession]:
+        async with sessions() as db:
+            yield db
+
+    settings = Settings(
+        enable_dev_endpoints=True,
+        dev_token=DEV_TOKEN,
+        frontend_url="https://app.test",
+        whatsapp_bot_number="59800000000",
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_session] = session
+    app.dependency_overrides[get_storage] = lambda: storage
+    app.dependency_overrides[get_channel] = lambda: channel
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+        yield http
+    app.dependency_overrides.clear()
+
+
+async def new_link(client: httpx.AsyncClient, **body: Any) -> str:
+    response = await client.post(
+        "/dev/onboarding-link",
+        json={"phone": PHONE, **body},
+        headers={"X-Dev-Token": DEV_TOKEN},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["token"]
+
+
+async def upload(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    token: str,
+    kind: str = "photo",
+    data: bytes | None = None,
+    content_type: str = "image/jpeg",
+) -> dict[str, Any]:
+    data = data if data is not None else make_image((1200, 900))
+    ticket = await client.post(
+        f"/api/o/{token}/uploads",
+        json={
+            "kind": kind,
+            "filename": "foto.jpg",
+            "content_type": content_type,
+            "size_bytes": len(data),
+        },
+    )
+    assert ticket.status_code == 200, ticket.text
+    asset_id = ticket.json()["asset_id"]
+    path = ticket.json()["upload_url"].split("/upload/assets/")[1].split("?")[0]
+    storage.put("assets", path, data)
+    completed = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+    assert completed.status_code == 200, completed.text
+    return completed.json()
+
+
+def error_code(response: httpx.Response) -> str:
+    return response.json()["error"]["code"]
+
+
+async def test_dev_link_needs_the_dev_token(client: httpx.AsyncClient) -> None:
+    response = await client.post(
+        "/dev/onboarding-link", json={"phone": PHONE}, headers={"X-Dev-Token": "wrong"}
+    )
+
+    assert response.status_code == 401
+
+
+async def test_dev_link_is_off_unless_enabled(client: httpx.AsyncClient) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(dev_token=DEV_TOKEN)
+
+    response = await client.post(
+        "/dev/onboarding-link", json={"phone": PHONE}, headers={"X-Dev-Token": DEV_TOKEN}
+    )
+
+    assert response.status_code == 404
+
+
+async def test_dev_link_reuses_the_business_of_a_phone(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    response = await client.post(
+        "/dev/onboarding-link",
+        json={"phone": "+598 99 123 456", "business_name": "Muebles Ramírez"},
+        headers={"X-Dev-Token": DEV_TOKEN},
+    )
+    await new_link(client)
+
+    assert response.json()["url"] == f"https://app.test/o/{response.json()['token']}"
+    async with sessions() as db:
+        businesses = (await db.scalars(select(Business))).all()
+        links = (await db.scalars(select(MagicLink))).all()
+    assert [(b.owner_phone, b.name, b.onboarding_state) for b in businesses] == [
+        (PHONE, "Muebles Ramírez", "awaiting_web_form")
+    ]
+    assert len(links) == 2
+    assert response.json()["token"] not in {link.token_hash for link in links}
+
+
+async def test_new_link_starts_with_an_empty_state(client: httpx.AsyncClient) -> None:
+    token = await new_link(client, business_name="Muebles Ramírez")
+
+    response = await client.get(f"/api/o/{token}")
+
+    assert response.status_code == 200
+    state = response.json()
+    assert state["business"]["name"] == "Muebles Ramírez"
+    assert state["products"] == []
+    assert state["assets"] == []
+    assert state["brand"] == {"three_words": [], "colors": []}
+    assert state["preferences"] is None
+    assert state["instagram"] == {"status": "not_connected", "handle": None}
+    assert state["completed"] is False
+    assert state["whatsapp_url"] == "https://wa.me/59800000000"
+
+
+async def test_unknown_link_is_404_with_the_error_shape(client: httpx.AsyncClient) -> None:
+    response = await client.get("/api/o/nope")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "link_not_found"
+    assert response.json()["error"]["message"]
+
+
+async def test_expired_link_is_410(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    async with sessions() as db:
+        link = await db.scalar(select(MagicLink))
+        assert link
+        link.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        await db.commit()
+
+    response = await client.get(f"/api/o/{token}")
+
+    assert response.status_code == 410
+    assert error_code(response) == "link_expired"
+
+
+async def test_business_is_saved(client: httpx.AsyncClient) -> None:
+    token = await new_link(client)
+
+    response = await client.put(f"/api/o/{token}/business", json=BUSINESS)
+
+    assert response.status_code == 200
+    assert response.json()["business"] == {
+        **BUSINESS,
+        "instagram_handle": "mueblesramirez",
+        "description": None,
+        "website": None,
+    }
+
+
+async def test_business_needs_its_required_fields(client: httpx.AsyncClient) -> None:
+    token = await new_link(client)
+
+    response = await client.put(f"/api/o/{token}/business", json={**BUSINESS, "name": "  "})
+
+    assert response.status_code == 422
+    assert error_code(response) == "invalid_request"
+
+
+async def test_products_are_upserted_in_order_and_left_out_ones_archived(
+    client: httpx.AsyncClient,
+) -> None:
+    token = await new_link(client)
+    first = await client.put(
+        f"/api/o/{token}/products",
+        json={
+            "products": [
+                {"name": "Mesa", "description": "De roble", "price": "$U 12.000"},
+                {"name": "Silla", "description": ""},
+            ]
+        },
+    )
+    mesa = first.json()["products"][0]
+
+    second = await client.put(
+        f"/api/o/{token}/products",
+        json={"products": [{"name": "Banco", "description": ""}, {**mesa, "name": "Mesa ratona"}]},
+    )
+
+    products = second.json()["products"]
+    assert [(p["name"], p["position"]) for p in products] == [("Banco", 0), ("Mesa ratona", 1)]
+    assert products[1]["id"] == mesa["id"]
+    assert products[1]["price"] == "$U 12.000"
+
+
+async def test_more_than_five_products_is_rejected(client: httpx.AsyncClient) -> None:
+    token = await new_link(client)
+    products = [{"name": f"Producto {n}", "description": ""} for n in range(6)]
+
+    response = await client.put(f"/api/o/{token}/products", json={"products": products})
+
+    assert response.status_code == 422
+    assert error_code(response) == "too_many_products"
+
+
+async def test_a_product_id_from_elsewhere_is_rejected(client: httpx.AsyncClient) -> None:
+    token = await new_link(client)
+
+    response = await client.put(
+        f"/api/o/{token}/products",
+        json={"products": [{"id": str(uuid.uuid4()), "name": "Mesa", "description": ""}]},
+    )
+
+    assert response.status_code == 422
+    assert error_code(response) == "unknown_product"
+
+
+async def test_brand_needs_colors_unless_there_is_no_brand_yet(client: httpx.AsyncClient) -> None:
+    token = await new_link(client)
+    words = ["cálido", "artesanal", "honesto"]
+
+    missing = await client.put(f"/api/o/{token}/brand", json={"three_words": words, "colors": []})
+    no_brand = await client.put(
+        f"/api/o/{token}/brand",
+        json={"three_words": words, "colors": ["#FFFFFF"], "no_brand_yet": True},
+    )
+    with_colors = await client.put(
+        f"/api/o/{token}/brand", json={"three_words": words, "colors": ["#2F3E2C"]}
+    )
+
+    assert error_code(missing) == "missing_colors"
+    assert no_brand.json()["brand"] == {"three_words": words, "colors": []}
+    assert with_colors.json()["brand"] == {"three_words": words, "colors": ["#2f3e2c"]}
+
+
+async def test_preferences_round_trip(client: httpx.AsyncClient) -> None:
+    token = await new_link(client)
+
+    await client.put(f"/api/o/{token}/preferences", json=PREFERENCES)
+    response = await client.get(f"/api/o/{token}")
+
+    assert response.json()["preferences"] == PREFERENCES
+
+
+@pytest.mark.parametrize(
+    ("kind", "content_type"),
+    [("video", "video/mp4"), ("photo", "application/pdf"), ("photo", "image/gif")],
+)
+async def test_upload_rejects_what_the_wizard_does_not_take(
+    client: httpx.AsyncClient, kind: str, content_type: str
+) -> None:
+    token = await new_link(client)
+
+    response = await client.post(
+        f"/api/o/{token}/uploads",
+        json={"kind": kind, "filename": "x", "content_type": content_type, "size_bytes": 10},
+    )
+
+    assert response.status_code == 422
+    assert error_code(response) == "unsupported_file"
+
+
+async def test_upload_rejects_a_file_over_the_limit(client: httpx.AsyncClient) -> None:
+    token = await new_link(client)
+
+    response = await client.post(
+        f"/api/o/{token}/uploads",
+        json={
+            "kind": "photo",
+            "filename": "x.jpg",
+            "content_type": "image/jpeg",
+            "size_bytes": 10 * 1024 * 1024 + 1,
+        },
+    )
+
+    assert response.status_code == 422
+    assert "10 MB" in response.json()["error"]["message"]
+
+
+async def test_sixteenth_photo_is_rejected_before_upload(client: httpx.AsyncClient) -> None:
+    token = await new_link(client)
+    body = {"kind": "photo", "filename": "x.jpg", "content_type": "image/jpeg", "size_bytes": 10}
+    for _ in range(15):
+        assert (await client.post(f"/api/o/{token}/uploads", json=body)).status_code == 200
+
+    response = await client.post(f"/api/o/{token}/uploads", json=body)
+
+    assert response.status_code == 422
+    assert error_code(response) == "too_many_photos"
+
+
+async def test_ticket_points_to_the_business_folder_of_the_assets_bucket(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+
+    response = await client.post(
+        f"/api/o/{token}/uploads",
+        json={"kind": "photo", "filename": "x.png", "content_type": "image/png", "size_bytes": 10},
+    )
+
+    ticket = response.json()
+    async with sessions() as db:
+        business = await db.scalar(select(Business))
+        asset = await db.get(BrandAsset, uuid.UUID(ticket["asset_id"]))
+    assert business and asset
+    assert asset.storage_path == f"{business.id}/{asset.id}.png"
+    assert (asset.status, asset.source, asset.kind) == ("uploading", "web", "photo")
+    assert ticket["upload_url"].startswith(f"https://storage.test/upload/assets/{business.id}/")
+    assert ticket["resumable"] is False
+
+
+async def test_completing_an_upload_that_never_arrived_is_409(client: httpx.AsyncClient) -> None:
+    token = await new_link(client)
+    ticket = await client.post(
+        f"/api/o/{token}/uploads",
+        json={"kind": "photo", "filename": "x.jpg", "content_type": "image/jpeg", "size_bytes": 10},
+    )
+
+    response = await client.post(f"/api/o/{token}/assets/{ticket.json()['asset_id']}/complete")
+
+    assert response.status_code == 409
+    assert error_code(response) == "upload_missing"
+
+
+async def test_completed_photo_is_ready_with_a_copy_for_the_agents_and_a_queued_analysis(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+
+    asset = await upload(client, storage, token)
+
+    assert asset["status"] == "ready"
+    assert (asset["width"], asset["height"]) == (1200, 900)
+    assert asset["url"].startswith("https://storage.test/sign/assets/")
+    assert asset["analyzed"] is False
+    async with sessions() as db:
+        business = await db.scalar(select(Business))
+        jobs = (await db.scalars(select(Job))).all()
+    assert business
+    assert f"assets/{business.id}/{asset['id']}-llm.jpg" in storage.objects
+    assert [(job.kind, job.payload) for job in jobs] == [
+        ("analyze_asset", {"asset_id": asset["id"]})
+    ]
+
+
+async def test_heic_photo_is_stored_as_jpeg(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+
+    asset = await upload(
+        client,
+        storage,
+        token,
+        data=make_image((400, 300), format="HEIF"),
+        content_type="image/heic",
+    )
+
+    async with sessions() as db:
+        stored = await db.get(BrandAsset, uuid.UUID(asset["id"]))
+    assert stored
+    assert stored.storage_path.endswith(".jpg")
+    assert stored.mime_type == "image/jpeg"
+    assert storage.content_types[f"assets/{stored.storage_path}"] == "image/jpeg"
+
+
+async def test_logo_gets_its_palette_and_no_analysis_job(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+
+    asset = await upload(client, storage, token, kind="logo", data=make_image((300, 300), "white"))
+
+    assert asset["palette"] == ["#ffffff"]
+    async with sessions() as db:
+        assert (await db.scalars(select(Job))).all() == []
+
+
+async def test_unreadable_upload_fails(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    ticket = (
+        await client.post(
+            f"/api/o/{token}/uploads",
+            json={
+                "kind": "photo",
+                "filename": "x.jpg",
+                "content_type": "image/jpeg",
+                "size_bytes": 3,
+            },
+        )
+    ).json()
+    path = ticket["upload_url"].split("/upload/assets/")[1].split("?")[0]
+    storage.put("assets", path, b"nop")
+
+    response = await client.post(f"/api/o/{token}/assets/{ticket['asset_id']}/complete")
+
+    assert response.status_code == 422
+    async with sessions() as db:
+        asset = await db.get(BrandAsset, uuid.UUID(ticket["asset_id"]))
+    assert asset and asset.status == "failed"
+
+
+async def test_deleted_asset_leaves_the_state(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    kept = await upload(client, storage, token)
+    deleted = await upload(client, storage, token)
+
+    response = await client.delete(f"/api/o/{token}/assets/{deleted['id']}")
+    state = (await client.get(f"/api/o/{token}")).json()
+
+    assert response.status_code == 204
+    assert [asset["id"] for asset in state["assets"]] == [kept["id"]]
+
+
+async def test_complete_checks_the_required_steps(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+
+    no_business = await client.post(f"/api/o/{token}/complete")
+    await client.put(f"/api/o/{token}/business", json=BUSINESS)
+    no_products = await client.post(f"/api/o/{token}/complete")
+    await client.put(
+        f"/api/o/{token}/products", json={"products": [{"name": "Mesa", "description": ""}]}
+    )
+    await upload(client, storage, token)
+    await upload(client, storage, token)
+    two_photos = await client.post(f"/api/o/{token}/complete")
+
+    assert error_code(no_business) == "missing_business"
+    assert error_code(no_products) == "missing_products"
+    assert error_code(two_photos) == "missing_photos"
+
+
+async def test_complete_starts_the_brand_and_tells_the_owner_once(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    channel: FakeChannel,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    token = await new_link(client)
+    await client.put(f"/api/o/{token}/business", json=BUSINESS)
+    await client.put(
+        f"/api/o/{token}/products", json={"products": [{"name": "Mesa", "description": ""}]}
+    )
+    for _ in range(3):
+        await upload(client, storage, token)
+
+    first = await client.post(f"/api/o/{token}/complete")
+    again = await client.post(f"/api/o/{token}/complete")
+    late_edit = await client.put(f"/api/o/{token}/business", json=BUSINESS)
+    state = (await client.get(f"/api/o/{token}")).json()
+
+    assert (first.status_code, first.json()) == (202, {"status": "generating_brand"})
+    assert again.status_code == 202
+    assert channel.sent == [(PHONE, messages_es.BRAND_GENERATING)]
+    assert late_edit.status_code == 409
+    assert error_code(late_edit) == "onboarding_completed"
+    assert state["completed"] is True
+    async with sessions() as db:
+        business = await db.scalar(select(Business))
+        kinds = (await db.scalars(select(Job.kind).order_by(Job.created_at))).all()
+    assert business and business.onboarding_state == "generating_brand"
+    assert kinds.count("generate_brand") == 1
