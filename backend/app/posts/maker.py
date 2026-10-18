@@ -21,6 +21,8 @@ from app.copy import messages_es
 from app.imagegen.base import ImageGenPort
 from app.media.images import add_logo, to_post_image
 from app.media.public import PublicImages
+from app.rendering.base import RendererPort
+from app.rendering.slides import render_slides
 
 from .drafts import PostDrafter
 from .store import APPROVABLE, InMemoryPosts, Post, PostImage
@@ -28,10 +30,6 @@ from .store import APPROVABLE, InMemoryPosts, Post, PostImage
 logger = logging.getLogger(__name__)
 
 MIN_SLIDES = 2
-LOGO_SPACE_NOTE = (
-    "Leave the bottom-right corner, about a quarter of the width and a tenth of the height, "
-    "free of text and of the product: the brand's logo is added there afterwards."
-)
 WHATSAPP_CAPTION_MAX = 1024
 
 
@@ -66,6 +64,7 @@ class PostMaker:
         self,
         drafter: PostDrafter,
         image_gen: ImageGenPort,
+        renderer: RendererPort,
         photos: InMemoryPhotos,
         images: PublicImages,
         posts: InMemoryPosts,
@@ -76,6 +75,7 @@ class PostMaker:
     ) -> None:
         self._drafter = drafter
         self._image_gen = image_gen
+        self._renderer = renderer
         self._photos = photos
         self._images = images
         self._posts = posts
@@ -219,7 +219,11 @@ class PostMaker:
         brand: BrandBrain | None,
         logo: bytes | None,
     ) -> RenderedPost:
-        """The post's images in order (one per photo, unless a design asks for a slide count)."""
+        """The post's images in order (one per photo, unless a design asks for a slide count).
+
+        Photos as they are get the logo stamped in a corner (ADR 0027); a design's slides are
+        rendered from templates over text-free scenes, logo included (ADR 0028).
+        """
         references = [photo.data for photo in photos]
         if args.style == "photos":
             copy = await self._drafter.copy(args.brief, references, brand)
@@ -232,12 +236,8 @@ class PostMaker:
         copy, brief = await self._drafter.design(
             args.brief, references, [photo.id for photo in photos], count, brand
         )
-        if logo:
-            brief = brief.model_copy(
-                update={"style_prompt": f"{brief.style_prompt}\n{LOGO_SPACE_NOTE}"}
-            )
         one_per_photo = len(photos) == count
-        slides = await CarouselGenerator(self._image_gen).generate(
+        scenes = await CarouselGenerator(self._image_gen).generate(
             copy,
             brief,
             references,
@@ -246,7 +246,7 @@ class PostMaker:
             else None,
         )
         return RenderedPost(
-            await with_logo([slide.image for slide in slides], logo),
+            await render_slides(self._renderer, copy, brief, scenes, brand, logo),
             post_text(copy.caption, copy.hashtags),
             headlines=[slide.headline for slide in copy.slides],
         )

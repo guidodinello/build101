@@ -1,4 +1,6 @@
+import base64
 from io import BytesIO
+from typing import Literal
 
 from PIL import Image, ImageDraw, ImageOps, ImageStat
 from pillow_heif import register_heif_opener
@@ -18,6 +20,10 @@ LIGHT_BACKING = (255, 255, 255)
 DARK_BACKING = (31, 31, 31)
 OPAQUE_ALPHA = 128
 MID_LUMINANCE = 128
+RENDER_LOGO_MAX_SIDE = 600
+POST_RATIO = POST_SIZE[0] / POST_SIZE[1]
+
+Tone = Literal["light", "dark"]
 
 
 def prepare_reference(data: bytes) -> bytes:
@@ -32,6 +38,47 @@ def to_post_image(data: bytes) -> bytes:
         image = ImageOps.exif_transpose(source).convert("RGB")
     fitted = ImageOps.fit(image, POST_SIZE, method=Image.Resampling.LANCZOS)
     return _to_jpeg(fitted)
+
+
+def slice_panorama(data: bytes, count: int) -> list[bytes]:
+    """A wide scene cut into `count` side-by-side post images, after a centered crop to N × 4:5."""
+    if count < 1:
+        raise ValueError(f"a panorama needs at least one slide, got {count}")
+    with Image.open(BytesIO(data)) as source:
+        image = ImageOps.exif_transpose(source).convert("RGB")
+    strip = ImageOps.fit(
+        image,
+        (round(image.height * POST_RATIO * count), image.height),
+        method=Image.Resampling.LANCZOS,
+    )
+    width = strip.width / count
+    slices = (
+        strip.crop((round(n * width), 0, round((n + 1) * width), strip.height))
+        for n in range(count)
+    )
+    return [_to_jpeg(piece.resize(POST_SIZE, Image.Resampling.LANCZOS)) for piece in slices]
+
+
+def logo_for_render(data: bytes) -> tuple[bytes, Tone]:
+    """The logo as a PNG without transparent margins, and whether it reads as light or dark."""
+    with Image.open(BytesIO(data)) as source:
+        mark = ImageOps.exif_transpose(source).convert("RGBA")
+    bounds = mark.getchannel("A").getbbox()
+    if bounds is None:
+        raise ValueError("the logo is fully transparent")
+    mark = mark.crop(bounds)
+    mark.thumbnail((RENDER_LOGO_MAX_SIDE, RENDER_LOGO_MAX_SIDE), Image.Resampling.LANCZOS)
+    shape = mark.getchannel("A").point(lambda value: 255 if value >= OPAQUE_ALPHA else 0)
+    if shape.getbbox() is None:
+        shape = mark.getchannel("A").point(lambda value: 255 if value else 0)
+    luminance = ImageStat.Stat(mark.convert("L"), shape).mean[0]
+    buffer = BytesIO()
+    mark.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue(), "light" if luminance >= MID_LUMINANCE else "dark"
+
+
+def data_uri(data: bytes) -> str:
+    return f"data:{image_mime(data)};base64,{base64.b64encode(data).decode()}"
 
 
 def add_logo(post: bytes, logo: bytes) -> bytes:

@@ -124,7 +124,13 @@ class CountingImageGen:
     fail: bool = False
 
     async def generate(
-        self, prompt: str, reference_images: list[bytes], style_image: bytes | None = None
+        self,
+        prompt: str,
+        reference_images: list[bytes],
+        style_image: bytes | None = None,
+        *,
+        aspect_ratio: str | None = None,
+        image_size: str | None = None,
     ) -> GeneratedImage:
         self.calls.append(prompt)
         self.references.append(reference_images)

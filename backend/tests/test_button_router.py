@@ -18,6 +18,7 @@ from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts, Post, PostImage, PostStatus
 from app.publishing.base import PublishResult
+from app.rendering.mock import MockRenderer
 from tests.conftest import make_image
 from tests.fakes import CountingImageGen, FakeChannel, ScriptedModel
 
@@ -44,6 +45,7 @@ class Rig:
         self.maker = PostMaker(
             PostDrafter(self.model),
             CountingImageGen(),
+            MockRenderer(),
             self.photos,
             images,
             self.store,

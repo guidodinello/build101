@@ -14,6 +14,7 @@ from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts
 from app.publishing.base import PublisherPort
 from app.publishing.mock import MOCK_ACCOUNT_ID
+from app.rendering.factory import build_renderer
 from app.storage import get_storage
 
 from .button_router import ButtonRouter
@@ -51,6 +52,7 @@ def build_inbound_handler(
             posts = PostMaker(
                 PostDrafter(model, load_trend_notes(settings.niche_report_path)),
                 build_image_gen(settings),
+                build_renderer(settings),
                 photos,
                 images,
                 store,

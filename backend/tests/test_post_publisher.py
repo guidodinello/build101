@@ -20,6 +20,7 @@ from app.publishing.base import (
     PublishRetryable,
 )
 from app.publishing.mock import MOCK_ACCOUNT_ID, PERMALINK_PREFIX, MockPublisher
+from app.rendering.mock import MockRenderer
 from tests.conftest import make_image
 from tests.fakes import (
     PERMALINK,
@@ -69,6 +70,7 @@ class Rig:
         maker = PostMaker(
             PostDrafter(model),
             CountingImageGen(),
+            MockRenderer(),
             self.photos,
             self.images,
             self.store,

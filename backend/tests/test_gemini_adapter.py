@@ -89,7 +89,7 @@ def test_parse_response_raises_blocked_when_the_prompt_is_blocked() -> None:
         parse_response(blocked, MODEL)
 
 
-def test_build_contents_labels_products_and_puts_the_style_reference_last() -> None:
+def test_build_contents_labels_products_and_puts_the_other_slide_last() -> None:
     product = make_image((100, 125))
     style = make_image((100, 125), format="PNG")
 
@@ -99,7 +99,7 @@ def test_build_contents_labels_products_and_puts_the_style_reference_last() -> N
         "prompt",
         "Product reference 1:",
         "Product reference 2:",
-        "Style reference:",
+        "Another slide of this carousel:",
     ]
     assert parts[-1].inline_data.mime_type == "image/png"
     assert parts[2].inline_data.mime_type == "image/jpeg"
@@ -129,6 +129,26 @@ async def test_generate_sends_model_and_4_5_2k_config() -> None:
     assert config.image_config.aspect_ratio == "4:5"
     assert config.image_config.image_size == "2K"
     assert config.thinking_config.thinking_level == types.ThinkingLevel.MINIMAL
+
+
+async def test_generate_takes_a_wider_ratio_and_size_for_one_call() -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def generate_content(**kwargs: Any) -> types.GenerateContentResponse:
+        calls.append(kwargs)
+        return response([image_part(b"image")])
+
+    adapter = GeminiImageGen(
+        fake_client(generate_content), MODEL, "minimal", "2K", max_concurrency=2
+    )
+    await adapter.generate(
+        "panorama", [make_image((100, 125))], aspect_ratio="4:1", image_size="4K"
+    )
+    await adapter.generate("slide", [make_image((100, 125))])
+
+    wide, post = (call["config"].image_config for call in calls)
+    assert (wide.aspect_ratio, wide.image_size) == ("4:1", "4K")
+    assert (post.aspect_ratio, post.image_size) == ("4:5", "2K")
 
 
 async def test_generate_maps_api_errors_to_unavailable() -> None:
