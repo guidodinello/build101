@@ -23,6 +23,7 @@ from app.media.images import add_logo, to_post_image
 from app.media.public import PublicImages
 
 from .drafts import PostDrafter
+from .facts import drop_unsupported_figures
 from .store import APPROVABLE, InMemoryPosts, Post, PostImage
 
 logger = logging.getLogger(__name__)
@@ -224,8 +225,9 @@ class PostMaker:
         if args.style == "photos":
             copy = await self._drafter.copy(args.brief, references, brand)
             images = [await asyncio.to_thread(to_post_image, data) for data in references]
+            caption = grounded_caption(copy.caption, args.brief, brand)
             return RenderedPost(
-                await with_logo(images, logo), post_text(copy.caption, copy.hashtags), headlines=[]
+                await with_logo(images, logo), post_text(caption, copy.hashtags), headlines=[]
             )
 
         count = args.slide_count or len(photos)
@@ -247,7 +249,7 @@ class PostMaker:
         )
         return RenderedPost(
             await with_logo([slide.image for slide in slides], logo),
-            post_text(copy.caption, copy.hashtags),
+            post_text(grounded_caption(copy.caption, args.brief, brand), copy.hashtags),
             headlines=[slide.headline for slide in copy.slides],
         )
 
@@ -315,6 +317,13 @@ async def with_logo(images: list[bytes], logo: bytes | None) -> list[bytes]:
     if logo is None:
         return images
     return [await asyncio.to_thread(add_logo, image, logo) for image in images]
+
+
+def grounded_caption(caption: str, brief: str, brand: BrandBrain | None) -> str:
+    cleaned = drop_unsupported_figures(caption, brief, brand.model_dump_json() if brand else "")
+    if cleaned != caption:
+        logger.warning("dropped sentences with figures not in the brief or the Brand Brain")
+    return cleaned or caption
 
 
 def post_text(caption: str, hashtags: list[str]) -> str:

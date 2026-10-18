@@ -574,3 +574,24 @@ async def test_a_post_with_the_logo_without_one_is_refused(photos: InMemoryPhoto
     assert result == {"error": "no_logo"}
     assert channel.images == []
     assert model.structured_calls == []
+
+
+async def test_a_caption_with_an_invented_price_loses_that_sentence(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(
+        drafts={
+            PostCopy: PostCopy(
+                caption="Mesa de roble a medida. Hoy a $4.900. ¿Te gusta?", hashtags=["#roble"]
+            )
+        }
+    )
+    channel = FakeChannel()
+    posts = maker(model, CountingImageGen(), photos)
+
+    posts.create_post(
+        SENDER, {"brief": "una mesa", "asset_ids": ["f1"], "style": "photos"}, channel
+    )
+    await posts.join()
+
+    assert captions(channel) == ["Mesa de roble a medida. ¿Te gusta?\n\n#roble"]
