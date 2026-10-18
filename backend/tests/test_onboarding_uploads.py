@@ -3,6 +3,7 @@ from io import BytesIO
 import pytest
 from PIL import Image
 
+from app.onboarding import uploads
 from app.onboarding.uploads import (
     UnreadableImage,
     asset_path,
@@ -57,6 +58,22 @@ def test_logo_palette_ignores_the_transparent_background() -> None:
 
 def test_logo_palette_of_a_fully_transparent_image_is_empty() -> None:
     assert logo_palette(Image.new("RGBA", (50, 50), (0, 0, 0, 0))) == []
+
+
+def test_an_image_over_the_pixel_cap_is_rejected_before_decoding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(uploads, "MAX_PIXELS", 100 * 100)
+
+    with pytest.raises(UnreadableImage, match="101x100"):
+        process_upload(make_image((101, 100)), "image/jpeg", "photo")
+
+
+def test_a_decompression_bomb_is_unreadable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 10)
+
+    with pytest.raises(UnreadableImage):
+        process_upload(make_image((50, 50)), "image/jpeg", "photo")
 
 
 def test_unreadable_file_raises() -> None:

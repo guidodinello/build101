@@ -11,6 +11,8 @@ PALETTE_SIZE = 5
 PALETTE_SAMPLE_SIDE = 128
 OPAQUE_ALPHA = 128
 JPEG_QUALITY = 90
+# A 50 MP phone photo fits. Checked before decoding: a small PNG can expand to hundreds of MB.
+MAX_PIXELS = 60_000_000
 
 
 class UnreadableImage(Exception):
@@ -39,9 +41,11 @@ def process_upload(data: bytes, content_type: str, kind: str) -> ProcessedUpload
     """Read an uploaded photo or logo once it is in Storage. CPU-bound: run it in a thread."""
     try:
         with Image.open(BytesIO(data)) as source:
+            if source.width * source.height > MAX_PIXELS:
+                raise UnreadableImage(f"{source.width}x{source.height} is over {MAX_PIXELS} px")
             image = ImageOps.exif_transpose(source)
             image.load()
-    except (UnidentifiedImageError, OSError) as exc:
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
         raise UnreadableImage(str(exc)) from exc
     return ProcessedUpload(
         width=image.width,

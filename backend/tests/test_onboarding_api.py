@@ -642,3 +642,30 @@ async def test_a_product_photo_must_be_a_ready_photo_of_the_business(
 
         assert response.status_code == 422
         assert error_code(response) == "unknown_asset"
+
+
+async def test_a_second_link_cannot_start_the_brand_again(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    channel: FakeChannel,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    first = await new_link(client)
+    second = await new_link(client)
+    await client.put(f"/api/o/{first}/business", json=BUSINESS)
+    await client.put(
+        f"/api/o/{first}/products", json={"products": [{"name": "Mesa", "description": ""}]}
+    )
+    for _ in range(3):
+        await upload(client, storage, first)
+    await client.post(f"/api/o/{first}/complete")
+
+    again = await client.post(f"/api/o/{second}/complete")
+    late_edit = await client.put(f"/api/o/{second}/business", json=BUSINESS)
+
+    assert again.status_code == 202
+    assert late_edit.status_code == 409
+    assert channel.sent == [(PHONE, messages_es.BRAND_GENERATING)]
+    async with sessions() as db:
+        kinds = (await db.scalars(select(Job.kind))).all()
+    assert kinds.count("generate_brand") == 1

@@ -324,14 +324,31 @@ async def complete_onboarding(
     channel: Annotated[ChannelPort, Depends(get_channel)],
 ) -> schemas.CompleteResponse:
     link, business = onboarding.link, onboarding.business
-    if link.completed_at is None:
-        await _check_complete(session, business)
-        link.completed_at = datetime.now(UTC)
-        business.onboarding_state = "generating_brand"
-        enqueue(session, "generate_brand", business.id, {})
-        await session.commit()
-        if business.channel == "whatsapp":
-            background.add_task(_send_brand_generating, channel, business.owner_phone)
+    # The lock serializes a double submit; any completed link of the Business counts, so a
+    # second open link can't start the brand again.
+    await session.refresh(business, with_for_update=True)
+    already_completed = await session.scalar(
+        select(MagicLink.id)
+        .where(
+            MagicLink.business_id == business.id,
+            MagicLink.purpose == "onboarding",
+            MagicLink.completed_at.is_not(None),
+        )
+        .limit(1)
+    )
+    if already_completed is not None:
+        if link.completed_at is None:
+            link.completed_at = datetime.now(UTC)
+            await session.commit()
+        return schemas.CompleteResponse(status="generating_brand")
+
+    await _check_complete(session, business)
+    link.completed_at = datetime.now(UTC)
+    business.onboarding_state = "generating_brand"
+    enqueue(session, "generate_brand", business.id, {})
+    await session.commit()
+    if business.channel == "whatsapp":
+        background.add_task(_send_brand_generating, channel, business.owner_phone)
     return schemas.CompleteResponse(status="generating_brand")
 
 
@@ -379,7 +396,10 @@ async def _fail(asset: BrandAsset, session: AsyncSession) -> None:
 async def _active_asset(
     session: AsyncSession, business_id: uuid.UUID, asset_id: uuid.UUID
 ) -> BrandAsset:
-    asset = await session.get(BrandAsset, asset_id)
+    """The asset, locked: a second /complete of it waits and then finds it ready."""
+    asset = await session.scalar(
+        select(BrandAsset).where(BrandAsset.id == asset_id).with_for_update()
+    )
     if asset is None or asset.business_id != business_id or asset.archived_at is not None:
         raise ApiError(404, "asset_not_found", ASSET_NOT_FOUND)
     return asset
