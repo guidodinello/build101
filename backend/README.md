@@ -64,7 +64,8 @@ Set on the service (`railway variable set KEY --stdin --service backend`, value 
 | `PUBLIC_BACKEND_URL` | the Railway domain (`https://<service>.up.railway.app`); the app refuses to start without it while `INBOUND_HANDLER=chat` |
 | `DATABASE_URL` | Supabase **session pooler**, port 5432, `postgresql+asyncpg://` (the transaction pooler breaks asyncpg prepared statements, see [ADR 0003](../docs/decisions/0003-database-supabase-sqlalchemy.md)) |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | the project URL and its legacy `service_role` JWT (the code sends it as `apikey` and as a Bearer token) |
-| `FRONTEND_URL`, `FRONTEND_ORIGINS` | **unset**: no frontend is hosted yet, so onboarding magic links and CORS default to `http://localhost:3000` |
+| `FRONTEND_URL`, `FRONTEND_ORIGINS` | the Vercel domain, `https://build101-khaki.vercel.app` (no `localhost` in production CORS) |
+| `WHATSAPP_BOT_NUMBER` | `56920403095`, the shared Kapso sandbox number (only answers phones with an active sandbox session) |
 | `ENABLE_DEV_ENDPOINTS`, `DEV_TOKEN` | unset (dev endpoints off) |
 
 Everything else (`GEMINI_*`, `KAPSO_*`, `ZERNIO_*`, `PUBLISHER`, `IMAGE_GEN`, ...) carries the same value as local. Without `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `GEMINI_API_KEY` the app still boots but the job runner is off (the startup log says so).
