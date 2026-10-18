@@ -132,7 +132,7 @@ Unified social publishing API (formerly *Late*, getlate.dev). Chosen because the
 
 1. Sign up at zernio.com (no card) and create an API key → `ZERNIO_API_KEY`.
 2. Make sure the demo Instagram account is **Business or Creator** (Instagram Login is used, so no Facebook Page is needed).
-3. Do one end-to-end test the day before: create profile → connect → publish a test image → delete it from IG.
+3. Do one end-to-end test the day before: create profile → connect → publish a test image → delete it from IG **by hand in the Instagram app**. Zernio can't do it: `DELETE /v1/posts/{id}` refuses published posts ("Published posts cannot be deleted") and does not remove anything already live on a platform, and `POST /v1/posts/{id}/unpublish` is "Not supported on Instagram, TikTok, or Snapchat" ([Zernio: delete post](https://docs.zernio.com/posts/delete-post), [unpublish post](https://docs.zernio.com/posts/unpublish-post), read 2026-10-17).
 4. Optional: register a webhook (`POST /v1/webhooks/settings`) with our `ZERNIO_WEBHOOK_SECRET` for `post.published`, `post.failed`, `account.connected`.
 
 **Free tier limit:** 2 connected accounts **across the whole team**. IG + Facebook Page for the demo business uses both slots, so connect **Instagram only** unless the FB cross-post is needed. A 3rd account returns `402 PAYMENT_REQUIRED`. Instagram caps: 25 posts/hour and 100/day per account.
@@ -162,7 +162,12 @@ POST /v1/posts
   // or: "scheduledFor": "2026-10-21T19:00:00", "timezone": "America/Montevideo"
 }
 → 201 {"post": {"_id": "...", "status": "published", "platforms": [{"platformPostUrl": "https://www.instagram.com/p/..."}]}}
-→ 207 = partial failure (check post.status and per-platform errors)
+→ 201 {"post": {"_id": "...", "status": "publishing", "platforms": [{"status": "processing"}]}}   # no platformPostUrl yet (see gotchas)
+→ 207 = the inline publish did not fully succeed (check post.status and per-platform errors)
+
+# 3a. Poll until Zernio reaches a final status (what ZernioPublisher does after a non-final answer)
+GET /v1/posts/<post_id>
+→ 200 {"post": {"status": "published", "platforms": [{"status": "published", "platformPostUrl": "https://www.instagram.com/p/..."}]}}
 ```
 
 ```python
@@ -196,7 +201,11 @@ Gotchas:
 - Media URL must be **public HTTPS returning the raw file**, JPEG/PNG < 8 MB, aspect ratio between 4:5 and 1.91:1. Our post images are 1080×1350 (4:5) JPEG in the public `renders` bucket, which fits.
 - **Reels** (Could; [Zernio Instagram](https://docs.zernio.com/platforms/instagram), [research](../research/media-uploads.md)): MP4/MOV, H.264, 3–90 s, ≤ 300 MB, 9:16 recommended. The Owner's video lives in the **private** `assets` bucket, so pass a signed URL valid long enough for Zernio to fetch it (24 h; for a scheduled Reel, sign it when `publish_post` runs, not when the Post is approved). Zernio caps Reels at 90 s while Meta allows 15 min: the Asset Analyst only marks videos of 3–90 s as `reel_suitable` until a real test proves otherwise. Videos that aren't H.264 (e.g. iPhone HEVC) may need a transcode; test with a real phone video before the hackathon.
 - Reels publish slower than images (Meta processes the video), so "publish now" can take a minute or more; the Zernio `post.published` webhook, not the `201`, is what confirms it.
-- Treat `207` and any `post.status != "published"` as failure for "publish now".
+- **`publishNow` is not always synchronous.** The OpenAPI spec says `publishNow: true` publishes "synchronously, inside this request", but on the live test (2026-10-18) the demo Instagram answered **201 with `post.status = "publishing"`**, the Instagram entry `processing` and no `platformPostUrl`; about 10 s later `GET /v1/posts/{id}` returned `published` with the URL, and the post really went live. A 201 is therefore not a confirmation, and mapping `publishing` to a failure would report a failure for a post that goes out (and a retry would publish it twice).
+- `post.status` decides ([OpenAPI spec](https://zernio.com/openapi.yaml) v1.290.1, read 2026-10-18): `published` is a success once the platform entry has its `platformPostUrl`; `failed`, `partial` and `cancelled` are final failures; `publishing` and `scheduled` are not final, and neither is a `207` whose `post.status` is `scheduled` ("Zernio retries automatically. This is **not** a failure", [Zernio: create post](https://docs.zernio.com/posts/create-post), read 2026-10-17). `ZernioPublisher` returns every non-final outcome as `PublishResult.status = "pending"`: never report a failure and never re-publish.
+- After a non-final answer `publish` polls `GET /v1/posts/{id}` every 2 s until a 90 s wall-clock cap (`POLL_INTERVAL_S`, `POLL_TIMEOUT_S`; the cap is generous so carousels fit) and never re-POSTs. Each poll has its own 10 s timeout (`POLL_REQUEST_TIMEOUT_S`), so a hung `GET` overruns the cap by at most one poll. It returns `published` with the permalink, `failed` with the platform error, or `pending` if the cap runs out or the polls keep failing. At that point the webhook (T29) or a later `GET` confirms it. A non-final POST answer **without a post id** raises `PublisherError` instead: there is nothing to poll and nothing for the webhook to match.
+- **Idempotency.** `POST /v1/posts` takes an optional `Idempotency-Key` header, which `publish(..., idempotency_key=...)` sends. The spec: "Optional client-generated unique key (e.g. a UUID) that makes retries safe. Same key + same body replays the original response; same key + different body → 422; key still processing → 409", and for create-post: "A retry with the same key within 24 hours returns the original post (HTTP 200) whatever its body; while the original is still being processed it returns 409 `idempotency_conflict` with `Retry-After`" ([OpenAPI spec](https://zernio.com/openapi.yaml), read 2026-10-18). The caller (T30) picks the key from the Post id, so a retry after a timeout or a 5xx cannot publish twice; a `409 idempotency_conflict` raises `PublisherError` and T30 retries after `Retry-After`.
+- Identical content to the same account within 24 h returns `409` (`details.existingPostId`), so repeated test posts need a different caption or image.
 - Webhook signature: `X-Zernio-Signature` = HMAC-SHA256 of the raw body with our secret.
 - Things not verified by research: the exact query param names on the connect redirect (log the full query on the first test and adapt `instagram/callback`), and whether old getlate.dev URLs still work (build only against `zernio.com/api/v1`).
 
@@ -211,7 +220,7 @@ Plan for F2.8: test the Zernio endpoint on the demo Instagram before the hackath
 
 ### Mock publisher
 
-`PUBLISHER=mock` → `MockPublisher` returns `published` with `permalink = https://instagram.com/p/MOCK-<post_id>` after a 2 s delay, and `connect_url` returns a frontend URL that marks the account connected. Used for local dev, the simulator, and the stage fallback.
+`PUBLISHER=mock` (the default) → `MockPublisher` returns `published` with `permalink = https://instagram.com/p/MOCK-<id>` after a 2 s delay, and `connect_url` returns a frontend URL that marks the account connected. Used for local dev, the simulator, and the stage fallback.
 
 ## Gemini API (text)
 

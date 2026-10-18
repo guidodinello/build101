@@ -43,12 +43,12 @@ Priority uses MoSCoW for the 24h build: **Must** = the demo fails without it; **
 |---|---|---|
 | F2.1 | First contact in WhatsApp: welcome, ask business name, send magic link | Must |
 | F2.2 | Web onboarding form (mobile-first, 6 steps as in the [mockups](../design/mockups/README.md)): business info, up to 5 Products, logo (optional, with a "Todavía no tengo logo ni colores" option) and colors, 3–15 photos (no videos), questionnaire | Must |
-| F2.3 | Connect Instagram account through the publishing provider's hosted connect flow | Must |
+| F2.3 | Connect Instagram account through the publishing provider's hosted connect flow. The MVP publishes to one demo account from env instead ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)) | Won't (MVP) |
 | F2.4 | Asset Analyst describes photos and extracts logo colors | Must |
 | F2.5 | Brand Strategist generates the Brand Brain; summary sent to WhatsApp for confirmation | Must |
 | F2.6 | Owner corrects the Brand Brain in chat ("no somos formales, somos re cercanos") | Could |
 | F2.7 | Fully conversational onboarding (no web) | Won't |
-| F2.8 | Import photos and videos from the owner's Instagram feed after connecting; the owner unticks what not to use (read access not verified) | Could |
+| F2.8 | Import photos and videos from the owner's Instagram feed after connecting; the owner unticks what not to use (read access not verified). Needs F2.3, so out of the MVP too ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)) | Won't (MVP) |
 | F2.9 | Build colors (and optionally a simple logo) in the chat when the owner has none: the bot proposes 3 palettes from a photo | Could |
 
 ### F3 — Strategy & calendar
