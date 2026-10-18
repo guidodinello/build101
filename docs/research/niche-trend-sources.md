@@ -18,6 +18,24 @@ Idea under research: a weekly job that analyses what works in the Owner's niche 
 | **Google Trends API** | Search interest for terms | Alpha since July 2025, access by application only, no pricing or GA date found. [PPC Land](https://ppc.land/google-opens-alpha-testing-for-new-trends-api-targeting-developers-and-journalists/), [ScrapeBadger](https://scrapebadger.com/blog/does-google-trends-have-an-api-what-to-use-in-2026) | Not available to us now |
 | **TikTok Creative Center** | Trending hashtags, songs and videos by country | Free web UI; no official API. [instagram-content-trends.md](instagram-content-trends.md#reading-trends-live) | Only through grounded search or by hand |
 
+## Hands-on run (2026-10-18)
+
+Two runs by hand of the Niche Analyst call ([ADR 0025](../decisions/0025-weekly-niche-report.md)): `gemini-3.8-flash`, Interactions API, thinking `medium`, tools `url_context` + `google_search`, reference websites [laiberica.com.uy](https://www.laiberica.com.uy/) and [kateiuy.lovable.app](https://kateiuy.lovable.app), niche "curated solid-wood furniture in Uruguay". Run 1 asked for JSON in the prompt; run 2 passed the `NicheReport` schema as `response_format`.
+
+| | Run 1 (JSON in prompt) | Run 2 (`response_format` schema) |
+|---|---|---|
+| Steps | URL context read both sites; 4 Google searches | Same |
+| Latency | 75 s | 33 s |
+| Tokens | 11,702 total (7,328 from the fetched pages, 2,402 thought) | 4,148 total |
+| Output | 5 insights, valid | 6 insights, valid against the schema |
+
+What it shows:
+
+- **It works end to end**, and **tools and a `response_format` schema combine** in one interaction (not stated in the [URL context docs](https://ai.google.dev/gemini-api/docs/url-context)). Before this run the key was on the free tier and got `429` (20 requests per day for `gemini-3.8-flash`); minutes before, the model also answered `503` "high demand", so the weekly job needs a retry later.
+- **Useful and on-niche**: warm wood with linen and travertine for spring, restoration process videos (before and after), "pieza heredable vs. mueble descartable" hooks, the 80/20 rule as an educational carousel, lived-in rooms over isolated product shots, a spring palette (salvia, terracota, arena). Written in Rioplatense *vos*, with concrete post ideas.
+- **Sources are mostly the two reference sites**: 10 of 11 insights cite only La Ibérica or KATEI; one cites a real article found by search ([Caras, primavera 2026](https://caras.perfil.com/noticias/content-caras-like/primavera-2026-una-paleta-inspirada-en-la-naturaleza.phtml)). Other search sources came back as `vertexaisearch.cloud.google.com/grounding-api-redirect/...` links, not the page URL.
+- **Performance claims without evidence**: lines like "tiene una tasa altísima de retención" or "rinden significativamente mejor" cite a store's website, which says nothing about engagement. The prompt needs a rule: say what the stores and articles *do*, never how well it performs unless a source measures it.
+
 ## Business Discovery: what we would and would not get
 
 From the [IG Media reference](https://developers.facebook.com/docs/instagram-platform/reference/instagram-media):
