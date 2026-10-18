@@ -797,7 +797,7 @@ async def test_every_event_is_one_model_turn_that_cannot_approve(event: Event) -
     assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
     assert chat._store.listed(SENDER) == ["other"]
     assert channel.sent[0][1].startswith("Ok")
-    history = (await chat._history.get(SENDER))
+    history = await chat._history.get(SENDER)
     assert step_text(history[0]) == event.note()
     assert history[-1]["type"] == "model_output"
 
@@ -886,7 +886,7 @@ async def test_when_the_model_is_down_each_event_sends_its_fixed_text(
 
     assert channel.sent == [(SENDER, expected)]
     # The next turn knows what the Owner was told.
-    [note] = (await chat._history.get(SENDER))
+    [note] = await chat._history.get(SENDER)
     assert f'{event.note()}\nThe Owner was told: "{expected}"' == step_text(note)
 
 

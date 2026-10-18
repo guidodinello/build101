@@ -73,8 +73,8 @@ async def test_compaction_merges_the_previous_summary() -> None:
 
     assert await history.summary(PHONE) == "nuevo"
     assert [step["content"][0]["text"] for step in (await history.get(PHONE))[:1]] == ["tres"]
-    assert "<previous_summary>\nviejo\n</previous_summary>" in (
-        model.structured_calls[0][0]["text"]
+    assert (
+        "<previous_summary>\nviejo\n</previous_summary>" in (model.structured_calls[0][0]["text"])
     )
 
 

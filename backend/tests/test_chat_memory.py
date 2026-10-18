@@ -221,8 +221,9 @@ async def test_old_turns_are_folded_into_the_summary() -> None:
     assert await chat._history.summary(SENDER) == "Vende mesas de roble."
     assert history[0]["type"] == "user_input"
     assert step_text(history[0]) != "hola"
-    assert "<conversation_summary>\nVende mesas de roble.\n</conversation_summary>" in (
-        model.systems[-1]
+    assert (
+        "<conversation_summary>\nVende mesas de roble.\n</conversation_summary>"
+        in (model.systems[-1])
     )
     assert "Owner or system: hola" in model.structured_calls[0][0]["text"]
 

@@ -187,4 +187,3 @@ async def test_what_was_said_survives_compaction() -> None:
 
     assert await live.history.summary(PHONE), "the conversation was never compacted"
     assert "gratis" in reply.lower()
-

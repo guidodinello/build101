@@ -140,7 +140,7 @@ LIST_POSTS: Tool = {
     "description": (
         "The posts made for the Owner, oldest first, with their status (pending_approval, "
         "approved, publishing, publish_pending, published, failed, discarded, replaced) and "
-        "Instagram link. For questions like \"¿ya se subió?\" or \"¿qué posts tengo "
+        'Instagram link. For questions like "¿ya se subió?" or "¿qué posts tengo '
         'pendientes?", or to find a post id the conversation no longer shows.'
     ),
     "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
