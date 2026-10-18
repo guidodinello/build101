@@ -10,6 +10,20 @@ from app.channels.inbound import EchoHandler
 from app.channels.kapso_webhook import parse_message
 from app.config import Settings
 from app.conversation.chat import MAX_STEPS, ChatHandler
+from app.conversation.events import (
+    AudioUnclear,
+    Event,
+    PhotosReceived,
+    PhotoTooBig,
+    PhotoUnreadable,
+    PostFailed,
+    PostSent,
+    Published,
+    PublishFailed,
+    PublishPending,
+    StaleButton,
+    UnsupportedMedia,
+)
 from app.conversation.factory import build_inbound_handler
 from app.conversation.history import InMemoryHistory
 from app.conversation.photos import InMemoryPhotos
@@ -19,14 +33,22 @@ from app.media.public import PublicImages
 from app.posts.drafts import CarouselDraft, PostCopy, PostDrafter, SlideDraft
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
-from app.posts.store import InMemoryPosts
+from app.posts.store import InMemoryPosts, Post, PostImage
 from app.publishing.mock import MOCK_ACCOUNT_ID, MockPublisher
 from tests.conftest import FIXTURES
-from tests.fakes import CountingImageGen, FakeChannel, ScriptedModel, call_reply, text_reply
+from tests.fakes import (
+    PERMALINK,
+    CountingImageGen,
+    FakeChannel,
+    ScriptedModel,
+    call_reply,
+    text_reply,
+)
 
 SENDER = "59899000001"
 REPLY_TEXT = "¡Hola! ¿Qué vendés?"
 FOLLOW_UP = "¡Listo! ¿Te gusta? ¿Lo subo, o le cambio algo?"
+EVENT_REPLY = "Mandámelo de nuevo, porfa 🙏"
 DRAFT = PostCopy(caption="Mesa de roble", hashtags=["#muebles"])
 # Long enough for photos handled one after the other to land in one batch.
 DEBOUNCE_S = 0.2
@@ -69,14 +91,13 @@ def build(
         PostDrafter(model),
         image_gen or CountingImageGen(),
         photos,
-        history,
         images,
         store,
         "https://backend.test",
         max_posts_per_day,
     )
     publishing = PostPublisher(
-        MockPublisher(delay_s=0), store, history, images, "https://backend.test", MOCK_ACCOUNT_ID
+        MockPublisher(delay_s=0), store, images, "https://backend.test", MOCK_ACCOUNT_ID
     )
     chat = ChatHandler(
         model,
@@ -90,7 +111,8 @@ def build(
         photo_debounce_s=DEBOUNCE_S,
         keep_alive_s=keep_alive_s,
     )
-    posts.on_post_sent(chat.post_sent)
+    posts.on_event(chat.notify)
+    publishing.on_event(chat.notify)
     return chat, posts
 
 
@@ -185,35 +207,111 @@ async def test_voice_note_is_answered_from_its_transcript() -> None:
     assert last_user_text(model.calls[0]) == "[audio] Quiero un post para la promo del sábado"
 
 
-async def test_voice_note_without_transcript_asks_again() -> None:
-    model, channel = ScriptedModel(), FakeChannel()
+async def test_voice_note_without_transcript_is_an_event_the_model_answers() -> None:
+    model, channel = ScriptedModel(replies=[text_reply(EVENT_REPLY)]), FakeChannel()
     incoming = message("audio")
     incoming.audio.provider_transcript = None
 
     await handler(model).handle(incoming, channel)
 
-    assert channel.sent == [(SENDER, messages_es.AUDIO_UNCLEAR)]
-    assert model.calls == []
+    assert channel.sent == [(SENDER, EVENT_REPLY)]
+    assert len(model.calls) == 1
+    assert step_text(model.calls[0][-1]) == AudioUnclear().note()
 
 
-async def test_a_button_gets_the_stale_button_message() -> None:
-    model, channel = ScriptedModel(), FakeChannel()
+async def test_a_button_is_a_stale_button_event() -> None:
+    model, channel = ScriptedModel(replies=[text_reply(EVENT_REPLY)]), FakeChannel()
 
     await handler(model).handle(message("interactive"), channel)
 
-    assert channel.sent == [(SENDER, messages_es.STALE_BUTTON)]
-    assert model.calls == []
+    assert channel.sent == [(SENDER, EVENT_REPLY)]
+    assert len(model.calls) == 1
+    assert step_text(model.calls[0][-1]) == StaleButton().note()
 
 
-async def test_a_photo_without_caption_is_kept_and_offered() -> None:
-    model, channel = ScriptedModel(), FakeChannel()
+async def test_an_unsupported_kind_is_an_event_the_model_answers() -> None:
+    model, channel = ScriptedModel(replies=[text_reply(EVENT_REPLY)]), FakeChannel()
+
+    await handler(model).handle(message("text", kind="sticker", text=None), channel)
+
+    assert channel.sent == [(SENDER, EVENT_REPLY)]
+    assert step_text(model.calls[0][-1]) == UnsupportedMedia().note()
+
+
+async def test_a_photo_without_caption_is_an_event_the_model_answers() -> None:
+    model, channel = ScriptedModel(replies=[text_reply(EVENT_REPLY)]), FakeChannel()
+    chat = handler(model)
+
+    await chat.handle(message("image", text=None), channel)
+    await chat.join()
+
+    assert channel.sent == [(SENDER, EVENT_REPLY)]
+    assert len(model.calls) == 1
+    assert step_text(model.calls[0][-1]) == PhotosReceived(("f1",)).note()
+
+
+async def test_photos_without_text_attach_the_images_but_store_only_the_note() -> None:
+    model, channel = ScriptedModel(replies=[text_reply(EVENT_REPLY)]), FakeChannel()
+    chat = handler(model)
+
+    await chat.handle(message("image", text=None), channel)
+    await chat.handle(message("image", text=None), channel)
+    await chat.join()
+
+    current = model.calls[0][-1]
+    assert step_text(current) == "[photos f1 f2 received, no text]"
+    assert "Attached below, in this order: f1, f2" in current["content"][1]["text"]
+    assert [part["type"] for part in current["content"][2:]] == ["image"] * 2
+    stored = chat._history.get(SENDER)[0]
+    assert len(stored["content"]) == 1
+    assert all(photo.seen for photo in chat._photos.recent(SENDER))
+
+
+async def test_photos_stay_unseen_when_their_turn_fails() -> None:
+    model, channel = ScriptedModel(fail=True), FakeChannel()
     chat = handler(model)
 
     await chat.handle(message("image", text=None), channel)
     await chat.join()
 
     assert channel.sent == [(SENDER, messages_es.PHOTO_KEPT)]
-    assert model.calls == []
+    assert not chat._photos.recent(SENDER)[0].seen
+
+
+async def test_several_photos_without_text_fall_back_to_the_plural_text() -> None:
+    model, channel = ScriptedModel(fail=True), FakeChannel()
+    chat = handler(model)
+
+    await chat.handle(message("image", text=None), channel)
+    await chat.handle(message("image", text=None), channel)
+    await chat.join()
+
+    assert channel.sent == [(SENDER, messages_es.PHOTOS_KEPT)]
+
+
+async def test_photos_without_text_proceed_with_the_post_the_owner_already_asked_for() -> None:
+    model = ScriptedModel(
+        replies=[
+            text_reply("¡Dale! Mandame las fotos 📸"),
+            call_reply("create_post", brief="Navidad", asset_ids=["f1"], style="photos"),
+            text_reply("Dale, lo armo con la foto ⏳"),
+            text_reply(FOLLOW_UP),
+        ]
+    )
+    channel = FakeChannel()
+    chat, posts = build(model)
+
+    await chat.handle(message("text", text="armame algo para Navidad"), channel)
+    await chat.handle(message("image", text=None), channel)
+    await chat.join()
+    await posts.join()
+
+    assert [text for _, text in channel.sent] == [
+        "¡Dale! Mandame las fotos 📸",
+        "Dale, lo armo con la foto ⏳",
+        FOLLOW_UP,
+    ]
+    assert len(channel.images) == 1
 
 
 async def test_an_album_is_answered_once_with_all_its_photos() -> None:
@@ -260,34 +358,38 @@ async def test_photos_are_attached_once_but_listed_while_recent() -> None:
 
 
 async def test_a_photo_declared_too_big_is_not_downloaded() -> None:
-    model, channel = ScriptedModel(), FakeChannel()
+    model, channel = ScriptedModel(replies=[text_reply(EVENT_REPLY)]), FakeChannel()
     incoming = message("image")
     incoming.media.byte_size = MAX_PHOTO_MB * 1024 * 1024 + 1
 
     await handler(model).handle(incoming, channel)
 
-    assert channel.sent == [(SENDER, messages_es.photo_too_big(MAX_PHOTO_MB))]
+    assert channel.sent == [(SENDER, EVENT_REPLY)]
     assert channel.downloads == []
+    assert step_text(model.calls[0][-1]) == PhotoTooBig(MAX_PHOTO_MB).note()
 
 
 async def test_a_photo_that_downloads_too_big_is_refused() -> None:
-    model = ScriptedModel()
+    model = ScriptedModel(replies=[text_reply(EVENT_REPLY)])
     channel = FakeChannel(media=b"x" * (MAX_PHOTO_MB * 1024 * 1024 + 1))
     chat = handler(model)
 
     await chat.handle(message("image"), channel)
     await chat.join()
 
-    assert channel.sent == [(SENDER, messages_es.photo_too_big(MAX_PHOTO_MB))]
-    assert model.calls == []
+    assert channel.sent == [(SENDER, EVENT_REPLY)]
+    assert len(model.calls) == 1
+    assert step_text(model.calls[0][-1]) == PhotoTooBig(MAX_PHOTO_MB).note()
 
 
-async def test_an_unreadable_photo_asks_again() -> None:
-    model, channel = ScriptedModel(), FakeChannel(media=b"not an image")
+async def test_an_unreadable_photo_is_an_event_the_model_answers() -> None:
+    model = ScriptedModel(replies=[text_reply(EVENT_REPLY)])
+    channel = FakeChannel(media=b"not an image")
 
     await handler(model).handle(message("image"), channel)
 
-    assert channel.sent == [(SENDER, messages_es.PHOTO_UNREADABLE)]
+    assert channel.sent == [(SENDER, EVENT_REPLY)]
+    assert step_text(model.calls[0][-1]) == PhotoUnreadable().note()
 
 
 @pytest.mark.parametrize("text", ["hola", "¿cuánto sale un post?"])
@@ -611,3 +713,141 @@ async def test_text_next_to_tool_calls_on_the_last_step_is_not_a_reply() -> None
 
     assert len(model.calls) == MAX_STEPS
     assert channel.sent == [(SENDER, messages_es.REPLY_FAILED)]
+
+
+def pending_post(chat: ChatHandler) -> None:
+    chat._store.add(Post(POST_ID, SENDER, [PostImage("/media/x.jpg", b"jpeg")], "Texto"))
+
+
+SENT = PostSent(POST_ID, 1, "photos", ("f1",), (), "Texto")
+EVENTS: list[Event] = [
+    SENT,
+    PostFailed(POST_ID, "design", ("f1",), "mesa"),
+    Published(POST_ID, PERMALINK),
+    PublishPending(POST_ID),
+    PublishFailed(POST_ID),
+    PhotosReceived(("f1",)),
+    AudioUnclear(),
+    UnsupportedMedia(),
+    PhotoUnreadable(),
+    PhotoTooBig(MAX_PHOTO_MB),
+    StaleButton(),
+]
+
+
+@pytest.mark.parametrize("event", EVENTS, ids=lambda event: type(event).__name__)
+async def test_every_event_is_one_model_turn_that_cannot_approve(event: Event) -> None:
+    approve = call_reply("approve_post", post_id=POST_ID, next="publish_now")
+    model, channel = ScriptedModel(replies=[approve, text_reply("Ok")]), FakeChannel()
+    chat, _ = build(model)
+    pending_post(chat)
+    chat._store.set_listed(SENDER, ["other"])
+
+    await chat.notify(SENDER, event, channel)
+
+    assert len(model.calls) == 2  # the event, then the tool result
+    assert step_text(model.calls[0][-1]) == event.note()
+    assert json.loads(model.calls[1][-1]["result"]) == {"error": "approval_not_explicit"}
+    assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
+    assert chat._store.listed(SENDER) == ["other"]
+    assert channel.sent[0][1].startswith("Ok")
+    history = chat._history.get(SENDER)
+    assert step_text(history[0]) == event.note()
+    assert history[-1]["type"] == "model_output"
+
+
+@pytest.mark.parametrize(
+    "event",
+    [e for e in EVENTS if not isinstance(e, PhotosReceived)],
+    ids=lambda e: type(e).__name__,
+)
+async def test_only_photos_without_text_may_start_a_post(event: Event) -> None:
+    model, channel, image_gen = (
+        ScriptedModel(replies=[CREATE, text_reply("Listo")]),
+        FakeChannel(),
+        CountingImageGen(),
+    )
+    chat, _ = build(model, image_gen)
+    pending_post(chat)
+
+    await chat.notify(SENDER, event, channel)
+
+    assert json.loads(model.calls[1][-1]["result"]) == {"error": "not_owner_request"}
+    assert image_gen.calls == []
+
+
+async def test_the_permalink_is_appended_when_the_reply_leaves_it_out() -> None:
+    model, channel = ScriptedModel(replies=[text_reply("¡Publicado! 🎉")]), FakeChannel()
+
+    await handler(model).notify(SENDER, Published(POST_ID, PERMALINK), channel)
+
+    assert channel.sent == [(SENDER, f"¡Publicado! 🎉\n{PERMALINK}")]
+
+
+async def test_the_permalink_is_not_repeated_when_the_reply_has_it() -> None:
+    reply = f"¡Publicado! 🎉 {PERMALINK}"
+    model, channel = ScriptedModel(replies=[text_reply(reply)]), FakeChannel()
+
+    await handler(model).notify(SENDER, Published(POST_ID, PERMALINK), channel)
+
+    assert channel.sent == [(SENDER, reply)]
+
+
+async def test_a_published_event_without_a_link_adds_nothing() -> None:
+    model, channel = ScriptedModel(replies=[text_reply("Listo")]), FakeChannel()
+    chat = handler(model)
+
+    await chat.notify(SENDER, Published(POST_ID, None), channel)
+
+    assert channel.sent == [(SENDER, "Listo")]
+    assert "No link came back" in step_text(model.calls[0][-1])
+
+
+FALLBACKS = [
+    (PostFailed(POST_ID, "design", ("f1",), "mesa"), messages_es.JOB_FAILED),
+    (Published(POST_ID, PERMALINK), messages_es.published(PERMALINK)),
+    (PublishPending(POST_ID), messages_es.PUBLISH_PENDING),
+    (PublishFailed(POST_ID), messages_es.PUBLISH_FAILED),
+    (PhotosReceived(("f1",)), messages_es.PHOTO_KEPT),
+    (PhotosReceived(("f1", "f2")), messages_es.PHOTOS_KEPT),
+    (AudioUnclear(), messages_es.AUDIO_UNCLEAR),
+    (UnsupportedMedia(), messages_es.UNSUPPORTED_MEDIA),
+    (PhotoUnreadable(), messages_es.PHOTO_UNREADABLE),
+    (PhotoTooBig(MAX_PHOTO_MB), messages_es.photo_too_big(MAX_PHOTO_MB)),
+    (StaleButton(), messages_es.STALE_BUTTON),
+]
+
+
+@pytest.mark.parametrize(("event", "expected"), FALLBACKS, ids=lambda x: type(x).__name__)
+async def test_when_the_model_is_down_each_event_sends_its_fixed_text(
+    event: Event, expected: str
+) -> None:
+    model, channel = ScriptedModel(fail=True), FakeChannel()
+    chat = handler(model)
+
+    await chat.notify(SENDER, event, channel)
+
+    assert channel.sent == [(SENDER, expected)]
+    # The next turn knows what the Owner was told.
+    [note] = chat._history.get(SENDER)
+    assert f'{event.note()}\nThe Owner was told: "{expected}"' == step_text(note)
+
+
+async def test_a_model_that_never_answers_an_event_counts_as_down() -> None:
+    model, channel = ScriptedModel(replies=[call_reply("unknown_tool")]), FakeChannel()
+
+    await handler(model).notify(SENDER, StaleButton(), channel)
+
+    assert len(model.calls) == MAX_STEPS
+    assert channel.sent == [(SENDER, messages_es.STALE_BUTTON)]
+
+
+async def test_a_sent_post_event_with_the_model_down_sends_nothing_but_keeps_the_note() -> None:
+    model, channel = ScriptedModel(fail=True), FakeChannel()
+    chat, _ = build(model)
+    pending_post(chat)
+
+    await chat.notify(SENDER, SENT, channel)
+
+    assert channel.sent == []
+    assert [step_text(step) for step in chat._history.get(SENDER)] == [SENT.note()]

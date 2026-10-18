@@ -44,14 +44,13 @@ def build_inbound_handler(
                 PostDrafter(model),
                 build_image_gen(settings),
                 photos,
-                history,
                 images,
                 store,
                 settings.public_backend_url,
                 settings.max_posts_per_day,
             )
             publishing = PostPublisher(
-                publisher, store, history, images, settings.public_backend_url, account_id
+                publisher, store, images, settings.public_backend_url, account_id
             )
             chat = ChatHandler(
                 model,
@@ -63,7 +62,8 @@ def build_inbound_handler(
                 settings.assistant_name,
                 max_photo_mb=settings.max_photo_mb,
             )
-            posts.on_post_sent(chat.post_sent)
+            posts.on_event(chat.notify)
+            publishing.on_event(chat.notify)
             return chat
         case "echo":
             return EchoHandler()

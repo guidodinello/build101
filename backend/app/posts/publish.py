@@ -5,12 +5,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.channels.base import ChannelError, ChannelPort
+from app.channels.base import ChannelPort
 from app.channels.inbound import mask
 from app.conversation.approval import Approval
-from app.conversation.history import InMemoryHistory
-from app.copy import messages_es
-from app.llm.client import user_step
+from app.conversation.events import Event, Notify, Published, PublishFailed, PublishPending
 from app.media.public import PublicImages
 from app.publishing.base import (
     PublisherError,
@@ -52,7 +50,6 @@ class PostPublisher:
         self,
         publisher: PublisherPort,
         posts: InMemoryPosts,
-        history: InMemoryHistory,
         images: PublicImages,
         public_base_url: str,
         account_id: str | None,
@@ -60,12 +57,16 @@ class PostPublisher:
     ) -> None:
         self._publisher = publisher
         self._posts = posts
-        self._history = history
         self._images = images
         self._public_base_url = public_base_url.rstrip("/")
         self._account_id = account_id
         self._sleep = sleep
         self._tasks: set[asyncio.Task[None]] = set()
+        self._notify: Notify | None = None
+
+    def on_event(self, callback: Notify) -> None:
+        """Register who tells the Owner how a publish ended (wired with the chat handler)."""
+        self._notify = callback
 
     def approve(
         self, sender: str, arguments: dict[str, Any], approval: Approval, channel: ChannelPort
@@ -149,34 +150,23 @@ class PostPublisher:
         return PublishResult(status="pending", error=str(uncertain))
 
     async def _finish(self, post: Post, result: PublishResult, channel: ChannelPort) -> None:
+        event: Event
         match result.status:
             case "published":
                 post.status = "published"
                 post.permalink = result.permalink
                 post.external_post_id = result.external_post_id
-                text = messages_es.published(result.permalink or "")
-                note = f"[post {post.id} published] The Owner got the Instagram link."
+                event = Published(post.id, result.permalink)
             case "failed":
                 post.status = "failed"
-                text = messages_es.PUBLISH_FAILED
-                note = (
-                    f"[post {post.id} publish failed] The Owner was told Instagram didn't take it. "
-                    "It can't be published again: offer to make a new one."
-                )
+                event = PublishFailed(post.id)
             case _:  # pending (or scheduled): it may be live, so no failure and no re-publish
                 post.status = "publish_pending"
                 post.external_post_id = result.external_post_id
-                text = messages_es.PUBLISH_PENDING
-                note = (
-                    f"[post {post.id} publish pending] Instagram is still processing it and the "
-                    "Owner was told it will show up on their account soon. Do not publish it again."
-                )
+                event = PublishPending(post.id)
         logger.info("post %s: %s (%s)", post.id, post.status, result.error or "ok")
-        # After the turn that started it has sent its reply, so the Owner reads "lo subo" first
-        # and the note lands after that turn's own steps.
-        async with self._history.lock(post.sender):
-            try:
-                await channel.send_text(post.sender, text)
-            except ChannelError:
-                logger.warning("could not tell %s about post %s", mask(post.sender), post.id)
-            self._history.extend(post.sender, [user_step(note)])
+        if self._notify is None:
+            raise RuntimeError("PostPublisher.on_event was never called: nobody can tell the Owner")
+        # The chat handler takes the sender's lock, so the Owner reads "lo subo" first and the
+        # note lands after the turn that started this publish.
+        await self._notify(post.sender, event, channel)

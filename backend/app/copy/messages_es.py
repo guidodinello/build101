@@ -1,4 +1,14 @@
-"""Fixed owner-facing messages, from docs/product/conversation-design.md (copy deck)."""
+"""Fixed owner-facing text, from docs/product/conversation-design.md (copy deck).
+
+The orchestrator writes what the Owner reads (ADR 0025): code emits an event
+(`app/conversation/events.py`) and the model answers it with the conversation in view. So this
+module holds only:
+
+- fallbacks for when the LLM is unavailable: `REPLY_FAILED`, `STILL_WORKING`, `LOOKING_AT_PHOTOS`
+  and the text of each event (`events.fallback`), sent only if that event's turn fails;
+- text sent directly, outside the chat: `BRAND_GENERATING` (onboarding API, until T23);
+- labels, not conversation: `carousel_slide`.
+"""
 
 STALE_BUTTON = "Ese botón ya no está activo 🙂"
 UNSUPPORTED_MEDIA = (
