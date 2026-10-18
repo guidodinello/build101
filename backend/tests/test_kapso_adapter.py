@@ -202,3 +202,29 @@ async def test_response_without_message_id_raises() -> None:
 
     with pytest.raises(ChannelError, match="no message id"):
         await channel.send_text("59899000001", "hola")
+
+
+async def test_send_text_converts_markdown_bold() -> None:
+    channel, requests = channel_with(sent_ok)
+
+    await channel.send_text("59899000001", "**Hola** https://www.instagram.com/p/AbC__d/")
+
+    assert json.loads(requests[0].content)["text"]["body"] == (
+        "*Hola* https://www.instagram.com/p/AbC__d/"
+    )
+
+
+async def test_send_image_converts_markdown_bold_in_the_caption() -> None:
+    channel, requests = channel_with(sent_ok)
+
+    await channel.send_image("59899000001", "https://img.test/a.jpg", caption="**1/5** __listo__")
+
+    assert json.loads(requests[0].content)["image"]["caption"] == "*1/5* _listo_"
+
+
+async def test_send_buttons_converts_markdown_bold_in_the_body() -> None:
+    channel, requests = channel_with(sent_ok)
+
+    await channel.send_buttons("59899000001", "**¿Lo subo?**", [Button(id="ok", title="Sí")])
+
+    assert json.loads(requests[0].content)["interactive"]["body"] == {"text": "*¿Lo subo?*"}
