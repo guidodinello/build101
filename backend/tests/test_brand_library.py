@@ -1,9 +1,11 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.conversation.library import BrandBrains, BrandLibrary
 from app.db.models import AssetProduct, BrandAsset, BrandBrainVersion, Business, Product
+from app.storage import StorageError
 from tests.conftest import make_image, requires_db
 from tests.fakes import FakeStorage, brand_brain
 
@@ -155,3 +157,26 @@ async def test_an_owner_without_a_logo_has_none(
         await db.commit()
 
     assert await BrandLibrary(sessions, FakeStorage()).logo(PHONE) is None
+
+
+async def test_a_logo_missing_from_storage_is_an_error_not_no_logo(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    async with sessions() as db:
+        business = Business(owner_phone=PHONE, name="Katei")
+        db.add(business)
+        await db.flush()
+        db.add(
+            BrandAsset(
+                business_id=business.id,
+                kind="logo",
+                source="web",
+                status="ready",
+                storage_path=f"{business.id}/logo.png",
+                mime_type="image/png",
+            )
+        )
+        await db.commit()
+
+    with pytest.raises(StorageError):
+        await BrandLibrary(sessions, FakeStorage()).logo(PHONE)

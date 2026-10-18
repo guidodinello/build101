@@ -9,7 +9,7 @@ from app.agents.schemas import BrandBrain
 from app.db.models import AssetProduct, BrandAsset, Business, Product
 from app.jobs.brand import latest_brand_brain
 from app.onboarding.uploads import llm_copy_path
-from app.storage import ASSETS_BUCKET, StoragePort
+from app.storage import ASSETS_BUCKET, StorageError, StoragePort
 
 from .photos import Photo
 
@@ -90,8 +90,8 @@ class BrandLibrary:
         if asset.id not in self._logos:
             data = await self._storage.download(ASSETS_BUCKET, asset.storage_path)
             if data is None:
-                logger.warning("the logo %s is missing from storage", asset.id)
-                return None
+                # Not "no logo": the Owner has one, and the chat must not tell them otherwise.
+                raise StorageError(f"the logo {asset.id} is missing from storage")
             self._logos[asset.id] = data
         return self._logos[asset.id]
 

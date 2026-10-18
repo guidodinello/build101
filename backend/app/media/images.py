@@ -79,9 +79,11 @@ def logo_backing(behind: Image.Image, mark: Image.Image) -> tuple[int, int, int]
     alpha = mark.getchannel("A")
     if alpha.getextrema()[0] >= OPAQUE_ALPHA:
         return None
-    opaque = alpha.point(lambda value: 255 if value >= OPAQUE_ALPHA else 0)
-    logo_luminance = ImageStat.Stat(mark.convert("L"), opaque).mean[0]
-    behind_luminance = ImageStat.Stat(behind.convert("L"), opaque).mean[0]
+    # A logo that is semi-transparent everywhere has no opaque pixel: measure all visible ones.
+    threshold = OPAQUE_ALPHA if alpha.getextrema()[1] >= OPAQUE_ALPHA else 1
+    shape = alpha.point(lambda value: 255 if value >= threshold else 0)
+    logo_luminance = ImageStat.Stat(mark.convert("L"), shape).mean[0]
+    behind_luminance = ImageStat.Stat(behind.convert("L"), shape).mean[0]
     if abs(logo_luminance - behind_luminance) >= LOGO_MIN_CONTRAST:
         return None
     return LIGHT_BACKING if logo_luminance < MID_LUMINANCE else DARK_BACKING

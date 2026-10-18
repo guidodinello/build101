@@ -139,3 +139,15 @@ def test_a_dark_transparent_logo_on_a_light_photo_gets_no_backing() -> None:
 def test_a_fully_transparent_logo_is_rejected() -> None:
     with pytest.raises(ValueError, match="transparent"):
         fit_logo(transparent_logo((100, 100), (0, 0), "black"), POST_SIZE)
+
+
+def test_a_logo_that_is_semi_transparent_everywhere_still_gets_a_backing() -> None:
+    post = to_post_image(make_image((1080, 1350), color="#202020"))
+    watermark = Image.new("RGBA", (300, 120), (0, 0, 0, 100))
+    buffer = BytesIO()
+    watermark.save(buffer, format="PNG")
+
+    result = add_logo(post, buffer.getvalue())
+
+    margin = round(1080 * 0.04)
+    assert near(pixel(result, (1080 - margin - 4, 1350 - margin - 30)), LIGHT_BACKING, 48)

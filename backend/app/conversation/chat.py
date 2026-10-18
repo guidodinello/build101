@@ -383,11 +383,14 @@ class ChatHandler:
         if self._library is None:
             return
         try:
-            self._photos.set_library(sender, await self._library.photos(sender))
-            self._photos.set_logo(sender, await self._library.logo(sender))
+            photos = await self._library.photos(sender)
+            logo = await self._library.logo(sender)
         except (SQLAlchemyError, StorageError):
-            # Answer with the photos already loaded rather than not at all.
+            # Answer with the photos and logo already loaded rather than not at all.
             logger.warning("loading the wizard photos failed for %s", mask(sender), exc_info=True)
+            return
+        self._photos.set_library(sender, photos)
+        self._photos.set_logo(sender, logo)
 
     async def _took_brand_correction(self, sender: str, words: str) -> bool:
         brand = self._buttons.brand
