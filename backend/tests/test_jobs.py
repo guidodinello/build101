@@ -373,11 +373,40 @@ async def test_a_brand_change_queues_revise_mode_once(
         jobs = (await db.scalars(select(Job).where(Job.business_id == business.id))).all()
         updated = await db.get_one(Business, business.id)
     # The old summary's buttons go stale while the revised one is made.
-    assert (updated.onboarding_state, updated.conversation_state) == ("generating_brand", {})
+    assert (updated.onboarding_state, updated.conversation_state) == (
+        "generating_brand",
+        {"resume_state": "awaiting_brand_confirmation"},
+    )
     assert await buttons.handle(PHONE, "brand_ok", FakeChannel()) == StaleButton()
     assert [(job.kind, job.payload) for job in jobs] == [
         ("generate_brand", {"correction": "somos más formales"})
     ]
+
+
+async def test_a_failed_revision_puts_an_active_business_back(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business = await add_business(sessions, state="active")
+    await BrandFlow(sessions).revise(PHONE, "más formales")
+
+    with pytest.raises(IndexError):  # the model has no answer: the Strategist fails
+        await generate_brand(context(sessions, business, SequenceModel([])), {"correction": "x"})
+
+    async with sessions() as db:
+        restored = await db.get_one(Business, business.id)
+    assert (restored.onboarding_state, restored.conversation_state) == ("active", {})
+
+
+async def test_a_failed_first_brand_stays_generating(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business = await add_business(sessions)
+
+    with pytest.raises(IndexError):
+        await generate_brand(context(sessions, business, SequenceModel([])), {})
+
+    async with sessions() as db:
+        assert (await db.get_one(Business, business.id)).onboarding_state == "generating_brand"
 
 
 async def test_an_active_brand_can_be_changed_but_not_before_onboarding(

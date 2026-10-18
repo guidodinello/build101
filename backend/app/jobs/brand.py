@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.brand_strategist import BrandInputs, write_brand_brain
 from app.agents.schemas import BrandBrain
 from app.channels.base import Button, ChannelPort
+from app.conversation.brand import RESUME_STATE
 from app.conversation.history import record_note
 from app.copy import messages_es
 from app.db.models import BrandAsset, BrandBrainVersion, Business, Job, Product
@@ -31,15 +32,23 @@ BRAND_SUMMARY_NOTE = (
 async def generate_brand(context: JobContext, payload: dict[str, Any]) -> dict[str, Any]:
     """Brand Strategist → new Brand Brain version → `brand_summary` with its buttons (Flow 3).
 
-    `payload["correction"]` (the Owner's words after "Corregir algo") runs revise mode on the
-    latest version.
+    `payload["correction"]` (the Owner's words after "Corregir algo", or an `update_brand`
+    change) runs revise mode on the latest version.
     """
     if context.business_id is None:
         raise ValueError("generate_brand needs a business")
-    business_id = context.business_id
+    try:
+        return await _generate_brand(context, context.business_id, payload.get("correction"))
+    except Exception:
+        await _resume(context, context.business_id)
+        raise
+
+
+async def _generate_brand(
+    context: JobContext, business_id: uuid.UUID, correction: str | None
+) -> dict[str, Any]:
     await _wait_for_analyses(context, business_id)
 
-    correction = payload.get("correction")
     async with context.sessions() as db:
         business = await db.get_one(Business, business_id)
         previous = await latest_brand_brain(db, business_id)
@@ -74,6 +83,17 @@ async def generate_brand(context: JobContext, payload: dict[str, Any]) -> dict[s
         await send_brand_summary(context.channel, owner_phone, name or brain.business_name, brain)
         await record_note(context.sessions, business_id, BRAND_SUMMARY_NOTE)
     return {"version": version}
+
+
+async def _resume(context: JobContext, business_id: uuid.UUID) -> None:
+    """A failed revision of a confirmed brand puts the Business back where it was (ADR 0028)."""
+    async with context.sessions() as db:
+        business = await db.get_one(Business, business_id, with_for_update=True)
+        previous = business.conversation_state.get(RESUME_STATE)
+        if business.onboarding_state == "generating_brand" and previous:
+            business.onboarding_state = previous
+            business.conversation_state = {}
+            await db.commit()
 
 
 async def send_brand_summary(

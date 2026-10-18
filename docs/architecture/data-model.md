@@ -1,8 +1,8 @@
 # Data model
 
-Postgres on Supabase ([ADR 0003](../decisions/0003-database-supabase-sqlalchemy.md)). The schema below is the **initial Alembic migration** (`backend/migrations/versions/0001_initial.py`, executing this SQL). After that, every change is a new migration; never edit an applied one.
+Postgres on Supabase ([ADR 0003](../decisions/0003-database-supabase-sqlalchemy.md)). The schema below is the **initial Alembic migration** (`backend/migrations/versions/0001_initial.py`, executing this SQL) plus the tables and columns later migrations added, each marked with its migration (`0002_conversation_memory`: `conversation_steps`, `owner_notes`, `businesses.conversation_summary`). Every change is a new migration; never edit an applied one.
 
-Conventions follow [`.claude/rules/database.md`](../../.claude/rules/database.md): explicitly named constraints and indexes (`uq_`, `ck_`, `ix_`, `{table}_{col}_fkey`), every FK column indexed (or covered by a composite index or unique constraint that starts with it), `timestamptz` everywhere, enum-like values as `text` + `check`, JSON in `jsonb`. Primary keys are UUIDs rather than identity integers, because IDs travel in WhatsApp button payloads and URLs (see the ADR).
+Conventions follow [`.claude/rules/database.md`](../../.claude/rules/database.md): explicitly named constraints and indexes (`uq_`, `ck_`, `ix_`, `{table}_{col}_fkey`), every FK column indexed (or covered by a composite index or unique constraint that starts with it), `timestamptz` everywhere, enum-like values as `text` + `check`, JSON in `jsonb`. Primary keys are UUIDs rather than identity integers, because IDs travel in WhatsApp button payloads and URLs (see the ADR); `conversation_steps`, whose ids never leave the backend and only order the history, uses an identity key.
 
 ## Entity overview
 

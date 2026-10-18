@@ -6,6 +6,7 @@ from app.jobs.queue import enqueue
 
 AWAITING_CORRECTION = "brand_correction"
 REVISABLE_STATES = ("awaiting_brand_confirmation", "active")
+RESUME_STATE = "resume_state"
 
 
 class BrandFlow:
@@ -51,7 +52,8 @@ class BrandFlow:
             )
             if business is None:
                 return False
-            business.conversation_state = {}
+            # Where a failed revision puts the Business back (`generate_brand`).
+            business.conversation_state = {RESUME_STATE: business.onboarding_state}
             # Back to generating: the old summary's buttons go stale until the new one arrives.
             business.onboarding_state = "generating_brand"
             enqueue(db, "generate_brand", business.id, {"correction": change})
