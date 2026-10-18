@@ -93,6 +93,7 @@ class BrandBrain(BaseModel):
     hashtags: list[str]               # 10–20, mix of niche + local
     posting: PostingPrefs             # posts_per_week, preferred_days, preferred_time ("19:00")
     constraints: list[str]            # hard "never" rules from the owner
+    visual_identity: VisualIdentity   # Owner colors win; neutral palette when they have none
     whatsapp_summary: str             # ≤ 600 chars, WhatsApp-formatted, for brand_summary message
 ```
 
@@ -442,6 +443,10 @@ Guards are in the tool implementations, not in the prompt. `create_post` returns
 - a91c… sent 16:20, caption "me llegó esta mesa ratona nueva 😍 armame algo para subir" — "Mesa ratona de roble, vista de frente"
 - a92d… sent 16:20 — "Detalle de la veta de la madera"
 </recent_photos>
+<brand_photos>
+- b1: Mesa nórdica: Mesa de roble en un living con luz natural
+- b2: Detalle de la veta en el taller
+</brand_photos>
 <owner_style>short (last 5 messages: median 6 words, casual)</owner_style>
 <catalog_size>products: 23 · photos: 64 · videos: 7 (reel-suitable: 4)</catalog_size>
 <active_offers>
@@ -452,7 +457,7 @@ Guards are in the tool implementations, not in the prompt. `create_post` returns
 </unannounced_results>
 ```
 
-`<recent_photos>` lists photos the Owner sent in the last 30 minutes that no post uses yet, with their caption and the Asset Analyst's description once it exists ("analizando…" before). `<owner_style>` (Should, F1.9) is computed in code from the Owner's last 5 messages. `<catalog_size>` and `<active_offers>` appear only once the Could Catalog and Offer features exist.
+`<recent_photos>` lists photos the Owner sent in the last 30 minutes that no post uses yet, with their caption and the Asset Analyst's description once it exists ("analizando…" before). `<brand_photos>` lists the photos uploaded in the wizard (ready, not archived) with ids `b1`, `b2`… in upload order, the Product the Owner linked each one to and the Asset Analyst's description; `create_post` takes these ids like the chat's. Until T19 the chat loads them each turn through `BrandLibrary` (`app/conversation/library.py`), which keeps each agents' copy in memory after the first download. `<owner_style>` (Should, F1.9) is computed in code from the Owner's last 5 messages. `<catalog_size>` and `<active_offers>` appear only once the Could Catalog and Offer features exist.
 
 `<unannounced_results>` lists scheduled posts whose `published` / `publish_failed` notification WhatsApp rejected (outside the 24-hour window, see [integrations.md](integrations.md#receiving)). The orchestrator mentions them in its next reply; the inbound handler then clears them.
 

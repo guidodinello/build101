@@ -6,7 +6,9 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-from app.channels.base import ChannelError, ChannelPort, InboundMedia, InboundMessage
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.channels.base import Button, ChannelError, ChannelPort, InboundMedia, InboundMessage
 from app.channels.inbound import mask
 from app.copy import messages_es
 from app.llm.client import (
@@ -24,10 +26,13 @@ from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts
 from app.prompts import load_prompt
+from app.storage import StorageError
 
 from .approval import Approval, decide
+from .button_router import ButtonRouter
 from .events import (
     AudioUnclear,
+    BrandRevising,
     Event,
     PhotosReceived,
     PhotoTooBig,
@@ -36,9 +41,11 @@ from .events import (
     Published,
     StaleButton,
     UnsupportedMedia,
+    buttons,
     fallback,
 )
 from .history import InMemoryHistory
+from .library import BrandLibrary
 from .photos import InMemoryPhotos, Photo
 from .tools import TOOLS
 
@@ -52,6 +59,7 @@ BYTES_PER_MB = 1024 * 1024
 PHOTO_DEBOUNCE_S = 5.0
 # WhatsApp hides the typing indicator after about 25 s, and as soon as we send a message.
 KEEP_ALIVE_S = 20.0
+WHATSAPP_BODY_MAX = 1024
 
 
 @cache
@@ -83,6 +91,8 @@ class ChatHandler:
         posts: PostMaker,
         publisher: PostPublisher,
         store: InMemoryPosts,
+        buttons: ButtonRouter,
+        library: BrandLibrary | None,
         assistant_name: str,
         max_photo_mb: int,
         photo_debounce_s: float = PHOTO_DEBOUNCE_S,
@@ -94,6 +104,8 @@ class ChatHandler:
         self._posts = posts
         self._publisher = publisher
         self._store = store
+        self._buttons = buttons
+        self._library = library
         self._system = system_prompt(assistant_name)
         self._max_photo_mb = max_photo_mb
         self._photo_debounce_s = photo_debounce_s
@@ -123,6 +135,12 @@ class ChatHandler:
         self, message: InboundMessage, photos: list[Photo], channel: ChannelPort
     ) -> str | None:
         """The reply to send, or None when an event turn already answered."""
+        words = message.text if message.kind == "text" else None
+        if message.kind == "audio" and message.audio:
+            words = message.audio.provider_transcript
+        if words and await self._took_brand_correction(message.sender, words):
+            await self._event_turn(message.sender, BrandRevising(words), channel)
+            return None
         match message.kind:
             case "text" if message.text:
                 return await self._llm_turn(
@@ -147,6 +165,11 @@ class ChatHandler:
                 )
             case "audio":
                 event: Event = AudioUnclear()
+            case "button" if message.button:
+                tapped = await self._buttons.handle(message.sender, message.button.id, channel)
+                if tapped is None:
+                    return None
+                event = tapped
             case "button":
                 event = StaleButton()
             case _:
@@ -225,9 +248,10 @@ class ChatHandler:
         """`text` is what the model reads; `words`, the Owner's own text, decides approval."""
         approval = self._approval(sender, words, attached)
         user = user_step(text)
+        await self._refresh_library(sender)
         recent = self._photos.recent(sender)
         unseen = [photo for photo in recent if not photo.seen]
-        with_context = step_with_photos(text, recent, unseen)
+        with_context = step_with_photos(text, recent, unseen, self._photos.library(sender))
         keep_alive = self._start(self._keep_owner_posted(sender, message_id, bool(unseen), channel))
         try:
             text, turn = await self._converse(sender, with_context, approval, True, channel)
@@ -280,7 +304,10 @@ class ChatHandler:
         # Only these turns attach the photos, so only they may mark them seen.
         recent = self._photos.recent(sender) if with_photos else []
         unseen = [photo for photo in recent if not photo.seen]
-        current = step_with_photos(note, recent, unseen) if with_photos else step
+        if with_photos:
+            await self._refresh_library(sender)
+        library = self._photos.library(sender) if with_photos else []
+        current = step_with_photos(note, recent, unseen, library) if with_photos else step
         keep_alive = (
             self._start(self._keep_owner_posted(sender, message_id, bool(unseen), channel))
             if with_photos
@@ -303,7 +330,7 @@ class ChatHandler:
             # The link is data, not copy: it reaches the Owner exactly, whatever the model wrote.
             text = f"{text}\n{event.permalink}"
         self._history.extend(sender, [step, *turn])
-        await channel.send_text(sender, text)
+        await send_with_buttons(sender, text, buttons(event), channel)
 
     async def _send_fallback(
         self, sender: str, event: Event, step: Step, channel: ChannelPort
@@ -317,7 +344,7 @@ class ChatHandler:
             return
         told = user_step(f'{event.note()}\nThe Owner was told: "{text}"')
         self._history.extend(sender, [told])
-        await channel.send_text(sender, text)
+        await send_with_buttons(sender, text, buttons(event), channel)
 
     async def _converse(
         self,
@@ -348,6 +375,26 @@ class ChatHandler:
                 for call in reply.function_calls
             )
         return "", turn
+
+    async def _refresh_library(self, sender: str) -> None:
+        if self._library is None:
+            return
+        try:
+            self._photos.set_library(sender, await self._library.photos(sender))
+        except (SQLAlchemyError, StorageError):
+            # Answer with the photos already loaded rather than not at all.
+            logger.warning("loading the wizard photos failed for %s", mask(sender), exc_info=True)
+
+    async def _took_brand_correction(self, sender: str, words: str) -> bool:
+        brand = self._buttons.brand
+        if brand is None:
+            return False
+        try:
+            return await brand.take_correction(sender, words)
+        except SQLAlchemyError:
+            # The database is down: answer as a normal turn rather than not at all.
+            logger.warning("brand correction check failed for %s", mask(sender), exc_info=True)
+            return False
 
     async def _keep_owner_posted(
         self, sender: str, message_id: str, looking_at_photos: bool, channel: ChannelPort
@@ -423,21 +470,43 @@ def request(photos: list[Photo], text: str) -> str:
     return f"[{label} {' '.join(photo.id for photo in photos)}] {text}"
 
 
-def step_with_photos(text: str, recent: list[Photo], unseen: list[Photo]) -> Step:
+async def send_with_buttons(
+    sender: str, text: str, attached: list[Button], channel: ChannelPort
+) -> None:
+    """`text`, with the event's buttons under it when it has some (T18)."""
+    if not attached:
+        await channel.send_text(sender, text)
+        return
+    if len(text) > WHATSAPP_BODY_MAX:
+        # Over the limit of a buttons message's body: the text first, then the buttons.
+        await channel.send_text(sender, text)
+        text = "👆"
+    await channel.send_buttons(sender, text, attached)
+
+
+def step_with_photos(
+    text: str, recent: list[Photo], unseen: list[Photo], library: list[Photo] | None = None
+) -> Step:
     """The context (and the photos the model hasn't seen) ride on this turn's user step only,
     so the system prompt and the stored history stay byte-identical across turns."""
     return user_step(
         text,
-        text_content(context_block(recent, unseen)),
+        text_content(context_block(recent, unseen, library)),
         *(image_content(photo.data, "image/jpeg") for photo in unseen),
     )
 
 
-def context_block(recent: list[Photo], attached: list[Photo]) -> str:
+def context_block(
+    recent: list[Photo], attached: list[Photo], library: list[Photo] | None = None
+) -> str:
     lines = [describe_photo(photo) for photo in recent] or ["none"]
     if attached:
         lines.append(f"Attached below, in this order: {', '.join(photo.id for photo in attached)}")
-    return "<recent_photos>\n" + "\n".join(lines) + "\n</recent_photos>"
+    block = "<recent_photos>\n" + "\n".join(lines) + "\n</recent_photos>"
+    if library:
+        listed = "\n".join(f"- {photo.id}: {photo.caption}" for photo in library)
+        block += f"\n<brand_photos>\n{listed}\n</brand_photos>"
+    return block
 
 
 def describe_photo(photo: Photo) -> str:

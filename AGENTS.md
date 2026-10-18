@@ -17,6 +17,7 @@ How the build101 team works. This file is the single source of truth for the wor
 | [`frontend/`](frontend/README.md) | Owner-facing web: onboarding form, dashboard, WhatsApp simulator (Next.js, [ADR 0004](docs/decisions/0004-frontend-nextjs-vercel.md)) |
 | [`.claude/skills/`](.claude/skills/README.md) | Agent skills that automate the steps below; plain Markdown, readable by anyone |
 | [`.claude/rules/`](.claude/rules/README.md) | Path-scoped coding rules (Python, database, Docker, CI) |
+| [`.claude/routines/`](.claude/routines/README.md) | Nightly cloud agents (product research, bug hunt) that open draft PRs; backup of their prompts and schedules |
 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | CI: markdownlint, docs index check, actionlint; one aggregate `CI` check |
 | [`scripts/`](scripts/) | Repo tooling (e.g. `check_docs_index.py`) |
 | GitHub issues / PRs | Work items (issues) and changes under review (PRs) |

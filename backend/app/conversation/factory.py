@@ -2,6 +2,7 @@ import logging
 
 from app.channels.inbound import EchoHandler, InboundHandler
 from app.config import Settings
+from app.db.session import get_sessionmaker
 from app.imagegen.factory import build_image_gen
 from app.llm.client import GeminiChat
 from app.media.public import PublicImages
@@ -11,9 +12,12 @@ from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts
 from app.publishing.base import PublisherPort
 from app.publishing.mock import MOCK_ACCOUNT_ID
+from app.storage import get_storage
 
+from .button_router import ButtonRouter
 from .chat import ChatHandler
 from .history import InMemoryHistory
+from .library import BrandLibrary
 from .photos import InMemoryPhotos
 
 logger = logging.getLogger(__name__)
@@ -52,6 +56,13 @@ def build_inbound_handler(
             publishing = PostPublisher(
                 publisher, store, images, settings.public_backend_url, account_id
             )
+            sessions = get_sessionmaker() if settings.database_url else None
+            buttons = ButtonRouter(store, posts, publishing, sessions)
+            library = (
+                BrandLibrary(sessions, get_storage())
+                if sessions and settings.supabase_url and settings.supabase_service_role_key
+                else None
+            )
             chat = ChatHandler(
                 model,
                 history,
@@ -59,6 +70,8 @@ def build_inbound_handler(
                 posts,
                 publishing,
                 store,
+                buttons,
+                library,
                 settings.assistant_name,
                 max_photo_mb=settings.max_photo_mb,
             )

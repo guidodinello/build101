@@ -21,7 +21,7 @@ from app.media.images import to_post_image
 from app.media.public import PublicImages
 
 from .drafts import PostDrafter
-from .store import InMemoryPosts, Post, PostImage
+from .store import APPROVABLE, InMemoryPosts, Post, PostImage
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +91,26 @@ class PostMaker:
             args = CreatePostArgs.model_validate(arguments)
         except ValidationError as exc:
             return {"error": "invalid_arguments", "detail": str(exc)}
+        photos, unknown = self._photos.find(sender, args.asset_ids)
+        if unknown:
+            return {"error": "unknown_asset", "asset_ids": unknown}
+        if not photos:
+            return {"error": "no_photos"}
+        return self._start(sender, args, photos, channel)
+
+    def remake(self, post: Post, channel: ChannelPort) -> dict[str, Any]:
+        """Another post from the same request as `post` ([Sí, otro] after [Descartar])."""
+        args = CreatePostArgs(
+            brief=post.brief,
+            asset_ids=[photo.id for photo in post.source_photos],
+            style=post.style,
+            slide_count=post.slide_count,
+        )
+        return self._start(post.sender, args, post.source_photos, channel)
+
+    def _start(
+        self, sender: str, args: CreatePostArgs, photos: list[Photo], channel: ChannelPort
+    ) -> dict[str, Any]:
         if sender in self._generating:
             return {"error": "generation_in_progress"}
         # Only a design generates images, which is what the daily limit caps.
@@ -99,11 +119,6 @@ class PostMaker:
         designs_today = started if day == today else 0
         if args.style == "design" and designs_today >= self._max_posts_per_day:
             return {"error": "daily_limit"}
-        photos, unknown = self._photos.find(sender, args.asset_ids)
-        if unknown:
-            return {"error": "unknown_asset", "asset_ids": unknown}
-        if not photos:
-            return {"error": "no_photos"}
 
         self._generating.add(sender)
         if args.style == "design":
@@ -133,7 +148,7 @@ class PostMaker:
         try:
             post = await self._render(args, photos)
             paths = await self._send(sender, post.images, post.text, channel)
-            self._keep(sender, post_id, args, paths, post)
+            self._keep(sender, post_id, args, photos, paths, post)
             event = PostSent(
                 post_id,
                 len(post.images),
@@ -198,15 +213,32 @@ class PostMaker:
         )
 
     def _keep(
-        self, sender: str, post_id: str, args: CreatePostArgs, paths: list[str], post: RenderedPost
+        self,
+        sender: str,
+        post_id: str,
+        args: CreatePostArgs,
+        photos: list[Photo],
+        paths: list[str],
+        post: RenderedPost,
     ) -> None:
         """Store the sent post for approval, and retire the one it remakes."""
         images = [PostImage(path, data) for path, data in zip(paths, post.images, strict=True)]
-        self._posts.add(Post(post_id, sender, images, post.text))
+        self._posts.add(
+            Post(
+                post_id,
+                sender,
+                images,
+                post.text,
+                brief=args.brief,
+                style=args.style,
+                slide_count=args.slide_count,
+                source_photos=photos,
+            )
+        )
         if args.replaces is None:
             return
         old = self._posts.get(sender, args.replaces)
-        if old is None or old.status != "pending_approval":
+        if old is None or old.status not in APPROVABLE:
             logger.info(
                 "post %s replaces %s, which is not pending: ignored", post_id, args.replaces
             )

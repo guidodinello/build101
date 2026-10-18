@@ -19,7 +19,7 @@ from app.publishing.base import (
     PublishRetryable,
 )
 
-from .store import InMemoryPosts, Post
+from .store import APPROVABLE, InMemoryPosts, Post
 
 logger = logging.getLogger(__name__)
 
@@ -79,19 +79,34 @@ class PostPublisher:
         post = self._posts.get(sender, args.post_id)
         if post is None:
             return {"error": "unknown_post"}
-        if post.status != "pending_approval":
+        if post.status not in APPROVABLE:
             return {"error": "post_not_pending", "status": post.status}
         if approval.post_id != post.id:
             result: dict[str, Any] = {"error": approval.reason}
             if approval.pending:
                 result["pending"] = approval.pending
             return result
+        return self._start(post, channel)
+
+    def publish_approved(self, post: Post, channel: ChannelPort) -> dict[str, Any]:
+        """[Publicar ahora]: the tap is the Owner's explicit approval (ADR 0007)."""
+        if post.status != "approved":
+            return {"error": "post_not_approved", "status": post.status}
+        return self._start(post, channel)
+
+    def retry(self, post: Post, channel: ChannelPort) -> dict[str, Any]:
+        """[Reintentar] after a definite failure, under a new idempotency key."""
+        if post.status != "failed":
+            return {"error": "post_not_failed", "status": post.status}
+        return self._start(post, channel)
+
+    def _start(self, post: Post, channel: ChannelPort) -> dict[str, Any]:
         account_id = self._account_id
         if account_id is None:
             logger.warning("cannot publish post %s: ZERNIO_ACCOUNT_ID is not set", post.id)
             return {"error": "need_ig"}
-
         post.status = "publishing"  # before the task starts, so a second "subilo" finds it busy
+        post.publish_attempts += 1
         task = asyncio.create_task(self._publish(post, account_id, channel))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -129,7 +144,7 @@ class PostPublisher:
                 self._images.keep(image.path, image.data)
             try:
                 return await self._publisher.publish(
-                    account_id, post.caption, media, idempotency_key=post.id
+                    account_id, post.caption, media, idempotency_key=post.idempotency_key
                 )
             except PublishInProgress as exc:
                 uncertain = exc

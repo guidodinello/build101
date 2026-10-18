@@ -47,6 +47,8 @@ class InMemoryPhotos:
         self._recent_for = recent_for
         self._now = now
         self._senders: defaultdict[str, _SenderPhotos] = defaultdict(_SenderPhotos)
+        # The wizard's photos (`BrandLibrary`), refreshed every turn; they don't expire.
+        self._library: dict[str, list[Photo]] = {}
 
     def add(self, sender: str, data: bytes, caption: str | None) -> Photo:
         stored = self._senders[sender]
@@ -60,9 +62,15 @@ class InMemoryPhotos:
         """Photos from the last 30 minutes that no post uses yet: what `<recent_photos>` lists."""
         return [photo for photo in self._kept(sender) if not photo.used]
 
+    def set_library(self, sender: str, photos: list[Photo]) -> None:
+        self._library[sender] = photos
+
+    def library(self, sender: str) -> list[Photo]:
+        return self._library.get(sender, [])
+
     def find(self, sender: str, ids: list[str]) -> tuple[list[Photo], list[str]]:
-        """The kept photos with these ids, used ones included, and the ids not found."""
-        by_id = {photo.id: photo for photo in self._kept(sender)}
+        """The kept and library photos with these ids, used ones included, and the ids not found."""
+        by_id = {photo.id: photo for photo in [*self._kept(sender), *self.library(sender)]}
         found = [by_id[photo_id] for photo_id in ids if photo_id in by_id]
         return found, [photo_id for photo_id in ids if photo_id not in by_id]
 

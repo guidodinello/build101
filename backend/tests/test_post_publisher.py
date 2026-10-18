@@ -3,6 +3,7 @@ from datetime import datetime
 
 import pytest
 
+from app.conversation.button_router import ButtonRouter
 from app.conversation.chat import ChatHandler
 from app.conversation.history import InMemoryHistory
 from app.conversation.photos import InMemoryPhotos
@@ -81,6 +82,8 @@ class Rig:
             maker,
             self.publishing,
             self.store,
+            ButtonRouter(self.store, maker, self.publishing, sessions=None),
+            None,
             assistant_name="Mora",
             max_photo_mb=1,
             keep_alive_s=60.0,

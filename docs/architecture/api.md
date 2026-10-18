@@ -197,8 +197,8 @@ Free-text approvals ("subilo", "publicalo") reach the same handlers through the 
 | `post_replace:{post_id}` | post `discarded` | new post with the same brief (origin same) → `generate_post` |
 | `post_publish:{post_id}` | post `approved` | enqueue `publish_post(now)` |
 | `post_schedule:{post_id}` | post `approved` (Should) | if `scheduled_for` in future → enqueue `publish_post(scheduled_for)`; else `awaiting = schedule_time`, send `schedule_ask` |
-| `post_retry:{post_id}` | post `failed` | retry the last failed job for that post |
-| `photo_post:{asset_id}` | active | `create_post(origin="photo", asset_id, brief="Post con esta foto")` |
+| `post_retry:{post_id}` | post `failed` | retry the last failed job for that post. Until T30, publishes again with idempotency key `{post_id}-r{n}` (the provider keeps a failed key's result) |
+| `photo_post:{asset_id}` | active | `create_post(origin="photo", asset_id, brief="Post con esta foto")`. Until WhatsApp photos are Brand assets the ids are the chat's short photo ids, comma-separated for several (`photo_post:f1,f2`), and the post uses the photos as they are |
 | `reel_post:{asset_id}` | active, video asset with `reel_suitable` (Could) | `create_post(origin="photo", format="reel", asset_id, brief="Reel con este video")` (`origin = "photo"` covers any asset the Owner sent) |
 | `retry:{job_id}` | job `failed` | re-enqueue same kind + payload |
 | `noop` | always | send nothing (or a 👍 reaction) |
