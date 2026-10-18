@@ -5,7 +5,8 @@
 - [ ] **Product name and assistant name.** Needed for the welcome message, the wizard header and the pitch (`ASSISTANT_NAME`).
 - [ ] **Hackathon rules:** is pre-written code allowed? If not, only accounts, materials and these docs are prepared in advance (see [implementation/plan.md](implementation/plan.md#before-the-hackathon-checklist)).
 - [x] **Backend host:** Railway, Trial first and Hobby if needed ([ADR 0017](decisions/0017-backend-host-railway.md)). Tenki is only the PR reviewer. Deployed 2026-10-18 in `us-east4-eqdc4a` (Railway has no South America region, so each Supabase round trip crosses continents) on the full Trial.
-- [ ] **Kapso webhook and local dev:** when the Kapso webhook moves to Railway, inbound WhatsApp stops reaching a local backend, and the `simulator` channel is not built yet (T21). Decide the timing of the repoint and how local development keeps working (temporary repoint to a tunnel, a second webhook or number if Kapso allows it, or the simulator once T21 lands).
+- [x] **Kapso repoint to Railway:** done 2026-10-18. The tunnel webhooks on the Sandbox number are paused and a new "Message received" webhook points at the Railway domain; a message went through end to end ([integrations.md](architecture/integrations.md#kapso-setup-hour-1)). Each Kapso webhook has its own secret, so `KAPSO_WEBHOOK_SECRET` had to be updated on Railway.
+- [ ] **Local WhatsApp development:** the `simulator` channel is not built yet (T21), so developing against real WhatsApp locally means toggling the Kapso webhooks back to a tunnel (steps in [backend README § Deploy](../backend/README.md#switching-whatsapp-between-railway-and-local-development)). Decide whether Kapso allows a second webhook or number so both can stay on, or wait for the simulator.
 - [ ] **Demo materials** from the furniture business (logo, photos, products, questionnaire answers, promo, permission to publish).
 
 ## Channel / platform risk

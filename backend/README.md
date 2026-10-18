@@ -78,6 +78,7 @@ Everything else (`GEMINI_*`, `KAPSO_*`, `ZERNIO_*`, `PUBLISHER`, `IMAGE_GEN`, ..
 - `railway logs --service backend` (deploy logs) and `railway logs --service backend --build` (build logs).
 - `curl -sS https://<service>.up.railway.app/health` returns `{"status":"ok"}`.
 - Pre-deploy output shows up in the deploy logs of the new deployment; `Running upgrade ...` lines appear only when a migration was pending.
+- uvicorn and the app log to stderr, so Railway tags every line `level=error`, including the normal `INFO` ones. It is known noise: read the message text, not the Railway level.
 
 ### Rollback
 
@@ -87,6 +88,13 @@ Redeploy the previous deployment from the Railway dashboard (service, Deployment
 
 State kept in memory is lost on every deploy or restart: running jobs (the job runner marks jobs stuck for more than 5 minutes as failed), the webhook dedupe store, served post images (`/media/*.jpg`) and the in-memory photo, history and post stores. Keep one replica ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)).
 
-### WhatsApp webhook
+### Switching WhatsApp between Railway and local development
 
-Kapso must call `https://<service>.up.railway.app/webhooks/whatsapp`, signed with `KAPSO_WEBHOOK_SECRET`. Point it at one backend at a time: two backends would both answer the Owner, and the dedupe store is per process. The `simulator` channel is not built yet (T21), so local development needs the webhook repointed at a tunnel while you work and back to Railway afterwards.
+Kapso calls `https://<service>.up.railway.app/webhooks/whatsapp` through a "Message received" webhook on the number. **Each Kapso webhook has its own signing secret**: after creating or replacing a webhook, set that webhook's secret as `KAPSO_WEBHOOK_SECRET` wherever that backend runs (Railway variable on stdin, or `backend/.env` locally). A mismatched secret gives 401s on every delivery.
+
+Point the number at one backend at a time: two backends would both answer the Owner, and the dedupe store is per process. The `simulator` channel is not built yet (T21), so developing against real WhatsApp locally means toggling:
+
+1. In the Kapso dashboard, pause the Railway webhook.
+2. Start a tunnel to the local backend (cloudflared or ngrok), set `PUBLIC_BACKEND_URL` in `backend/.env` to the tunnel URL, and enable (or create) a webhook on the tunnel URL `/webhooks/whatsapp`.
+3. Put that webhook's secret in `backend/.env` as `KAPSO_WEBHOOK_SECRET`.
+4. To go back: pause the tunnel webhook and resume the Railway one (its secret is already on Railway).
