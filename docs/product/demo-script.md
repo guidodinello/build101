@@ -32,7 +32,7 @@ Narrator:
 ### 0:30 – Onboarding (75 s)
 
 1. Owner sends "Hola" → welcome → types `{BUSINESS}` → magic link arrives.
-2. Opens the link: step 1 (prefilled name), 2–3 products, uploads the logo (**colors appear automatically**, a visible "wow"), selects 6–8 photos, taps through the questionnaire, connects Instagram (already authorized; one tap), "Volver a WhatsApp".
+2. Opens the link: step 1 (prefilled name), 2–3 products, uploads the logo (**colors appear automatically**, a visible "wow"), selects 6–8 photos, taps through the questionnaire, "Volver a WhatsApp". There is no Instagram step: the demo account is preconnected and every post goes to it ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)).
 3. Narrator while the Brand Brain generates: "Mientras tanto, un equipo de agentes está estudiando su marca: un analista mira cada foto, una estratega arma la identidad de la marca."
 4. WhatsApp: brand summary arrives → owner reads one line aloud ("Cercanos, cálidos, artesanales… sí, somos nosotros") → `[Sí, es mi marca]` → "¡Listo, ya conozco tu marca! ¿En qué te puedo ayudar hoy?"
 

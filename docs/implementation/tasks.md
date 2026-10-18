@@ -147,7 +147,7 @@ The first slice that joins the WhatsApp chat ([ADR 0020](../decisions/0020-whats
 ### T25: Onboarding wizard UI · B · M
 
 - Read: [design/web-app.md § /o/[token]](../design/web-app.md#otoken-onboarding-wizard-must), [design/mockups/](../design/mockups/README.md) row 2, [user-flows.md § Flow 2](../product/user-flows.md#flow-2--web-onboarding-form-must)
-- Build: the six steps of the second design pass ("Paso N de 6") plus the done and expired-token screens, autosave, color swatches, questionnaire controls, IG connect step. Step 2: up to 5 Products. Step 3: logo + colors, or "Todavía no tengo logo ni colores". Step 4: 3–15 photos with thumbnails, direct uploads to the signed URL with a progress overlay, retry on failure. The feed import screen (6b) is T53 (Could); until then step 6 must not promise it.
+- Build: the six steps of the second design pass ("Paso N de 6") plus the done and expired-token screens, autosave, color swatches, questionnaire controls. No IG connect step in the MVP ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). Step 2: up to 5 Products. Step 3: logo + colors, or "Todavía no tengo logo ni colores". Step 4: 3–15 photos with thumbnails, direct uploads to the signed URL with a progress overlay, retry on failure. The feed import screen (6b) is T53 (Could); until then step 6 must not promise it.
 - Done when: completed on a real phone from the WhatsApp link in < 5 minutes with the demo materials.
 
 ### T26: Variations in WhatsApp and the simulator · B · M
@@ -162,7 +162,9 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 
 - Read: [integrations.md § Zernio](../architecture/integrations.md#publishing-provider-zernio)
 - Build: `app/publishing/zernio.py` (ensure_profile, connect_url, publish now, 207 handling; scheduling comes with T30's Should part), `mock.py`, `/api/o/{token}/instagram/connect` + `/callback`, `PUBLISHER` env switch.
-- Done when: connecting the demo IG from the wizard stores `provider_account_id`; a test publish succeeds (then delete the IG post).
+- Done when: a test publish to the demo IG succeeds (then delete the IG post by hand: Zernio can't delete a published Instagram post).
+- MVP scope: one demo Instagram account from env (`ZERNIO_PROFILE_ID`, `ZERNIO_ACCOUNT_ID`); the connect endpoints, callback and wizard step 6 are out of the MVP ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)).
+- Started (PR #N): `app/publishing/` with `PublisherPort`, `ZernioPublisher` (`ensure_profile`, `connect_url`, publish now with 207 handling), `MockPublisher`, the `PUBLISHER` switch and the demo account env. Left: the live publish run on the demo IG, and wiring the publisher into `jobs/publish.py` (T30). The connect endpoints and callback are deferred by ADR 0024.
 
 ## H13–16
 
@@ -174,7 +176,7 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 
 ### T30: Publish job + guards · A · M
 
-- Build (Must): `jobs/publish.py` (status guard, need-IG path, publish now, store permalink, messages).
+- Build (Must): `jobs/publish.py` (status guard, need-IG path, publish now, store permalink, messages). In the MVP the account id comes from `ZERNIO_ACCOUNT_ID`, so the need-IG path only fires when it is missing ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). Handle `PublishResult.status`: `retrying` means do not re-publish, wait for the webhook (T29) or a status check.
 - Build (Should, F5.3): scheduling: `post_schedule`, `schedule_time` and approvals with a time in free text ("mañana a la tarde" → ISO in the Business's timezone via a tiny structured call; "a la tarde" defaults to 18:00), Zernio `scheduledFor`.
 - Done when: approve → publish now on the real IG returns the permalink in WhatsApp. Should: "subilo mañana a la tarde" schedules for tomorrow 18:00 local and the bot confirms the time.
 
@@ -251,6 +253,7 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 ### T53: Instagram feed import (F2.8) · B · C
 
 - Read: [integrations.md § Reading the Owner's existing Instagram media](../architecture/integrations.md#reading-the-owners-existing-instagram-media-could)
+- Out of the MVP with F2.8: it needs the Owner to connect their own Instagram ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)).
 - Prerequisite: the pre-hackathon test shows Zernio's `GET /v1/accounts/{accountId}/posts` returns Instagram posts with full-size images. If not, skip this task.
 - Build: `/api/o/{token}/instagram/import`, `/instagram/media`, `/instagram/media/selection`; `import_instagram_media` job; wizard step 6b (grid with progress, untick to exclude, "Listo, seguir").
 - Done when: after connecting the demo IG, step 6b shows its recent posts and the kept images become analyzed Brand assets with `source = 'instagram'`.

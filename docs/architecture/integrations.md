@@ -132,7 +132,7 @@ Unified social publishing API (formerly *Late*, getlate.dev). Chosen because the
 
 1. Sign up at zernio.com (no card) and create an API key → `ZERNIO_API_KEY`.
 2. Make sure the demo Instagram account is **Business or Creator** (Instagram Login is used, so no Facebook Page is needed).
-3. Do one end-to-end test the day before: create profile → connect → publish a test image → delete it from IG.
+3. Do one end-to-end test the day before: create profile → connect → publish a test image → delete it from IG **by hand in the Instagram app**. Zernio can't do it: `DELETE /v1/posts/{id}` refuses published posts ("Published posts cannot be deleted") and does not remove anything already live on a platform, and `POST /v1/posts/{id}/unpublish` is "Not supported on Instagram, TikTok, or Snapchat" ([Zernio: delete post](https://docs.zernio.com/posts/delete-post), [unpublish post](https://docs.zernio.com/posts/unpublish-post), read 2026-10-17).
 4. Optional: register a webhook (`POST /v1/webhooks/settings`) with our `ZERNIO_WEBHOOK_SECRET` for `post.published`, `post.failed`, `account.connected`.
 
 **Free tier limit:** 2 connected accounts **across the whole team**. IG + Facebook Page for the demo business uses both slots, so connect **Instagram only** unless the FB cross-post is needed. A 3rd account returns `402 PAYMENT_REQUIRED`. Instagram caps: 25 posts/hour and 100/day per account.
@@ -196,7 +196,8 @@ Gotchas:
 - Media URL must be **public HTTPS returning the raw file**, JPEG/PNG < 8 MB, aspect ratio between 4:5 and 1.91:1. Our post images are 1080×1350 (4:5) JPEG in the public `renders` bucket, which fits.
 - **Reels** (Could; [Zernio Instagram](https://docs.zernio.com/platforms/instagram), [research](../research/media-uploads.md)): MP4/MOV, H.264, 3–90 s, ≤ 300 MB, 9:16 recommended. The Owner's video lives in the **private** `assets` bucket, so pass a signed URL valid long enough for Zernio to fetch it (24 h; for a scheduled Reel, sign it when `publish_post` runs, not when the Post is approved). Zernio caps Reels at 90 s while Meta allows 15 min: the Asset Analyst only marks videos of 3–90 s as `reel_suitable` until a real test proves otherwise. Videos that aren't H.264 (e.g. iPhone HEVC) may need a transcode; test with a real phone video before the hackathon.
 - Reels publish slower than images (Meta processes the video), so "publish now" can take a minute or more; the Zernio `post.published` webhook, not the `201`, is what confirms it.
-- Treat `207` and any `post.status != "published"` as failure for "publish now".
+- Treat `207` and any `post.status != "published"` as failure for "publish now". One exception: a `207` whose `post.status` is `scheduled` means every platform hit a transient error and "Zernio retries automatically. This is **not** a failure" ([Zernio: create post](https://docs.zernio.com/posts/create-post), read 2026-10-17). `ZernioPublisher` returns it as `PublishResult.status = "retrying"`: do not re-publish, wait for the webhook.
+- Identical content to the same account within 24 h returns `409` (`details.existingPostId`), so repeated test posts need a different caption or image.
 - Webhook signature: `X-Zernio-Signature` = HMAC-SHA256 of the raw body with our secret.
 - Things not verified by research: the exact query param names on the connect redirect (log the full query on the first test and adapt `instagram/callback`), and whether old getlate.dev URLs still work (build only against `zernio.com/api/v1`).
 
@@ -211,7 +212,7 @@ Plan for F2.8: test the Zernio endpoint on the demo Instagram before the hackath
 
 ### Mock publisher
 
-`PUBLISHER=mock` → `MockPublisher` returns `published` with `permalink = https://instagram.com/p/MOCK-<post_id>` after a 2 s delay, and `connect_url` returns a frontend URL that marks the account connected. Used for local dev, the simulator, and the stage fallback.
+`PUBLISHER=mock` (the default) → `MockPublisher` returns `published` with `permalink = https://instagram.com/p/MOCK-<id>` after a 2 s delay, and `connect_url` returns a frontend URL that marks the account connected. Used for local dev, the simulator, and the stage fallback.
 
 ## Claude API
 

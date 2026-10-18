@@ -41,8 +41,11 @@
 | `IMAGE_GEN_MAX_CONCURRENCY` | `4` | Process-wide limit on image-service calls (variations and carousel slides) |
 | `OPENAI_API_KEY` | `sk-...` | Fallback only; the OpenAI org may need Organization Verification |
 | `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst` | Fallback only |
-| `PUBLISHER` | `zernio` \| `mock` | Demo fallback switch |
+| `PUBLISHER` | `zernio` \| `mock` | Default `mock`, so a missing env never posts for real. Demo fallback switch |
 | `ZERNIO_API_KEY` | `sk_...` | |
+| `ZERNIO_BASE_URL` | `https://zernio.com/api/v1` | Optional; this is the default |
+| `ZERNIO_PROFILE_ID`, `ZERNIO_ACCOUNT_ID` | `...` | The single demo Instagram account's Zernio profile and account ids. Temporary: they stand in for `social_accounts` until T02 exists ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)) |
+| `ZERNIO_TEST_IMAGE_URL` | `https://raw.githubusercontent.com/guidodinello/build101/main/backend/tests/fixtures/zernio-live-test.jpg` | Only for `uv run pytest -m live`: a public HTTPS URL serving the fixture JPEG with no redirect. Before the PR merges, put the branch name in place of `main` (the branch is deleted after the squash merge). The live publish posts to the real demo Instagram: delete the post by hand |
 | `ZERNIO_WEBHOOK_SECRET` | random | |
 | `ASSISTANT_NAME` | TBD | Shown in the welcome |
 | `ENABLE_DEV_ENDPOINTS` | `true` | `/dev/*` |

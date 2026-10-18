@@ -101,8 +101,8 @@ Opened from the magic link on the owner's phone. Short, mobile-first wizard of 6
 | 3. Tu marca | Logo upload (optional); brand colors (auto-detected from logo, editable as swatches); "¿Cómo hablarían de tu marca tus clientes?" (3 words) | Colors are extracted server-side from the logo right after upload. "Todavía no tengo logo ni colores" skips the upload: the Brand Brain starts with neutral default colors, and Flow 13 (Could) builds them in the chat |
 | 4. Tus fotos | 3 to 15 photos (products, workshop, team); no videos | Show thumbnails and upload progress, counter "7 de 15", "Mínimo 3". "Usamos tus fotos reales en los posts" |
 | 5. Preferencias | Questionnaire (see below) | All single taps, no long text |
-| 6. Conectá Instagram | Button → provider's hosted connect flow → returns to the wizard with ✅ | Skippable ("Lo hago después"); publishing is then mocked until connected. Copy: they log in on Instagram's page, never give us their password, and every Post comes to WhatsApp first for approval |
-| 6b. Trajimos tu feed | Grid of the photos and videos imported from the connected Instagram feed; the owner unticks what not to use | **Could** (F2.8): needs read access to the owner's media, not verified. Without it, step 6 goes straight to the closing screen |
+| 6. Conectá Instagram | Button → provider's hosted connect flow → returns to the wizard with ✅ | **Out of the MVP** ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)): the demo publishes to one account from env, so the wizard skips this step. Skippable ("Lo hago después"); publishing is then mocked until connected. Copy: they log in on Instagram's page, never give us their password, and every Post comes to WhatsApp first for approval |
+| 6b. Trajimos tu feed | Grid of the photos and videos imported from the connected Instagram feed; the owner unticks what not to use | **Out of the MVP** with step 6 ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). Was **Could** (F2.8): needs read access to the owner's media, not verified. Without it, step 6 goes straight to the closing screen |
 | ¡Listo! | Summary (Products, photos, posts per week, Instagram handle) + "Volver a WhatsApp" (wa.me deep link) | Submitting triggers Flow 3 |
 
 Questionnaire (step 5):
@@ -252,7 +252,7 @@ If several Posts are `pending_approval`, the orchestrator asks which one, showin
    If not (ad-hoc) → bot sends `publish_when_adhoc`.
 2. `[Publicar ahora]` → status `publishing` → Publisher service → on success `published`, store `external_post_id` + `permalink` → bot sends `published` with the permalink. A Reel goes out as a single-video Reel through Zernio; Instagram processes the video for up to a few minutes, so the Post stays `publishing` until the provider reports it.
 3. `[Programar]` → if planned date exists, use it; otherwise `awaiting = schedule_time` → owner: "el jueves a las 8 de la noche" → orchestrator parses to ISO datetime in the business timezone (`America/Montevideo`) → confirm → provider schedules → status `scheduled` → bot sends `scheduled`. When the provider later reports the publish, the bot sends `published` (only deliverable inside the 24-hour window, see [integrations.md](../architecture/integrations.md#receiving)).
-4. No Instagram connected → bot sends `need_ig`. The post stays `approved`.
+4. No Instagram connected → bot sends `need_ig`. The post stays `approved`. In the MVP Instagram is always "connected": the demo account comes from env ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)), so this path only fires with `PUBLISHER=zernio` and no `ZERNIO_ACCOUNT_ID`. After the MVP it is the path for a Business that has not connected.
 5. Failure → status `failed` → bot sends `publish_failed`.
 
 ## Flow 9 — Owner sends a photo in the chat (Must; videos Could)
