@@ -35,6 +35,9 @@ from tests.test_chat_handler import SENDER, message
 ACCOUNT_ID = "acc-1"
 BASE_URL = "https://backend.test"
 STARTED = text_reply("¡Dale, lo subo! ⏳")
+LIVE = text_reply("¡Ya está en tu Instagram! 🎉")
+PROCESSING = text_reply("Instagram lo está procesando, en un ratito aparece ⏳")
+REJECTED = text_reply("Uy, Instagram no lo aceptó. ¿Armamos otro?")
 ASK = text_reply("¿Lo subo?")
 
 
@@ -61,13 +64,12 @@ class Rig:
             self.sleeps.append(seconds)
 
         self.publishing = PostPublisher(
-            self.publisher, self.store, self.history, self.images, BASE_URL, account_id, sleep
+            self.publisher, self.store, self.images, BASE_URL, account_id, sleep
         )
         maker = PostMaker(
             PostDrafter(model),
             CountingImageGen(),
             self.photos,
-            self.history,
             self.images,
             self.store,
             BASE_URL,
@@ -80,12 +82,14 @@ class Rig:
             maker,
             self.publishing,
             self.store,
-            ButtonRouter(self.store, maker, self.publishing, self.history, sessions=None),
+            ButtonRouter(self.store, maker, self.publishing, sessions=None),
             None,
             assistant_name="Mora",
             max_photo_mb=1,
             keep_alive_s=60.0,
         )
+        maker.on_event(self.chat.notify)
+        self.publishing.on_event(self.chat.notify)
 
     def add_post(self, post_id: str, slides: int = 1) -> Post:
         images = [PostImage(self.images.add(make_image((80, 100))), b"jpeg") for _ in range(slides)]
@@ -111,7 +115,7 @@ def status(rig: Rig, post_id: str) -> str:
 
 
 async def test_subilo_publishes_the_one_pending_post_once_and_sends_the_link() -> None:
-    rig = Rig(ScriptedModel(replies=[approve("p1"), STARTED]))
+    rig = Rig(ScriptedModel(replies=[approve("p1"), STARTED, LIVE]))
     post = rig.add_post("p1")
 
     await rig.say("subilo")
@@ -123,7 +127,9 @@ async def test_subilo_publishes_the_one_pending_post_once_and_sends_the_link() -
     assert call["caption"] == "Caption p1 #muebles"
     assert call["media"].format == "image"
     assert call["media"].url == BASE_URL + post.images[0].path
-    assert rig.said == [STARTED.text, messages_es.published(PERMALINK)]
+    # The model's reply left the link out, so code appended it: the URL is data, not copy.
+    assert rig.said == [STARTED.text, f"{LIVE.text}\n{PERMALINK}"]
+    assert len(rig.model.calls) == 3
     assert (post.status, post.permalink, post.external_post_id) == ("published", PERMALINK, "ext-1")
 
 
@@ -141,15 +147,20 @@ async def test_a_carousel_goes_out_with_its_slides_in_order() -> None:
 
 async def test_the_outcome_message_waits_for_the_turn_that_started_the_publish() -> None:
     # The publisher answers at once; the model's second call is slow.
-    rig = Rig(ScriptedModel(replies=[approve("p1"), STARTED], delay_s=0.1))
+    rig = Rig(ScriptedModel(replies=[approve("p1"), STARTED, LIVE], delay_s=0.1))
     rig.add_post("p1")
 
     await rig.say("subilo")
     await rig.finish()
 
-    assert rig.said == [STARTED.text, messages_es.published(PERMALINK)]
-    history = rig.history.get(SENDER)
-    assert history[-1]["content"][0]["text"].startswith("[post p1 published]")  # after the turn
+    assert rig.said == [STARTED.text, f"{LIVE.text}\n{PERMALINK}"]
+    texts = [
+        step["content"][0]["text"]
+        for step in rig.history.get(SENDER)
+        if "content" in step and step["type"] == "user_input"
+    ]
+    note = next(i for i, text in enumerate(texts) if text.startswith("[post p1 published]"))
+    assert texts.index("subilo") < note  # after the turn that started it
 
 
 async def test_praise_does_not_publish_even_if_the_model_calls_the_tool() -> None:
@@ -298,13 +309,16 @@ async def test_without_an_instagram_account_nothing_is_published() -> None:
 
 async def test_pending_is_not_reported_as_a_failure_and_is_not_published_again() -> None:
     pending = PublishResult(status="pending", external_post_id="ext-1", error="still publishing")
-    rig = Rig(ScriptedModel(replies=[approve("p1"), STARTED]), FakePublisher(results=[pending]))
+    rig = Rig(
+        ScriptedModel(replies=[approve("p1"), STARTED, PROCESSING]),
+        FakePublisher(results=[pending]),
+    )
     rig.add_post("p1")
 
     await rig.say("subilo")
     await rig.finish()
 
-    assert rig.said == [STARTED.text, messages_es.PUBLISH_PENDING]
+    assert rig.said == [STARTED.text, PROCESSING.text]
     assert status(rig, "p1") == "publish_pending"
     assert len(rig.publisher.calls) == 1
 
@@ -313,36 +327,38 @@ async def test_pending_is_not_reported_as_a_failure_and_is_not_published_again()
     "outcome",
     [PublishResult(status="failed", error="rejected"), PublisherError("zernio 400: bad")],
 )
-async def test_a_definite_failure_tells_the_owner_and_offers_a_retry(
+async def test_a_definite_failure_tells_the_owner_and_is_terminal(
     outcome: PublishResult | Exception,
 ) -> None:
-    rig = Rig(ScriptedModel(replies=[approve("p1"), STARTED]), FakePublisher(results=[outcome]))
+    rig = Rig(
+        ScriptedModel(replies=[approve("p1"), STARTED, REJECTED]),
+        FakePublisher(results=[outcome]),
+    )
     rig.add_post("p1")
 
     await rig.say("subilo")
     await rig.finish()
 
-    assert rig.said == [STARTED.text]
-    assert rig.channel.buttons == [(SENDER, messages_es.PUBLISH_FAILED, ["post_retry:p1"])]
+    assert rig.said == [STARTED.text, REJECTED.text]
     assert status(rig, "p1") == "failed"
     assert len(rig.publisher.calls) == 1
 
 
 async def test_a_timeout_is_retried_once_with_the_same_key() -> None:
     results = [PublishRetryable("timeout"), PublishResult(status="published", permalink=PERMALINK)]
-    rig = Rig(ScriptedModel(replies=[approve("p1"), STARTED]), FakePublisher(results=results))
+    rig = Rig(ScriptedModel(replies=[approve("p1"), STARTED, LIVE]), FakePublisher(results=results))
     rig.add_post("p1")
 
     await rig.say("subilo")
     await rig.finish()
 
     assert [call["key"] for call in rig.publisher.calls] == ["p1", "p1"]
-    assert rig.said[-1] == messages_es.published(PERMALINK)
+    assert rig.said[-1] == f"{LIVE.text}\n{PERMALINK}"
 
 
 async def test_a_timeout_that_repeats_is_unknown_not_failed() -> None:
     rig = Rig(
-        ScriptedModel(replies=[approve("p1"), STARTED]),
+        ScriptedModel(replies=[approve("p1"), STARTED, PROCESSING]),
         FakePublisher(results=[PublishRetryable("timeout")]),
     )
     rig.add_post("p1")
@@ -351,7 +367,7 @@ async def test_a_timeout_that_repeats_is_unknown_not_failed() -> None:
     await rig.finish()
 
     assert len(rig.publisher.calls) == 2
-    assert rig.said[-1] == messages_es.PUBLISH_PENDING
+    assert rig.said[-1] == PROCESSING.text
     assert status(rig, "p1") == "publish_pending"
 
 
@@ -396,14 +412,16 @@ async def test_a_pending_post_keeps_its_images_served_after_others_push_it_out()
 
 async def test_the_whole_flow_runs_offline_with_the_mock_publisher() -> None:
     rig = Rig(
-        ScriptedModel(replies=[approve("p1"), STARTED]), MockPublisher(delay_s=0), MOCK_ACCOUNT_ID
+        ScriptedModel(replies=[approve("p1"), STARTED, LIVE]),
+        MockPublisher(delay_s=0),
+        MOCK_ACCOUNT_ID,
     )
     rig.add_post("p1")
 
     await rig.say("subilo")
     await rig.finish()
 
-    assert rig.said[-1].startswith(f"¡Publicado! 🎉 {PERMALINK_PREFIX}")
+    assert PERMALINK_PREFIX in rig.said[-1]
     assert status(rig, "p1") == "published"
 
 
@@ -439,3 +457,35 @@ async def test_a_listed_post_that_is_no_longer_pending_is_not_approved_by_its_nu
     await rig.finish()
 
     assert rig.publisher.calls == []
+
+
+@pytest.mark.parametrize(
+    ("outcome", "fallback"),
+    [
+        (PublishResult(status="published", permalink=PERMALINK), messages_es.published(PERMALINK)),
+        (PublishResult(status="pending", error="slow"), messages_es.PUBLISH_PENDING),
+        (PublishResult(status="failed", error="no"), messages_es.PUBLISH_FAILED),
+    ],
+)
+async def test_when_the_model_is_down_the_owner_still_hears_how_it_ended(
+    outcome: PublishResult, fallback: str
+) -> None:
+    gate = asyncio.Event()
+    rig = Rig(
+        ScriptedModel(replies=[approve("p1"), STARTED]),
+        FakePublisher(results=[outcome], gate=gate),
+    )
+    rig.add_post("p1")
+
+    await rig.say("subilo")
+    rig.model.fail = True
+    gate.set()
+    await rig.finish()
+
+    assert rig.said == [STARTED.text, fallback]
+    texts = [
+        step["content"][0]["text"]
+        for step in rig.history.get(SENDER)
+        if step["type"] == "user_input"
+    ]
+    assert f'The Owner was told: "{fallback}"' in texts[-1]

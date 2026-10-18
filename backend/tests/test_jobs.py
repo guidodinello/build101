@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agents.schemas import AssetAnalysis
 from app.conversation.brand import BrandFlow
 from app.conversation.button_router import ButtonRouter
-from app.conversation.history import InMemoryHistory
+from app.conversation.events import BrandConfirmed, BrandFixAsked, JobRetried, StaleButton
 from app.copy import messages_es
 from app.db.models import (
     AssetProduct,
@@ -336,8 +336,7 @@ async def test_a_correction_makes_a_new_version_from_the_previous_one(
 
 
 def router(sessions: async_sessionmaker[AsyncSession]) -> ButtonRouter:
-    store, history = InMemoryPosts(), InMemoryHistory()
-    return ButtonRouter(store, maker=None, publisher=None, history=history, sessions=sessions)  # type: ignore[arg-type]
+    return ButtonRouter(InMemoryPosts(), maker=None, publisher=None, sessions=sessions)  # type: ignore[arg-type]
 
 
 async def test_brand_ok_activates_the_business_once(
@@ -349,7 +348,7 @@ async def test_brand_ok_activates_the_business_once(
     first = await buttons.handle(PHONE, "brand_ok", FakeChannel())
     second = await buttons.handle(PHONE, "brand_ok", FakeChannel())
 
-    assert (first, second) == (messages_es.READY_OPEN_CHAT, messages_es.STALE_BUTTON)
+    assert (first, second) == (BrandConfirmed(), StaleButton())
     async with sessions() as db:
         assert (await db.get_one(Business, business.id)).onboarding_state == "active"
 
@@ -366,9 +365,13 @@ async def test_brand_fix_takes_the_next_message_as_the_correction(
     taken = await flow.take_correction(PHONE, "somos más formales")
     again = await flow.take_correction(PHONE, "y otra cosa")
 
-    assert (before, asked, taken, again) == (False, messages_es.BRAND_FIX_PROMPT, True, False)
+    assert (before, asked, taken, again) == (False, BrandFixAsked(), True, False)
     async with sessions() as db:
         jobs = (await db.scalars(select(Job).where(Job.business_id == business.id))).all()
+        state = (await db.get_one(Business, business.id)).onboarding_state
+    # The old summary's buttons go stale while the revised one is made.
+    assert state == "generating_brand"
+    assert await buttons.handle(PHONE, "brand_ok", FakeChannel()) == StaleButton()
     assert [(job.kind, job.payload) for job in jobs] == [
         ("generate_brand", {"correction": "somos más formales"})
     ]
@@ -380,8 +383,8 @@ async def test_brand_buttons_are_stale_in_another_state(
     await add_business(sessions, state="active")
     buttons = router(sessions)
 
-    assert await buttons.handle(PHONE, "brand_ok", FakeChannel()) == messages_es.STALE_BUTTON
-    assert await buttons.handle(PHONE, "brand_fix", FakeChannel()) == messages_es.STALE_BUTTON
+    assert await buttons.handle(PHONE, "brand_ok", FakeChannel()) == StaleButton()
+    assert await buttons.handle(PHONE, "brand_fix", FakeChannel()) == StaleButton()
 
 
 async def test_retry_button_requeues_the_failed_job(
@@ -397,4 +400,4 @@ async def test_retry_button_requeues_the_failed_job(
     first = await buttons.handle(PHONE, f"retry:{failed.id}", FakeChannel())
     second = await buttons.handle(PHONE, f"retry:{failed.id}", FakeChannel())
 
-    assert (first, second) == (messages_es.RETRYING, messages_es.STALE_BUTTON)
+    assert (first, second) == (JobRetried("generate_brand"), StaleButton())

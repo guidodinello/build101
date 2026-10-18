@@ -60,6 +60,8 @@ class FakeChannel:
         header_image_url: str | None = None,
         header_video_url: str | None = None,
     ) -> str:
+        # The body is a message the Owner reads, in order with the rest: `sent` keeps it too.
+        self.sent.append((to, body))
         self.buttons.append((to, body, [button.id for button in buttons]))
         return "wamid.BTN"
 

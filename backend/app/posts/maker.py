@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Literal
@@ -11,13 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.carousel.generator import CarouselGenerator
 from app.carousel.schemas import MAX_SLIDES
-from app.channels.base import Button, ChannelError, ChannelPort
+from app.channels.base import ChannelPort
 from app.channels.inbound import mask
-from app.conversation.history import InMemoryHistory
+from app.conversation.events import Event, Notify, PostFailed, PostSent
 from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
 from app.imagegen.base import ImageGenPort
-from app.llm.client import user_step
 from app.media.images import to_post_image
 from app.media.public import PublicImages
 
@@ -28,10 +27,6 @@ logger = logging.getLogger(__name__)
 
 MIN_SLIDES = 2
 WHATSAPP_CAPTION_MAX = 1024
-
-# Called as (sender, post_id, note, channel) once a post reached the Owner. It owns adding the
-# note to the history: the chat handler does it under the sender's lock and answers the note.
-PostSent = Callable[[str, str, str, ChannelPort], Awaitable[None]]
 
 
 class CreatePostArgs(BaseModel):
@@ -54,7 +49,8 @@ class RenderedPost:
 class PostMaker:
     """`create_post` before the database: guards per sender, then a background generation.
 
-    The result goes into the sender's history as a note, so the model knows what was sent
+    The result is an event (`PostSent` / `PostFailed`) for the orchestrator, which writes the
+    message and keeps the note in the history, so the model knows what was sent
     ("cambiale el título"). T19 moves the guards onto `posts` and the generation onto the job
     runner (T16, T17).
     """
@@ -64,7 +60,6 @@ class PostMaker:
         drafter: PostDrafter,
         image_gen: ImageGenPort,
         photos: InMemoryPhotos,
-        history: InMemoryHistory,
         images: PublicImages,
         posts: InMemoryPosts,
         public_base_url: str,
@@ -74,7 +69,6 @@ class PostMaker:
         self._drafter = drafter
         self._image_gen = image_gen
         self._photos = photos
-        self._history = history
         self._images = images
         self._posts = posts
         self._public_base_url = public_base_url.rstrip("/")
@@ -83,11 +77,11 @@ class PostMaker:
         self._generating: set[str] = set()
         self._designs_today: dict[str, tuple[date, int]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
-        self._post_sent: PostSent | None = None
+        self._notify: Notify | None = None
 
-    def on_post_sent(self, callback: PostSent) -> None:
-        """Register who follows up after a post arrives (wired where the chat handler is built)."""
-        self._post_sent = callback
+    def on_event(self, callback: Notify) -> None:
+        """Register who tells the Owner about a post (wired where the chat handler is built)."""
+        self._notify = callback
 
     def create_post(
         self, sender: str, arguments: dict[str, Any], channel: ChannelPort
@@ -150,12 +144,19 @@ class PostMaker:
         channel: ChannelPort,
     ) -> None:
         started = time.monotonic()
-        note: str | None = None
+        event: Event
         try:
             post = await self._render(args, photos)
             paths = await self._send(sender, post.images, post.text, channel)
             self._keep(sender, post_id, args, photos, paths, post)
-            note = sent_note(post_id, args, photos, post)
+            event = PostSent(
+                post_id,
+                len(post.images),
+                args.style,
+                tuple(photo.id for photo in photos),
+                tuple(post.headlines),
+                post.text,
+            )
             logger.info(
                 "post %s (%s, %d images) sent to %s in %.1fs",
                 post_id,
@@ -167,27 +168,22 @@ class PostMaker:
         except Exception:
             # The task's boundary: nobody awaits it, so log and tell the Owner.
             logger.exception("post %s failed for %s", post_id, mask(sender))
-            self._history.extend(sender, [user_step(failed_note(post_id))])
-            try:
-                await channel.send_text(sender, messages_es.JOB_FAILED)
-            except ChannelError:
-                logger.warning("could not tell %s that post %s failed", mask(sender), post_id)
+            event = PostFailed(post_id, args.style, tuple(photo.id for photo in photos), args.brief)
         finally:
             self._generating.discard(sender)
-        if note is not None:
-            # After the guard is released, and outside the try: a failing follow-up must not
-            # report a failed post that the Owner already has.
-            await self._announce(sender, post_id, note, channel)
+        # After the guard is released, and outside the try: a failing notify must not report a
+        # failed post that the Owner already has.
+        await self._announce(sender, post_id, event, channel)
 
-    async def _announce(self, sender: str, post_id: str, note: str, channel: ChannelPort) -> None:
-        if self._post_sent is None:
-            self._history.extend(sender, [user_step(note)])
-            await self.offer_actions(sender, post_id, messages_es.post_actions(), channel)
-            return
+    async def _announce(
+        self, sender: str, post_id: str, event: Event, channel: ChannelPort
+    ) -> None:
+        if self._notify is None:
+            raise RuntimeError("PostMaker.on_event was never called: nobody can tell the Owner")
         try:
-            await self._post_sent(sender, post_id, note, channel)
+            await self._notify(sender, event, channel)
         except Exception:
-            logger.exception("follow-up for post %s failed for %s", post_id, mask(sender))
+            logger.exception("event for post %s failed for %s", post_id, mask(sender))
 
     async def _render(self, args: CreatePostArgs, photos: list[Photo]) -> RenderedPost:
         """The post's images in order (one per photo, unless a design asks for a slide count)."""
@@ -274,45 +270,6 @@ class PostMaker:
             await channel.send_text(sender, caption)
         return paths
 
-    async def offer_actions(
-        self, sender: str, post_id: str, body: str, channel: ChannelPort
-    ) -> None:
-        """`body` with [Aprobar] [Cambiar] [Descartar]; "subilo" keeps working without them."""
-        buttons = [
-            Button(id=f"post_approve:{post_id}", title=messages_es.BUTTON_APPROVE),
-            Button(id=f"post_change:{post_id}", title=messages_es.BUTTON_CHANGE),
-            Button(id=f"post_discard:{post_id}", title=messages_es.BUTTON_DISCARD),
-        ]
-        try:
-            if len(body) > WHATSAPP_CAPTION_MAX:
-                # Over the limit of a buttons message's body: the text first, then the buttons.
-                await channel.send_text(sender, body)
-                body = messages_es.post_actions()
-            await channel.send_buttons(sender, body, buttons)
-        except ChannelError:
-            logger.warning("could not send the buttons of post %s", post_id, exc_info=True)
-
 
 def post_text(caption: str, hashtags: list[str]) -> str:
     return f"{caption}\n\n{' '.join(hashtags)}" if hashtags else caption
-
-
-def sent_note(post_id: str, args: CreatePostArgs, photos: list[Photo], post: RenderedPost) -> str:
-    style = "photos as they are" if args.style == "photos" else "design"
-    photo_ids = " ".join(photo.id for photo in photos)
-    lines = [
-        f"[post {post_id} sent to the Owner] {len(post.images)} image(s), {style}, "
-        f"from photos {photo_ids}."
-    ]
-    if post.headlines:
-        headlines = "; ".join(f'{n} "{text}"' for n, text in enumerate(post.headlines, start=1))
-        lines.append(f"Slide headlines: {headlines}")
-    lines.append(f'Text: "{post.text}"')
-    return "\n".join(lines)
-
-
-def failed_note(post_id: str) -> str:
-    return (
-        f"[post {post_id} failed] The Owner was told something went wrong and asked whether "
-        "to try again."
-    )

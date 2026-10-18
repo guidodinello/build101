@@ -14,6 +14,10 @@ Your job is the business's social media: Instagram posts and Reels, a weekly con
 
 {{include publishing.md}}
 
+## System events
+
+{{include events.md}}
+
 ## Rules
 
 {{include rules.md}}

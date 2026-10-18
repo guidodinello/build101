@@ -71,6 +71,7 @@ class JobRunner:
         self._max_concurrent = max_concurrent
         self._poll_interval_s = poll_interval_s
         self._running: set[asyncio.Task[None]] = set()
+        self._running_ids: set[uuid.UUID] = set()
         self._poller: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
@@ -85,12 +86,19 @@ class JobRunner:
         await asyncio.gather(*self._running, return_exceptions=True)
 
     async def fail_stale(self, older_than: timedelta = STALE_AFTER) -> int:
-        """Mark as failed the jobs a previous process left `running` (no retries in the MVP)."""
+        """Mark as failed the jobs a previous process left `running` (no retries in the MVP).
+
+        This process's own jobs are skipped however long they take: they are alive.
+        """
         cutoff = datetime.now(UTC) - older_than
         async with self._sessions() as db:
             result = await db.execute(
                 update(Job)
-                .where(Job.status == "running", Job.started_at < cutoff)
+                .where(
+                    Job.status == "running",
+                    Job.started_at < cutoff,
+                    Job.id.not_in(self._running_ids),
+                )
                 .values(
                     status="failed", error="interrupted by a restart", finished_at=datetime.now(UTC)
                 )
@@ -120,6 +128,7 @@ class JobRunner:
                 job.started_at = datetime.now(UTC)
             await db.commit()
         for job in jobs:
+            self._running_ids.add(job.id)
             task = asyncio.create_task(self._run(job.id, job.kind, job.business_id, job.payload))
             self._running.add(task)
             task.add_done_callback(self._running.discard)
@@ -160,12 +169,19 @@ class JobRunner:
             logger.exception("job %s (%s) failed", job_id, kind)
             error = repr(exc)[:MAX_ERROR_CHARS]
         async with self._sessions() as db:
-            job = await db.get_one(Job, job_id)
-            job.status = "failed" if error else "succeeded"
-            job.result = result
-            job.error = error
-            job.finished_at = datetime.now(UTC)
+            # Only a row still `running`: anything else was decided elsewhere and stays.
+            await db.execute(
+                update(Job)
+                .where(Job.id == job_id, Job.status == "running")
+                .values(
+                    status="failed" if error else "succeeded",
+                    result=result,
+                    error=error,
+                    finished_at=datetime.now(UTC),
+                )
+            )
             await db.commit()
+        self._running_ids.discard(job_id)
         logger.info("job %s (%s): %s", job_id, kind, "failed" if error else "succeeded")
         if error and kind in self._notify_on_failure and business_id:
             await self._tell_owner(job_id, business_id)

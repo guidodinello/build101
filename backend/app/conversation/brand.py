@@ -43,6 +43,8 @@ class BrandFlow:
             ):
                 return False
             business.conversation_state = {}
+            # Back to generating: the old summary's buttons go stale until the new one arrives.
+            business.onboarding_state = "generating_brand"
             enqueue(db, "generate_brand", business.id, {"correction": text})
             await db.commit()
         return True

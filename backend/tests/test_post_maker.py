@@ -2,9 +2,8 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from app.conversation.history import InMemoryHistory
+from app.conversation.events import Event, PostFailed, PostSent
 from app.conversation.photos import LOCAL_TZ, InMemoryPhotos
-from app.copy import messages_es
 from app.media.images import POST_SIZE, image_size
 from app.media.public import PublicImages
 from app.posts.drafts import CarouselDraft, PostCopy, PostDrafter, SlideDraft
@@ -37,21 +36,28 @@ def maker(
     image_gen: CountingImageGen,
     photos: InMemoryPhotos,
     images: PublicImages | None = None,
-    history: InMemoryHistory | None = None,
     max_posts_per_day: int = 5,
     store: InMemoryPosts | None = None,
+    events: list[Event] | None = None,
 ) -> PostMaker:
-    return PostMaker(
+    """A maker whose events go to `events` (a throwaway list when the test doesn't look)."""
+    recorded = events if events is not None else []
+
+    async def record(sender: str, event: Event, channel: object) -> None:
+        recorded.append(event)
+
+    posts = PostMaker(
         PostDrafter(model),
         image_gen,
         photos,
-        history or InMemoryHistory(),
         images or PublicImages(),
         store or InMemoryPosts(),
         "https://backend.test/",
         max_posts_per_day=max_posts_per_day,
         now=lambda: NOON,
     )
+    posts.on_event(record)
+    return posts
 
 
 @pytest.fixture
@@ -149,65 +155,85 @@ async def test_a_design_with_a_slide_count_uses_all_photos_on_every_slide(
     assert all(len(refs) == 1 for refs in image_gen.references)
 
 
-async def test_a_sent_design_leaves_a_note_with_its_headlines_and_text(
+async def test_a_sent_design_emits_an_event_with_its_headlines_and_text(
     photos: InMemoryPhotos,
 ) -> None:
     model = ScriptedModel(drafts={CarouselDraft: carousel_draft(2)})
-    history = InMemoryHistory()
-    posts = maker(model, CountingImageGen(), photos, history=history)
+    events: list[Event] = []
+    posts = maker(model, CountingImageGen(), photos, events=events)
 
     result = posts.create_post(
         SENDER, {"brief": "m", "asset_ids": ["f1", "f2"], "style": "design"}, FakeChannel()
     )
     await posts.join()
 
-    [note] = history.get(SENDER)
-    text = note["content"][0]["text"]
+    assert events == [
+        PostSent(result["post_id"], 2, "design", ("f1", "f2"), ("Slide 1", "Slide 2"), POST_TEXT)
+    ]
+    text = events[0].note()
     assert text.startswith(f"[post {result['post_id']} sent to the Owner] 2 image(s), design")
     assert "from photos f1 f2" in text
     assert 'Slide headlines: 1 "Slide 1"; 2 "Slide 2"' in text
     assert f'Text: "{POST_TEXT}"' in text
 
 
-async def test_a_registered_follow_up_gets_the_note_once_the_guard_is_free(
-    photos: InMemoryPhotos,
-) -> None:
+async def test_the_event_is_sent_once_the_guard_is_free(photos: InMemoryPhotos) -> None:
     model = ScriptedModel(drafts={CarouselDraft: carousel_draft(1)})
-    history, channel = InMemoryHistory(), FakeChannel()
-    posts = maker(model, CountingImageGen(), photos, history=history)
-    seen: list[tuple[str, str, str, bool]] = []
+    channel = FakeChannel()
+    posts = maker(model, CountingImageGen(), photos)
+    seen: list[tuple[str, Event, bool]] = []
 
-    async def follow_up(sender: str, post_id: str, note: str, to: object) -> None:
+    async def notify(sender: str, event: Event, to: object) -> None:
         assert to is channel
         # The guard is free, so an Owner turn can ask for another post meanwhile.
-        seen.append((sender, post_id, note, SENDER in posts._generating))
+        seen.append((sender, event, SENDER in posts._generating))
 
-    posts.on_post_sent(follow_up)
+    posts.on_event(notify)
     result = posts.create_post(
         SENDER, {"brief": "m", "asset_ids": ["f1"], "style": "design"}, channel
     )
     await posts.join()
 
-    [(sender, post_id, note, generating)] = seen
-    assert (sender, post_id, generating) == (SENDER, result["post_id"], False)
-    assert note.startswith(f"[post {post_id} sent to the Owner]")
-    assert history.get(SENDER) == []  # the follow-up owns adding the note
+    [(sender, event, generating)] = seen
+    assert (sender, generating) == (SENDER, False)
+    assert isinstance(event, PostSent) and event.post_id == result["post_id"]
 
 
-async def test_a_failing_follow_up_is_not_a_failed_post(photos: InMemoryPhotos) -> None:
+async def test_a_failing_notify_is_not_a_failed_post(photos: InMemoryPhotos) -> None:
     model = ScriptedModel(drafts={CarouselDraft: carousel_draft(1)})
     channel = FakeChannel()
     posts = maker(model, CountingImageGen(), photos)
 
-    async def follow_up(sender: str, post_id: str, note: str, to: object) -> None:
+    async def notify(sender: str, event: Event, to: object) -> None:
         raise RuntimeError("boom")
 
-    posts.on_post_sent(follow_up)
+    posts.on_event(notify)
     posts.create_post(SENDER, {"brief": "m", "asset_ids": ["f1"], "style": "design"}, channel)
     await posts.join()
 
-    assert channel.sent == []  # no JOB_FAILED
+    assert channel.sent == []  # no failure message: the post arrived
     assert len(channel.images) == 1
+
+
+async def test_without_a_registered_callback_the_generation_fails_loudly(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(1)})
+    posts = PostMaker(
+        PostDrafter(model),
+        CountingImageGen(),
+        photos,
+        PublicImages(),
+        InMemoryPosts(),
+        "https://backend.test/",
+        max_posts_per_day=5,
+        now=lambda: NOON,
+    )
+
+    posts.create_post(SENDER, {"brief": "m", "asset_ids": ["f1"], "style": "design"}, FakeChannel())
+
+    with pytest.raises(RuntimeError, match="on_event"):
+        await posts.join()
 
 
 async def test_a_text_too_long_for_a_caption_follows_the_images(photos: InMemoryPhotos) -> None:
@@ -223,20 +249,20 @@ async def test_a_text_too_long_for_a_caption_follows_the_images(photos: InMemory
     assert channel.sent == [(SENDER, long_caption)]
 
 
-async def test_a_failed_generation_tells_the_owner_and_frees_the_guard(
+async def test_a_failed_generation_emits_the_failure_and_frees_the_guard(
     photos: InMemoryPhotos,
 ) -> None:
     model = ScriptedModel(drafts={CarouselDraft: carousel_draft(1)})
-    channel, image_gen, history = FakeChannel(), CountingImageGen(fail=True), InMemoryHistory()
-    posts = maker(model, image_gen, photos, history=history)
+    channel, image_gen, events = FakeChannel(), CountingImageGen(fail=True), []
+    posts = maker(model, image_gen, photos, events=events)
     request = {"brief": "mesa", "asset_ids": ["f1"], "style": "design"}
 
-    posts.create_post(SENDER, request, channel)
+    result = posts.create_post(SENDER, request, channel)
     await posts.join()
 
-    assert channel.sent == [(SENDER, messages_es.JOB_FAILED)]
-    [note] = history.get(SENDER)
-    assert note["content"][0]["text"].endswith("asked whether to try again.")
+    assert channel.sent == []  # the orchestrator tells the Owner, not the maker
+    assert events == [PostFailed(result["post_id"], "design", ("f1",), "mesa")]
+    assert "Nothing reached the Owner" in events[0].note()
     assert posts.create_post(SENDER, request, channel)["status"] == "generating"
     await posts.join()
 
