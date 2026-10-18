@@ -26,6 +26,14 @@ class PublicImages:
             self._images.popitem(last=False)
         return f"/media/{token}.jpg"
 
+    def keep(self, path: str, data: bytes) -> None:
+        """Serve `data` at `path` again as the newest image, so a pending post is not evicted."""
+        token = path.removeprefix("/media/").removesuffix(".jpg")
+        self._images[token] = data
+        self._images.move_to_end(token)
+        if len(self._images) > self._max_images:
+            self._images.popitem(last=False)
+
     def get(self, token: str) -> bytes | None:
         return self._images.get(token)
 

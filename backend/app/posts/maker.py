@@ -22,6 +22,7 @@ from app.media.images import to_post_image
 from app.media.public import PublicImages
 
 from .drafts import PostDrafter
+from .store import InMemoryPosts, Post, PostImage
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class CreatePostArgs(BaseModel):
     asset_ids: list[str] = Field(default_factory=list, max_length=MAX_SLIDES)
     style: Literal["photos", "design"]
     slide_count: int | None = Field(default=None, ge=MIN_SLIDES, le=MAX_SLIDES)
+    replaces: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +62,7 @@ class PostMaker:
         photos: InMemoryPhotos,
         history: InMemoryHistory,
         images: PublicImages,
+        posts: InMemoryPosts,
         public_base_url: str,
         max_posts_per_day: int,
         now: Callable[[], datetime] = local_now,
@@ -69,6 +72,7 @@ class PostMaker:
         self._photos = photos
         self._history = history
         self._images = images
+        self._posts = posts
         self._public_base_url = public_base_url.rstrip("/")
         self._max_posts_per_day = max_posts_per_day
         self._now = now
@@ -124,7 +128,8 @@ class PostMaker:
         started = time.monotonic()
         try:
             post = await self._render(args, photos)
-            await self._send(sender, post.images, post.text, channel)
+            paths = await self._send(sender, post.images, post.text, channel)
+            self._keep(sender, post_id, args, paths, post)
             self._history.extend(sender, [user_step(sent_note(post_id, args, photos, post))])
             logger.info(
                 "post %s (%s, %d images) sent to %s in %.1fs",
@@ -172,10 +177,29 @@ class PostMaker:
             headlines=[slide.headline for slide in copy.slides],
         )
 
+    def _keep(
+        self, sender: str, post_id: str, args: CreatePostArgs, paths: list[str], post: RenderedPost
+    ) -> None:
+        """Store the sent post for approval, and retire the one it remakes."""
+        images = [PostImage(path, data) for path, data in zip(paths, post.images, strict=True)]
+        self._posts.add(Post(post_id, sender, images, post.text))
+        if args.replaces is None:
+            return
+        old = self._posts.get(sender, args.replaces)
+        if old is None or old.status != "pending_approval":
+            logger.info(
+                "post %s replaces %s, which is not pending: ignored", post_id, args.replaces
+            )
+            return
+        old.status = "replaced"
+
     async def _send(
         self, sender: str, images: list[bytes], caption: str, channel: ChannelPort
-    ) -> None:
-        """Numbered images with the post text on the first, so nothing arrives out of order."""
+    ) -> list[str]:
+        """Numbered images with the post text on the first, so nothing arrives out of order.
+
+        Returns the public path of each image, in order.
+        """
         count = len(images)
         numbers = [
             messages_es.carousel_slide(n, count) if count > 1 else "" for n in range(1, count + 1)
@@ -183,12 +207,16 @@ class PostMaker:
         first = f"{numbers[0]}\n\n{caption}".strip()
         text_fits = len(first) <= WHATSAPP_CAPTION_MAX
         captions = [first if text_fits else numbers[0], *numbers[1:]]
+        paths: list[str] = []
         for image, image_caption in zip(images, captions, strict=True):
-            url = self._public_base_url + self._images.add(image)
-            await channel.send_image(sender, url, caption=image_caption or None)
+            paths.append(self._images.add(image))
+            await channel.send_image(
+                sender, self._public_base_url + paths[-1], caption=image_caption or None
+            )
         if not text_fits:
             logger.warning("post text is %d chars, over the image caption limit", len(caption))
             await channel.send_text(sender, caption)
+        return paths
 
 
 def post_text(caption: str, hashtags: list[str]) -> str:

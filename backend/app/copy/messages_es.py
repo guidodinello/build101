@@ -14,10 +14,16 @@ JOB_FAILED = "Uy, se me trabó algo armando esto. ¿Lo intento de nuevo?"
 PHOTO_KEPT = "¡Buenísima! 📸 ¿Armo un post con esta foto?"
 PHOTOS_KEPT = "¡Buenísimas! 📸 ¿Armo un post con estas fotos?"
 PHOTO_UNREADABLE = "No pude abrir la foto 🙈 ¿Me la mandás de nuevo?"
+PUBLISH_PENDING = "Instagram lo está procesando, en un ratito aparece en tu cuenta ⏳"
+PUBLISH_FAILED = "Uy, Instagram no me dejó publicarlo 🙈 ¿Probamos armándolo de nuevo?"
 
 
 def photo_too_big(max_mb: int) -> str:
     return f"Esa foto es muy pesada 🙈 ¿Me mandás una más liviana? (hasta {max_mb} MB)"
+
+
+def published(permalink: str) -> str:
+    return f"¡Publicado! 🎉 {permalink}"
 
 
 def carousel_slide(n: int, count: int) -> str:

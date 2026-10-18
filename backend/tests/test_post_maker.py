@@ -9,6 +9,7 @@ from app.media.images import POST_SIZE, image_size
 from app.media.public import PublicImages
 from app.posts.drafts import CarouselDraft, PostCopy, PostDrafter, SlideDraft
 from app.posts.maker import WHATSAPP_CAPTION_MAX, PostMaker
+from app.posts.store import InMemoryPosts, Post, PostImage
 from tests.conftest import make_image
 from tests.fakes import CountingImageGen, FakeChannel, ScriptedModel
 
@@ -38,6 +39,7 @@ def maker(
     images: PublicImages | None = None,
     history: InMemoryHistory | None = None,
     max_posts_per_day: int = 5,
+    store: InMemoryPosts | None = None,
 ) -> PostMaker:
     return PostMaker(
         PostDrafter(model),
@@ -45,6 +47,7 @@ def maker(
         photos,
         history or InMemoryHistory(),
         images or PublicImages(),
+        store or InMemoryPosts(),
         "https://backend.test/",
         max_posts_per_day=max_posts_per_day,
         now=lambda: NOON,
@@ -263,3 +266,103 @@ def test_photo_ids_are_not_reused_after_the_cap() -> None:
         photos.add(SENDER, bytes([n]), None)
 
     assert [photo.id for photo in photos.recent(SENDER)] == ["f2", "f3"]
+
+
+def photos_model() -> ScriptedModel:
+    copy = PostCopy(caption="Mesa de roble a medida", hashtags=["#muebles", "#roble"])
+    return ScriptedModel(drafts={PostCopy: copy})
+
+
+async def test_a_sent_post_waits_for_approval_with_its_images_in_order(
+    photos: InMemoryPhotos,
+) -> None:
+    store, channel = InMemoryPosts(), FakeChannel()
+    posts = maker(photos_model(), CountingImageGen(), photos, store=store)
+
+    result = posts.create_post(
+        SENDER, {"brief": "mesa", "asset_ids": ["f1", "f2", "f3"], "style": "photos"}, channel
+    )
+    await posts.join()
+
+    [post] = store.pending(SENDER)
+    assert post.id == result["post_id"]
+    assert (post.format, post.caption) == ("carousel", POST_TEXT)
+    assert [f"https://backend.test{image.path}" for image in post.images] == [
+        url for _, url, _ in channel.images
+    ]
+
+
+async def test_a_single_photo_is_stored_as_an_image_post(photos: InMemoryPhotos) -> None:
+    store = InMemoryPosts()
+    posts = maker(photos_model(), CountingImageGen(), photos, store=store)
+
+    posts.create_post(
+        SENDER, {"brief": "mesa", "asset_ids": ["f2"], "style": "photos"}, FakeChannel()
+    )
+    await posts.join()
+
+    assert [post.format for post in store.pending(SENDER)] == ["image"]
+
+
+async def test_a_failed_generation_stores_nothing(photos: InMemoryPhotos) -> None:
+    store = InMemoryPosts()
+    posts = maker(photos_model(), CountingImageGen(fail=True), photos, store=store)
+
+    posts.create_post(
+        SENDER, {"brief": "mesa", "asset_ids": ["f1"], "style": "design"}, FakeChannel()
+    )
+    await posts.join()
+
+    assert store.pending(SENDER) == []
+
+
+async def test_the_remade_post_replaces_the_old_one_only_once_it_is_sent(
+    photos: InMemoryPhotos,
+) -> None:
+    store = InMemoryPosts()
+    old = Post("old", SENDER, [PostImage("/media/x.jpg", b"x")], "caption")
+    store.add(old)
+    posts = maker(photos_model(), CountingImageGen(), photos, store=store)
+
+    posts.create_post(
+        SENDER,
+        {"brief": "otro título", "asset_ids": ["f1"], "style": "photos", "replaces": "old"},
+        FakeChannel(),
+    )
+    assert old.status == "pending_approval"  # still generating
+    await posts.join()
+
+    assert old.status == "replaced"
+    assert [post.id for post in store.pending(SENDER)] != ["old"]
+    assert len(store.pending(SENDER)) == 1
+
+
+async def test_replacing_something_unknown_or_not_pending_is_ignored(
+    photos: InMemoryPhotos,
+) -> None:
+    store = InMemoryPosts()
+    published = Post("done", SENDER, [PostImage("/media/x.jpg", b"x")], "caption", "published")
+    store.add(published)
+    posts = maker(photos_model(), CountingImageGen(), photos, store=store)
+
+    for replaces in ("done", "nope"):
+        posts.create_post(
+            SENDER,
+            {"brief": "mesa", "asset_ids": ["f1"], "style": "photos", "replaces": replaces},
+            FakeChannel(),
+        )
+        await posts.join()
+
+    assert published.status == "published"
+    assert len(store.pending(SENDER)) == 2
+
+
+def test_a_publishing_post_is_never_dropped_to_make_room() -> None:
+    store = InMemoryPosts(max_per_sender=2)
+    busy = Post("busy", SENDER, [], "c", "publishing")
+    for post in (busy, Post("a", SENDER, [], "c"), Post("b", SENDER, [], "c")):
+        store.add(post)
+
+    assert store.get(SENDER, "busy") is busy
+    assert store.get(SENDER, "a") is None
+    assert store.get(SENDER, "b") is not None

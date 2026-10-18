@@ -44,3 +44,20 @@ class PublisherPort(Protocol):
 
 class PublisherError(Exception):
     """The provider could not be reached, or answered something we cannot use."""
+
+
+class PublishRetryable(PublisherError):
+    """The outcome is unknown: a timeout, a dropped connection, a 5xx, or an accepted post with
+    no id. The post may have been saved anyway, so retry with the same `idempotency_key` (the
+    provider replays the original post) and never report a failure while it is unresolved."""
+
+
+class PublishInProgress(PublisherError):
+    """A request with the same `idempotency_key` is still being processed (HTTP 409).
+
+    Wait `retry_after_s` (when the provider said how long) and resend with the same key.
+    """
+
+    def __init__(self, message: str, retry_after_s: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_s = retry_after_s

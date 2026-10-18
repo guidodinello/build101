@@ -29,3 +29,28 @@ def test_the_oldest_image_is_dropped_past_the_cap() -> None:
     images.add(b"2")
 
     assert images.get(first) is None
+
+
+def test_keep_serves_an_evicted_image_again_at_the_same_path() -> None:
+    images = PublicImages(max_images=2)
+    path = images.add(b"1")
+    images.add(b"2")
+    images.add(b"3")
+    token = path.removeprefix("/media/").removesuffix(".jpg")
+    assert images.get(token) is None
+
+    images.keep(path, b"1")
+
+    assert images.get(token) == b"1"
+
+
+def test_keep_makes_a_live_image_the_newest() -> None:
+    images = PublicImages(max_images=2)
+    first = images.add(b"1")
+    second = images.add(b"2")
+
+    images.keep(first, b"1")
+    images.add(b"3")
+
+    assert images.get(first.removeprefix("/media/").removesuffix(".jpg")) == b"1"
+    assert images.get(second.removeprefix("/media/").removesuffix(".jpg")) is None

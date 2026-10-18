@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel
@@ -7,6 +8,7 @@ from pydantic import BaseModel
 from app.channels.base import ChannelError
 from app.imagegen.base import GeneratedImage
 from app.llm.client import Content, FunctionCall, LLMError, Reply, Step, Tool
+from app.publishing.base import PublishMedia, PublishResult
 from tests.conftest import make_image
 
 
@@ -108,3 +110,43 @@ class CountingImageGen:
         return GeneratedImage(
             data=make_image((1080, 1350)), mime="image/jpeg", provider="fake", model=None, usage={}
         )
+
+
+PERMALINK = "https://www.instagram.com/p/ABC123/"
+
+
+@dataclass
+class FakePublisher:
+    """Stands in for Zernio: answers in order (the last repeats), raising the exceptions."""
+
+    results: list[PublishResult | Exception] = field(
+        default_factory=lambda: [
+            PublishResult(status="published", external_post_id="ext-1", permalink=PERMALINK)
+        ]
+    )
+    calls: list[dict[str, Any]] = field(default_factory=list)
+    gate: asyncio.Event | None = None  # when set, publishing waits for it
+
+    async def ensure_profile(self, name: str, external_id: str) -> str:
+        return "profile"
+
+    async def connect_url(self, profile_id: str, platform: str, redirect_url: str) -> str:
+        return redirect_url
+
+    async def publish(
+        self,
+        account_id: str,
+        caption: str,
+        media: PublishMedia,
+        when: datetime | None = None,
+        idempotency_key: str | None = None,
+    ) -> PublishResult:
+        self.calls.append(
+            {"account_id": account_id, "caption": caption, "media": media, "key": idempotency_key}
+        )
+        if self.gate is not None:
+            await self.gate.wait()
+        item = self.results.pop(0) if len(self.results) > 1 else self.results[0]
+        if isinstance(item, Exception):
+            raise item
+        return item

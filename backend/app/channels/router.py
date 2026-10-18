@@ -10,6 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from app.config import Settings, get_settings
 from app.conversation.factory import build_inbound_handler
 from app.media.public import get_public_images
+from app.publishing.factory import get_publisher
 
 from .base import ChannelPort, InboundMessage
 from .factory import build_channel
@@ -31,7 +32,7 @@ def get_dedupe_store() -> DedupeStore:
 
 @cache
 def get_inbound_handler() -> InboundHandler:
-    return build_inbound_handler(get_settings(), get_public_images())
+    return build_inbound_handler(get_settings(), get_public_images(), get_publisher())
 
 
 @asynccontextmanager
@@ -40,11 +41,12 @@ async def lifespan(app: Any) -> AsyncIterator[None]:
     # turning every webhook into a 500. Tests swap the handler through dependency_overrides.
     app.dependency_overrides.get(get_inbound_handler, get_inbound_handler)()
     yield
-    # Close the HTTP clients only if a request ever built the channel.
-    if get_channel.cache_info().currsize:
-        aclose = getattr(get_channel(), "aclose", None)
-        if aclose:
-            await aclose()
+    # Close the HTTP clients only if a request ever built them.
+    for cached, get in ((get_channel, get_channel), (get_publisher, get_publisher)):
+        if cached.cache_info().currsize:
+            aclose = getattr(get(), "aclose", None)
+            if aclose:
+                await aclose()
 
 
 router = APIRouter(lifespan=lifespan)

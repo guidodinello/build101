@@ -21,7 +21,10 @@ from app.llm.client import (
 )
 from app.media.images import prepare_reference
 from app.posts.maker import PostMaker
+from app.posts.publish import PostPublisher
+from app.posts.store import InMemoryPosts
 
+from .approval import Approval, decide
 from .history import InMemoryHistory
 from .photos import InMemoryPhotos, Photo
 from .tools import TOOLS
@@ -53,10 +56,10 @@ class _PhotoBatch:
 class ChatHandler:
     """InboundHandler that answers text, voice notes and photos with the LLM.
 
-    Orchestrator v0 (T56): only `create_post` is registered, and no onboarding or button
-    routing yet (T23, T18), so buttons and other kinds get fixed messages. Photos wait
-    `PHOTO_DEBOUNCE_S` after the last one and are answered together, with any text that
-    arrives meanwhile.
+    Orchestrator v0 (T56, T57): only `create_post` and `approve_post` are registered, and no
+    onboarding or button routing yet (T23, T18), so buttons and other kinds get fixed
+    messages. Photos wait `PHOTO_DEBOUNCE_S` after the last one and are answered together, with
+    any text that arrives meanwhile.
     """
 
     def __init__(
@@ -65,6 +68,8 @@ class ChatHandler:
         history: InMemoryHistory,
         photos: InMemoryPhotos,
         posts: PostMaker,
+        publisher: PostPublisher,
+        store: InMemoryPosts,
         assistant_name: str,
         max_photo_mb: int,
         photo_debounce_s: float = PHOTO_DEBOUNCE_S,
@@ -74,6 +79,8 @@ class ChatHandler:
         self._history = history
         self._photos = photos
         self._posts = posts
+        self._publisher = publisher
+        self._store = store
         self._system = system_prompt(assistant_name)
         self._max_photo_mb = max_photo_mb
         self._photo_debounce_s = photo_debounce_s
@@ -104,14 +111,24 @@ class ChatHandler:
         match message.kind:
             case "text" if message.text:
                 return await self._llm_turn(
-                    message.sender, message.message_id, request(photos, message.text), channel
+                    message.sender,
+                    message.message_id,
+                    request(photos, message.text),
+                    channel,
+                    words=message.text,
+                    attached=bool(photos),
                 )
             case "audio" if message.audio and message.audio.provider_transcript:
                 # ADR 0021: a voice note is handled as its transcript. The Gemini fallback
                 # transcriber (TranscriberPort) isn't built yet, so no transcript = unclear.
                 transcript = f"[audio] {message.audio.provider_transcript}"
                 return await self._llm_turn(
-                    message.sender, message.message_id, request(photos, transcript), channel
+                    message.sender,
+                    message.message_id,
+                    request(photos, transcript),
+                    channel,
+                    words=message.audio.provider_transcript,
+                    attached=bool(photos),
                 )
             case "audio":
                 return messages_es.AUDIO_UNCLEAR
@@ -168,7 +185,12 @@ class ChatHandler:
                 captions = " ".join(photo.caption for photo in batch.photos if photo.caption)
                 if captions:
                     reply = await self._llm_turn(
-                        sender, batch.last_message_id, request(batch.photos, captions), channel
+                        sender,
+                        batch.last_message_id,
+                        request(batch.photos, captions),
+                        channel,
+                        words=captions,
+                        attached=True,
                     )
                 else:
                     many = len(batch.photos) > 1
@@ -178,7 +200,17 @@ class ChatHandler:
             # The task's boundary, like the webhook's run_handler: nobody awaits it.
             logger.exception("answering %d photos failed for %s", len(batch.photos), mask(sender))
 
-    async def _llm_turn(self, sender: str, message_id: str, text: str, channel: ChannelPort) -> str:
+    async def _llm_turn(
+        self,
+        sender: str,
+        message_id: str,
+        text: str,
+        channel: ChannelPort,
+        words: str,
+        attached: bool,
+    ) -> str:
+        """`text` is what the model reads; `words`, the Owner's own text, decides approval."""
+        approval = self._approval(sender, words, attached)
         user = user_step(text)
         recent = self._photos.recent(sender)
         unseen = [photo for photo in recent if not photo.seen]
@@ -204,7 +236,7 @@ class ChatHandler:
                 if not reply.function_calls:
                     break
                 turn.extend(
-                    function_result_step(call, self._run_tool(call, sender, channel))
+                    function_result_step(call, self._run_tool(call, sender, channel, approval))
                     for call in reply.function_calls
                 )
         except LLMError:
@@ -236,11 +268,30 @@ class ChatHandler:
             await mark_read(message_id, channel)
             await asyncio.sleep(self._keep_alive_s)
 
-    def _run_tool(self, call: FunctionCall, sender: str, channel: ChannelPort) -> dict[str, Any]:
+    def _approval(self, sender: str, words: str, attached: bool) -> Approval:
+        """What this turn's message allows `approve_post` to publish, computed in code (ADR 0007).
+
+        Photos came with it, or are waiting unused: the Owner is asking for a post, not
+        approving one.
+        """
+        approval, awaiting_choice = decide(
+            words,
+            self._store.pending(sender),
+            self._store.awaiting_choice(sender),
+            has_photos=attached or bool(self._photos.recent(sender)),
+        )
+        self._store.set_awaiting_choice(sender, awaiting_choice)
+        return approval
+
+    def _run_tool(
+        self, call: FunctionCall, sender: str, channel: ChannelPort, approval: Approval
+    ) -> dict[str, Any]:
         logger.info("tool %s for %s: %s", call.name, mask(sender), call.arguments)
         match call.name:
             case "create_post":
                 result = self._posts.create_post(sender, call.arguments, channel)
+            case "approve_post":
+                result = self._publisher.approve(sender, call.arguments, approval, channel)
             case _:
                 result = {"error": "unknown_tool"}
         logger.info("tool %s result: %s", call.name, result)

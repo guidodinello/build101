@@ -7,7 +7,7 @@ from typing import Any, Self
 
 import httpx
 
-from .base import PublisherError, PublishMedia, PublishResult
+from .base import PublisherError, PublishInProgress, PublishMedia, PublishResult, PublishRetryable
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,8 @@ STATUSES_FAILED = frozenset({"failed", "partial", "cancelled"})
 # Not final: still publishing, or (207) a transient error that Zernio retries on its own
 STATUSES_PENDING = frozenset({"publishing", "scheduled"})
 HTTP_CONFLICT = 409
+HTTP_SERVER_ERROR = 500
+IDEMPOTENCY_CONFLICT = "idempotency_conflict"
 ERROR_BODY_CHARS = 300
 
 Sleep = Callable[[float], Awaitable[None]]
@@ -133,7 +135,7 @@ class ZernioPublisher:
             if not result.external_post_id:
                 # nothing to poll and nothing for the webhook (T29) to match: surface it
                 # instead of returning a pending result that can never be resolved
-                raise PublisherError(
+                raise PublishRetryable(
                     "zernio accepted the post but returned no post id, so it cannot be tracked; "
                     "it may still go live, so check the account before retrying "
                     "(a retry with the same Idempotency-Key replays the original post)"
@@ -188,13 +190,28 @@ class ZernioPublisher:
         """Send a request; raise PublisherError unless it succeeded or its status is in `accept`."""
         try:
             response = await self._client.request(method, url, **kwargs)
+        except httpx.TransportError as exc:  # timeouts and dropped connections: outcome unknown
+            raise PublishRetryable(f"zernio request failed: {exc!r}") from exc
         except httpx.HTTPError as exc:
             raise PublisherError(f"zernio request failed: {exc!r}") from exc
         if response.is_error and response.status_code not in (accept or set()):
-            raise PublisherError(
-                f"zernio {response.status_code}: {response.text[:ERROR_BODY_CHARS]}"
-            )
+            raise _status_error(response)
         return response
+
+
+def _status_error(response: httpx.Response) -> PublisherError:
+    """Classify an error response: unknown outcome (5xx), same key in flight (409), or final."""
+    message = f"zernio {response.status_code}: {response.text[:ERROR_BODY_CHARS]}"
+    if response.status_code >= HTTP_SERVER_ERROR:
+        return PublishRetryable(message)
+    if response.status_code == HTTP_CONFLICT:
+        # The in-flight 409 has no documented body, so Retry-After is the signal; a duplicate-
+        # content 409 has none and is final.
+        retry_after = response.headers.get("Retry-After", "")
+        if retry_after or IDEMPOTENCY_CONFLICT in response.text:
+            seconds = float(retry_after) if retry_after.replace(".", "", 1).isdigit() else None
+            return PublishInProgress(message, seconds)
+    return PublisherError(message)
 
 
 def _image_urls(media: PublishMedia) -> list[str]:

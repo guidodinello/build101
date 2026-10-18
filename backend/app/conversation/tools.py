@@ -35,6 +35,14 @@ CREATE_POST: Tool = {
                     "design: new images made from the photos, with text on them."
                 ),
             },
+            "replaces": {
+                "type": "string",
+                "description": (
+                    "Only when remaking a post that was already sent because the Owner asked "
+                    "for a change: the id of that post (from its [post ... sent] note), so the "
+                    "old one can no longer be published."
+                ),
+            },
             "slide_count": {
                 "type": "integer",
                 "minimum": MIN_SLIDES,
@@ -50,4 +58,31 @@ CREATE_POST: Tool = {
     },
 }
 
-TOOLS = [CREATE_POST]
+APPROVE_POST: Tool = {
+    "type": "function",
+    "name": "approve_post",
+    "description": (
+        "Publish a post to the Owner's Instagram now. Call it only when the Owner's last "
+        'message explicitly tells you to publish it ("subilo", "publicalo", "dale, '
+        'subila"). Never for praise ("me encanta", "está lindo"): ask "¿Lo subo?" '
+        "instead. It returns at once; the Owner gets the Instagram link when it is live."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "post_id": {
+                "type": "string",
+                "description": "Id of the post to publish, from its [post ... sent] note.",
+            },
+            "next": {
+                "type": "string",
+                "enum": ["publish_now"],
+                "description": "publish_now: publish right away.",
+            },
+        },
+        "required": ["post_id", "next"],
+        "additionalProperties": False,
+    },
+}
+
+TOOLS = [CREATE_POST, APPROVE_POST]

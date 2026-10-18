@@ -16,6 +16,9 @@ from app.llm.client import Step
 from app.media.public import PublicImages
 from app.posts.drafts import CarouselDraft, PostCopy, PostDrafter, SlideDraft
 from app.posts.maker import PostMaker
+from app.posts.publish import PostPublisher
+from app.posts.store import InMemoryPosts
+from app.publishing.mock import MOCK_ACCOUNT_ID, MockPublisher
 from tests.conftest import FIXTURES
 from tests.fakes import CountingImageGen, FakeChannel, ScriptedModel, call_reply, text_reply
 
@@ -53,21 +56,32 @@ def build(
 ) -> tuple[ChatHandler, PostMaker]:
     model.drafts.setdefault(PostCopy, DRAFT)
     model.drafts.setdefault(CarouselDraft, carousel_draft(1))
-    photos, history = InMemoryPhotos(), InMemoryHistory()
+    photos, history, store, images = (
+        InMemoryPhotos(),
+        InMemoryHistory(),
+        InMemoryPosts(),
+        PublicImages(),
+    )
     posts = PostMaker(
         PostDrafter(model),
         image_gen or CountingImageGen(),
         photos,
         history,
-        PublicImages(),
+        images,
+        store,
         "https://backend.test",
         max_posts_per_day,
+    )
+    publishing = PostPublisher(
+        MockPublisher(delay_s=0), store, history, images, "https://backend.test", MOCK_ACCOUNT_ID
     )
     chat = ChatHandler(
         model,
         history,
         photos,
         posts,
+        publishing,
+        store,
         assistant_name="Mora",
         max_photo_mb=MAX_PHOTO_MB,
         photo_debounce_s=DEBOUNCE_S,
@@ -421,11 +435,16 @@ def test_history_is_trimmed_to_start_with_a_user_turn() -> None:
 
 def test_chat_handler_needs_a_gemini_key_and_a_public_url() -> None:
     with pytest.raises(ValueError, match="GEMINI_API_KEY"):
-        build_inbound_handler(Settings(inbound_handler="chat", gemini_api_key=None), PublicImages())
+        build_inbound_handler(
+            Settings(inbound_handler="chat", gemini_api_key=None),
+            PublicImages(),
+            MockPublisher(),
+        )
     with pytest.raises(ValueError, match="PUBLIC_BACKEND_URL"):
         build_inbound_handler(
             Settings(inbound_handler="chat", gemini_api_key="key", public_backend_url=None),
             PublicImages(),
+            MockPublisher(),
         )
 
 
@@ -438,8 +457,9 @@ def test_factory_builds_each_handler() -> None:
             image_gen="mock",
         ),
         PublicImages(),
+        MockPublisher(),
     )
-    echo = build_inbound_handler(Settings(inbound_handler="echo"), PublicImages())
+    echo = build_inbound_handler(Settings(inbound_handler="echo"), PublicImages(), MockPublisher())
 
     assert isinstance(chat, ChatHandler)
     assert isinstance(echo, EchoHandler)

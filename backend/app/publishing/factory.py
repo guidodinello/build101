@@ -1,4 +1,6 @@
-from app.config import Settings
+from functools import cache
+
+from app.config import Settings, get_settings
 
 from .base import PublisherPort
 from .mock import MockPublisher
@@ -16,3 +18,8 @@ def build_publisher(settings: Settings) -> PublisherPort:
             )
         case "mock":
             return MockPublisher()
+
+
+@cache
+def get_publisher() -> PublisherPort:
+    return build_publisher(get_settings())

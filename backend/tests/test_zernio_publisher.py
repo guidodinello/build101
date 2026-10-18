@@ -5,7 +5,12 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from app.publishing.base import PublisherError, PublishMedia
+from app.publishing.base import (
+    PublisherError,
+    PublishInProgress,
+    PublishMedia,
+    PublishRetryable,
+)
 from app.publishing.zernio import POLL_REQUEST_TIMEOUT_S, PUBLISH_TIMEOUT_S, ZernioPublisher
 
 BASE_URL = "https://zernio.test/api/v1"
@@ -275,7 +280,7 @@ async def test_a_pending_post_without_an_id_raises_and_is_not_polled() -> None:
     no_id = {"post": {"status": "publishing", "platforms": []}}
     publisher, requests = publisher_with(scripted(reply(201, no_id), reply(200, PUBLISHED)))
 
-    with pytest.raises(PublisherError, match="no post id"):
+    with pytest.raises(PublishRetryable, match="no post id"):
         await publisher.publish(ACCOUNT_ID, "x", IMAGE)
     assert posts(requests, "GET") == []
 
@@ -487,3 +492,36 @@ async def test_connect_url_only_supports_instagram() -> None:
 
     with pytest.raises(ValueError, match="instagram"):
         await publisher.connect_url("prof-1", "facebook", "https://app.test/back")
+
+
+async def test_a_timeout_and_a_5xx_are_retryable_because_the_post_may_exist() -> None:
+    def timeout(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("slow")
+
+    slow, _ = publisher_with(timeout)
+    broken, _ = publisher_with(respond(503, {"error": "down"}))
+
+    with pytest.raises(PublishRetryable):
+        await slow.publish(ACCOUNT_ID, "x", IMAGE)
+    with pytest.raises(PublishRetryable, match="zernio 503"):
+        await broken.publish(ACCOUNT_ID, "x", IMAGE)
+
+
+async def test_a_409_with_retry_after_is_a_request_still_in_flight() -> None:
+    in_flight = httpx.Response(409, json={"error": "processing"}, headers={"Retry-After": "7"})
+    publisher, _ = publisher_with(lambda request: in_flight)
+
+    with pytest.raises(PublishInProgress) as raised:
+        await publisher.publish(ACCOUNT_ID, "x", IMAGE, idempotency_key="p1")
+
+    assert raised.value.retry_after_s == 7.0
+
+
+async def test_a_duplicate_content_409_is_final() -> None:
+    body = {"error": "already posted", "details": {"existingPostId": "post-0"}}
+    publisher, _ = publisher_with(respond(409, body))
+
+    with pytest.raises(PublisherError) as raised:
+        await publisher.publish(ACCOUNT_ID, "x", IMAGE)
+
+    assert not isinstance(raised.value, PublishInProgress | PublishRetryable)
