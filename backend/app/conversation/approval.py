@@ -21,7 +21,10 @@ NOW_WORDS = frozenset({"ahora", "ya"})
 TIME_WORDS = frozenset(
     {"manana", "tarde", "noche", "hs", "lunes", "martes", "miercoles", "jueves", "viernes"}
     | {"sabado", "domingo", "hoy"}
+    | {"despues", "luego", "cuando", "rato", "ratito"}  # "subilo después", "cuando termine"
 )
+# Asking about publishing, or only willing to: when unsure it is not an approval.
+QUESTION_WORDS = frozenset({"como", "puedo", "podes", "puedes", "debo", "deberia", "quiero"})
 CLOCK = re.compile(r"\b\d{1,2}[:.]\d{2}\b|\ba las\b")  # "18:30", "a las 8"
 ORDINALS = {
     "primero": 1,
@@ -56,6 +59,8 @@ def classify(text: str) -> Intent:
     words = normalize(text)
     if not APPROVE_WORDS.intersection(words) or NEGATIONS.intersection(words):
         return "none"
+    if "?" in text or QUESTION_WORDS.intersection(words):
+        return "none"
     wants_later = TIME_WORDS.intersection(words) or CLOCK.search(plain(text))
     return "approve_later" if wants_later and not NOW_WORDS.intersection(words) else "approve"
 
@@ -83,28 +88,38 @@ class Approval:
 
 
 def decide(
-    text: str, pending: list[Post], awaiting_choice: bool, has_photos: bool
-) -> tuple[Approval, bool]:
-    """The Approval for one turn and whether the next turn may name one of `pending` by number.
+    text: str, pending: list[Post], listed: list[str] | None, has_photos: bool
+) -> tuple[Approval, list[str] | None]:
+    """The Approval for one turn and the post ids the next turn may name by number.
+
+    `listed`: the ids of the numbered list the Owner was last shown, in that order. A number is
+    resolved against it, not against `pending`, which may have changed since: a post that is no
+    longer pending is not approved, and the number never slides to another post.
 
     `has_photos`: photos came with this turn or none are used yet, so "subilas así" is a post
     request, not an approval of an older post.
     """
     if has_photos:
-        return Approval(), False
-    if awaiting_choice and (number := ordinal(text, len(pending))):
-        return Approval(post_id=pending[number - 1].id), False
+        return Approval(), None
+    if listed and (number := ordinal(text, len(listed))):
+        chosen = listed[number - 1]
+        if any(post.id == chosen for post in pending):
+            return Approval(post_id=chosen), None
+        return Approval(reason="post_not_pending"), None
     match classify(text):
         case "approve" if len(pending) == 1:
-            return Approval(post_id=pending[0].id), False
+            return Approval(post_id=pending[0].id), None
         case "approve" if pending:
-            return Approval(reason="several_pending", pending=numbered(pending)), True
+            return (
+                Approval(reason="several_pending", pending=numbered(pending)),
+                [post.id for post in pending],
+            )
         case "approve":
-            return Approval(reason="no_pending_post"), False
+            return Approval(reason="no_pending_post"), None
         case "approve_later":
-            return Approval(reason="scheduling_not_available"), False
+            return Approval(reason="scheduling_not_available"), None
         case _:
-            return Approval(), False
+            return Approval(), None
 
 
 def numbered(pending: list[Post]) -> list[dict[str, Any]]:

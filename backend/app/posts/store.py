@@ -47,8 +47,9 @@ class InMemoryPosts:
     def __init__(self, max_per_sender: int = MAX_POSTS_PER_SENDER) -> None:
         self._max_per_sender = max_per_sender
         self._posts: defaultdict[str, list[Post]] = defaultdict(list)
-        # Set when "subilo" met several pending posts: the next turn may name one by number.
-        self._awaiting_choice: set[str] = set()
+        # Set when "subilo" met several pending posts: the ids of the numbered list the Owner was
+        # shown, which the next turn may name by number.
+        self._listed: dict[str, list[str]] = {}
 
     def add(self, post: Post) -> None:
         posts = self._posts[post.sender]
@@ -67,8 +68,11 @@ class InMemoryPosts:
         """The posts awaiting approval, oldest first: the numbering the Owner sees."""
         return [post for post in self._posts[sender] if post.status == "pending_approval"]
 
-    def awaiting_choice(self, sender: str) -> bool:
-        return sender in self._awaiting_choice
+    def listed(self, sender: str) -> list[str] | None:
+        return self._listed.get(sender)
 
-    def set_awaiting_choice(self, sender: str, value: bool) -> None:
-        (self._awaiting_choice.add if value else self._awaiting_choice.discard)(sender)
+    def set_listed(self, sender: str, post_ids: list[str] | None) -> None:
+        if post_ids:
+            self._listed[sender] = post_ids
+        else:
+            self._listed.pop(sender, None)

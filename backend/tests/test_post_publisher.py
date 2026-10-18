@@ -405,3 +405,33 @@ async def test_the_whole_flow_runs_offline_with_the_mock_publisher() -> None:
 
 def test_the_clock_is_only_used_for_created_at() -> None:
     assert isinstance(Post("p", SENDER, [], "c").created_at, datetime)
+
+
+async def test_a_number_picks_the_post_that_was_listed_even_if_the_list_changed() -> None:
+    which = text_reply("¿Cuál subo? 1) … 2) … 3) …")
+    rig = Rig(ScriptedModel(replies=[approve("p1"), which, approve("p2"), STARTED]))
+    first = rig.add_post("p1")
+    rig.add_post("p2")
+    rig.add_post("p3")
+
+    await rig.say("subilo")
+    first.status = "replaced"  # a remake retired p1 after the Owner saw the numbered list
+    await rig.say("la segunda")  # "2" was p2 in that list
+    await rig.finish()
+
+    assert [call["key"] for call in rig.publisher.calls] == ["p2"]
+
+
+async def test_a_listed_post_that_is_no_longer_pending_is_not_approved_by_its_number() -> None:
+    which = text_reply("¿Cuál subo? 1) … 2) … 3) …")
+    rig = Rig(ScriptedModel(replies=[approve("p1"), which, approve("p3"), ASK]))
+    rig.add_post("p1")
+    chosen = rig.add_post("p2")
+    rig.add_post("p3")
+
+    await rig.say("subilo")
+    chosen.status = "replaced"
+    await rig.say("la segunda")  # p2 is gone; the model must not slide to another post
+    await rig.finish()
+
+    assert rig.publisher.calls == []

@@ -274,13 +274,13 @@ class ChatHandler:
         Photos came with it, or are waiting unused: the Owner is asking for a post, not
         approving one.
         """
-        approval, awaiting_choice = decide(
+        approval, listed = decide(
             words,
             self._store.pending(sender),
-            self._store.awaiting_choice(sender),
+            self._store.listed(sender),
             has_photos=attached or bool(self._photos.recent(sender)),
         )
-        self._store.set_awaiting_choice(sender, awaiting_choice)
+        self._store.set_listed(sender, listed)
         return approval
 
     def _run_tool(
