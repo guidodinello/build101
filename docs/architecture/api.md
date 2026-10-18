@@ -307,7 +307,8 @@ class GeneratedImage(BaseModel):
 
 class ImageGenPort(Protocol):
     async def generate(self, prompt: str, reference_images: list[bytes],
-                       style_image: bytes | None = None) -> GeneratedImage: ...   # one image per call; style_image = carousel anchor
+                       style_image: bytes | None = None, *, aspect_ratio: str | None = None,
+                       image_size: str | None = None) -> GeneratedImage: ...   # one image per call; style_image = carousel anchor; ratio/size override 4:5 (panorama)
 # errors: ImageGenError (base), ImageGenBlocked(reason), ImageGenNoImage, ImageGenUnavailable
 
 # app/media/images.py
@@ -316,10 +317,12 @@ def prepare_reference(data: bytes) -> bytes: ...   # reference photo for the ima
 
 # app/carousel/schemas.py  (ADR 0022; field docs in agents.md)
 SlideRole = Literal["cover", "content", "cta"]
+TemplateFamily = Literal["editorial", "numbers", "panorama"]
 class SlideCopy(BaseModel):
     role: SlideRole
     headline: str            # ≤ 6 words
     body: str | None = None  # ≤ 20 words
+    kicker: str | None = None  # 1–2 word label above the headline (ADR 0028)
 class CarouselCopy(BaseModel):          # Copywriter, carousel mode
     caption: str
     hashtags: list[str]
@@ -329,18 +332,15 @@ class SlideScene(BaseModel):
     scene_prompt: str        # English: what this slide shows (scene, composition); no text
 class CarouselBrief(BaseModel):         # Art Director, carousel mode
     reference_asset_ids: list[str]   # 1–10
-    style_prompt: str                # English: shared visual system (palette hex, typography, layout grid, text safe area)
+    family: TemplateFamily           # editorial | numbers | panorama: the renderer's template family (ADR 0028)
+    style_prompt: str                # English: shared photographic style (light, palette hex, props); no typography
     slides: list[SlideScene]         # one per CarouselCopy slide, same order
     style_notes: str                 # short Spanish summary for the Owner
-class TextCheck(BaseModel):             # Text Checker
-    matches: bool
-    found: str
-    issues: list[str]
 
 # app/carousel/prompts.py
 def build_slide_prompt(brief: CarouselBrief, copy: CarouselCopy, index: int, *, anchored: bool) -> str: ...
-    # style + scene + "render exactly this text and no other text" + fixed rules (keep the product unchanged,
-    # no logos, no prices/numbers unless in the given text, text inside the central 90%)
+    # style + scene + the template's framing + fixed rules (keep the product unchanged, no text, numbers or logos)
+def build_panorama_prompt(brief: CarouselBrief, copy: CarouselCopy) -> str: ...   # panorama: panels left to right
 
 # app/carousel/generator.py
 class GeneratedSlide:

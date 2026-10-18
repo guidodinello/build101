@@ -2,6 +2,7 @@
 
 - Date: 2026-10-18
 - Status: proposed
+- Revised by: [0028](0028-designed-slides-ai-scene-code-layout.md) (on designed slides the template's brand mark places the logo)
 
 ## Context
 

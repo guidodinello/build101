@@ -60,6 +60,17 @@ From [ADR 0022](decisions/0022-carousels-in-mvp.md).
 - [ ] **Redo feedback that changes the words** ("que la 3 diga envío gratis"): does `redo_slides` rewrite that slide's text with the Copywriter, or only its scene?
 - [ ] **On stage:** does the demo script show a carousel? Carousels are Must, but [product/demo-script.md](product/demo-script.md) shows one image Post.
 
+## Post and carousel design
+
+From [research/post-design/](research/post-design/recommendation.md). The proposal (AI makes text-free visuals, code templates add type, figures, logo and brand chrome) changes ADRs 0018, 0022 and 0027, so it needs an ADR first.
+
+- [x] **AI visual + code layout:** yes, Takumi on a Vercel route renders the slides ([ADR 0028](decisions/0028-designed-slides-ai-scene-code-layout.md)); hosted template APIs stay the fallback. Still to measure: Gemini panorama fidelity and how reliably scenes leave the template's text area calm.
+- [x] **First template families:** `editorial`, `numbers` and `panorama` ([ADR 0028](decisions/0028-designed-slides-ai-scene-code-layout.md)). Next candidates: before/after, notes and moodboard; the cut-out families (spec sheet, shop the look, colorways) wait for a cut-out provider.
+- [ ] **Cut-outs:** Gemini can't output transparency; Recraft remove-background ($0.01), Ideogram or OpenAI transparent output? Not rembg's default model (non-commercial weights).
+- [ ] **Brand typography:** the Brand Brain has no fonts or Instagram handle; how many curated font pairs, and how the wizard picks one.
+- [ ] **Who picks the family:** the Owner ("tipo revista") or always the Art Director?
+- [ ] **Scene anchoring:** `gemini-nano-banana-2.1` has no style-reference slot; the cover is now sent as "Another slide of this carousel" with a prompt that says to match its light and palette ([ADR 0028](decisions/0028-designed-slides-ai-scene-code-layout.md)). Does that keep the scenes consistent, or is it worth Nano Banana Pro's style references?
+
 ## Publishing
 
 - [ ] Confirm the exact query params Zernio appends to the connect redirect (log them in the pre-hackathon test).
