@@ -14,7 +14,7 @@ The "agency" is one **orchestrator** (the account manager the owner talks to) pl
 | **Content Strategist** | Single call, structured | `generate_plan` job; `suggest_ideas` tool | Brand Brain + Catalog + active Offers + assets + recent posts + date + notes + trend notes → weekly plan (images and Reels), or 3 ideas | `medium` |
 | **Copywriter** | Single call, structured | `generate_post` job | Brand Brain + brief + the Owner's own words + trend notes (+ feedback, previous version) → copy; for a carousel: + slide count → caption + the text of each slide | `medium` |
 | **Art Director** | Single call, vision, structured | `generate_post` job | Brand Brain + brief + copy + candidate photos (the ones the Owner sent with the request, if any) + trend notes → image brief (reference photos + image prompt); for a Reel: candidate videos (keyframes) → video + cover frame; for a carousel: → reference photos + shared style + one scene per slide | `medium` |
-| **Niche Analyst** | Single call, URL context + Google Search, structured | `generate_niche_report` job; `niche_report` tool | Business category + location + Brand Brain + reference websites + niche search themes → Niche Report with source links ([ADR 0026](../decisions/0025-weekly-niche-report.md)) | `medium` |
+| **Niche Analyst** | Single call, URL context + Google Search, structured | `generate_niche_report` job; `niche_report` tool | Business category + location + Brand Brain + reference websites + niche search themes → Niche Report with source links ([ADR 0025](../decisions/0025-weekly-niche-report.md)) | `medium` |
 | **Feedback Classifier** | Single call, structured | `revise_post` job | Feedback text → `copy` / `image` / `both` (Reel: `copy` / `cover` / `video`) + normalized instruction | `low` |
 | **Text Checker** | Single call, vision, structured | `CarouselGenerator` (carousel slides) | Slide image + expected `SlideCopy` → `TextCheck` | `low` |
 
@@ -243,7 +243,7 @@ A prompt can be composed from several files: a line that is only `{{include <pat
 
 **Purpose:** decide what the image shows and how it looks. It doesn't draw and doesn't compose: it picks the reference photos and writes the prompt; a third-party image service generates the variations ([ADR 0018](../decisions/0018-ai-image-generation-service.md), provider in [ADR 0019](../decisions/0019-image-provider-gemini.md)).
 
-- Input: Brand Brain (visual identity: palette, `photo_style`; voice; `constraints`), the brief and `owner_words`, `PostCopy` (for the angle; none of it goes on the image), candidate photos (IDs + analyses + **the images themselves**, as URLs), trend notes (optional; from the latest [Niche Report](#niche-analyst), [ADR 0026](../decisions/0025-weekly-niche-report.md)), optional feedback + previous brief (revise mode), optional `force_asset_id`.
+- Input: Brand Brain (visual identity: palette, `photo_style`; voice; `constraints`), the brief and `owner_words`, `PostCopy` (for the angle; none of it goes on the image), candidate photos (IDs + analyses + **the images themselves**, as URLs), trend notes (optional; from the latest [Niche Report](#niche-analyst), [ADR 0025](../decisions/0025-weekly-niche-report.md)), optional feedback + previous brief (revise mode), optional `force_asset_id`.
 - Candidates: when the Owner sent photos with the request (`posts.candidate_asset_ids`), those photos are the preferred references; whether the Business's photo library also complements them is not decided ([open questions](../open-questions.md#post-images-generated-by-ai-adr-0018)). With no photos in the request, the best matches from the library (by the brief, `best_for` and `quality`).
 - Output (`ImageBrief`):
 
@@ -288,7 +288,7 @@ A prompt can be composed from several files: a line that is only `{{include <pat
 
 ### Niche Analyst
 
-**Purpose:** tell the Agency what is working in the Business's niche this week (Should, F3.6, [ADR 0026](../decisions/0025-weekly-niche-report.md)). Sources compared in [research/niche-trend-sources.md](../research/niche-trend-sources.md); first niche: [research/furniture-decor-uruguay.md](../research/furniture-decor-uruguay.md).
+**Purpose:** tell the Agency what is working in the Business's niche this week (Should, F3.6, [ADR 0025](../decisions/0025-weekly-niche-report.md)). Sources compared in [research/niche-trend-sources.md](../research/niche-trend-sources.md); first niche: [research/furniture-decor-uruguay.md](../research/furniture-decor-uruguay.md).
 
 - Input: `businesses.category`, `location`, the Brand Brain (products, audience, pillars), the niche's reference websites and search themes (a static list per niche in `app/agents/data/`), reference websites the Owner named, today's date.
 - Call: one Gemini interaction through `app/llm/client.py` with the built-in `url_context` (reads the reference websites named in the prompt, up to 20 URLs) and `google_search` tools ([URL context docs](https://ai.google.dev/gemini-api/docs/url-context)). Source links come from the response's URL citations, not from the model's text.
@@ -410,7 +410,7 @@ From the second design pass ([../design/mockups/](../design/mockups/README.md), 
 | `revise_post` | Should | `post_id`, `feedback` | Enqueue `revise_post` | `{job_id}` |
 | `plan_week` | Should | `notes?: str`, `week_start?: date` | Enqueue `generate_plan`, only when the Owner asks for a plan | `{job_id, status: "started"}` |
 | `suggest_ideas` | Should | `request: str` | Content Strategist ideas mode (synchronous); stores the 3 ideas in `conversation_state.ideas` so "la 2" or "la del taller" can be resolved | `{ideas: [{n, title, idea, suggested_asset_ids}]}` |
-| `niche_report` | Should | — | Return the latest Niche Report, or enqueue `generate_niche_report` when there is none from this week ([ADR 0026](../decisions/0025-weekly-niche-report.md)) | `{summary, insights}` or `{job_id, status: "started"}` |
+| `niche_report` | Should | — | Return the latest Niche Report, or enqueue `generate_niche_report` when there is none from this week ([ADR 0025](../decisions/0025-weekly-niche-report.md)) | `{summary, insights}` or `{job_id, status: "started"}` |
 | `send_dashboard_link` | Should | — | Create a `dashboard` magic link (7 days) and send it as a CTA URL button ("Abrí tu panel") | `{sent: true}` |
 | `revise_plan` | Could | `plan_id`, `feedback` | Enqueue `generate_plan` (revise mode) | `{job_id}` |
 | `update_brand_brain` | Could | `change: str` | Enqueue `generate_brand` revise mode (silent: no summary message unless asked) | `{job_id}` |
