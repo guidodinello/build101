@@ -1,6 +1,6 @@
 # Frontend
 
-Next.js app: the Neitor AI landing page (`/`), the onboarding wizard opened from WhatsApp (`/o/[token]`), the read-only dashboard (`/b/[token]`) and the WhatsApp simulator used for development and as the demo fallback (`/dev/chat`).
+Next.js app: the Neitor AI landing page (`/`) and the onboarding wizard opened from WhatsApp (`/o/[token]`). Planned, not built yet: the read-only dashboard (`/b/[token]`, T35) and the WhatsApp simulator used for development and as the demo fallback (`/dev/chat`, T22).
 
 - Design: [docs/design/web-app.md](../docs/design/web-app.md)
 - API contract: [docs/architecture/api.md](../docs/architecture/api.md)

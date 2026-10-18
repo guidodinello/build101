@@ -96,7 +96,7 @@ uv run uvicorn app.main:app --reload --port 8000
 cd frontend
 cp .env.example .env.local
 npm install
-npm run dev                     # http://localhost:3000/dev/chat
+npm run dev                     # http://localhost:3000/o/demo with ENABLE_MOCK_API=true (/dev/chat is T22)
 ```
 
 Real WhatsApp against a local backend: `cloudflared tunnel --url http://localhost:8000` and point the Kapso webhook to `<tunnel>/webhooks/whatsapp` (remember to point it back to prod afterwards). Use the same `cloudflared` URL as `PUBLIC_BACKEND_URL`: free ngrok answers browser-like clients with an HTML warning page instead of the file, so Zernio gets HTML instead of the post image and Instagram rejects the post (`Failed to validate Instagram image: unrecognized file format`, seen 2026-10-18). ngrok is fine for the Kapso webhook alone.
