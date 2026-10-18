@@ -37,7 +37,7 @@ async def generate_brand(context: JobContext, payload: dict[str, Any]) -> dict[s
     correction = payload.get("correction")
     async with context.sessions() as db:
         business = await db.get_one(Business, business_id)
-        previous = await _latest_brain(db, business_id)
+        previous = await latest_brand_brain(db, business_id)
         inputs = await _inputs(db, business, previous if correction else None, correction)
 
     brain = await write_brand_brain(context.model, inputs)
@@ -106,7 +106,7 @@ async def _wait_for_analyses(context: JobContext, business_id: uuid.UUID) -> Non
         await asyncio.sleep(ANALYSES_POLL_S)
 
 
-async def _latest_brain(db: AsyncSession, business_id: uuid.UUID) -> BrandBrain | None:
+async def latest_brand_brain(db: AsyncSession, business_id: uuid.UUID) -> BrandBrain | None:
     row = await db.scalar(
         select(BrandBrainVersion)
         .where(BrandBrainVersion.business_id == business_id)

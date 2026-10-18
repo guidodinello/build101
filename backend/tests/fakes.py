@@ -84,6 +84,7 @@ class ScriptedModel:
     calls: list[list[Step]] = field(default_factory=list)
     tools_seen: list[list[Tool] | None] = field(default_factory=list)
     structured_calls: list[list[Content]] = field(default_factory=list)
+    structured_systems: list[str] = field(default_factory=list)
     fail: bool = False
     delay_s: float = 0.0
 
@@ -111,6 +112,7 @@ class ScriptedModel:
         thinking_level: str,
     ) -> T:
         self.structured_calls.append(content)
+        self.structured_systems.append(system)
         return self.drafts[schema]  # type: ignore[return-value]
 
 

@@ -2,10 +2,10 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.conversation.library import BrandLibrary
-from app.db.models import AssetProduct, BrandAsset, Business, Product
+from app.conversation.library import BrandBrains, BrandLibrary
+from app.db.models import AssetProduct, BrandAsset, BrandBrainVersion, Business, Product
 from tests.conftest import make_image, requires_db
-from tests.fakes import FakeStorage
+from tests.fakes import FakeStorage, brand_brain
 
 pytestmark = requires_db
 
@@ -72,3 +72,43 @@ async def test_an_unknown_sender_has_no_wizard_photos(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     assert await BrandLibrary(sessions, FakeStorage()).photos("59800000000") == []
+
+
+async def test_posts_read_the_latest_brand_brain_version(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    async with sessions() as db:
+        business = Business(owner_phone=PHONE, name="Katei")
+        db.add(business)
+        await db.flush()
+        db.add_all(
+            [
+                BrandBrainVersion(
+                    business_id=business.id,
+                    version=version,
+                    data=brand_brain(one_liner=one_liner).model_dump(),
+                    reason=reason,
+                )
+                for version, one_liner, reason in [
+                    (1, "Muebles restaurados", "onboarding"),
+                    (2, "Muebles restaurados a mano", "correction"),
+                ]
+            ]
+        )
+        await db.commit()
+
+    brand = await BrandBrains(sessions).latest(PHONE)
+
+    assert brand is not None
+    assert brand.one_liner == "Muebles restaurados a mano"
+
+
+async def test_an_owner_without_a_brand_brain_has_none(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    async with sessions() as db:
+        db.add(Business(owner_phone=PHONE, name="Katei"))
+        await db.commit()
+
+    assert await BrandBrains(sessions).latest(PHONE) is None
+    assert await BrandBrains(sessions).latest("59800000000") is None

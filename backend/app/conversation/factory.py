@@ -17,7 +17,7 @@ from app.storage import get_storage
 from .button_router import ButtonRouter
 from .chat import ChatHandler
 from .history import InMemoryHistory
-from .library import BrandLibrary
+from .library import BrandBrains, BrandLibrary
 from .photos import InMemoryPhotos
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,7 @@ def build_inbound_handler(
                 logger.warning(
                     "PUBLISHER=zernio without ZERNIO_ACCOUNT_ID: posts can't be published"
                 )
+            sessions = get_sessionmaker() if settings.database_url else None
             posts = PostMaker(
                 PostDrafter(model),
                 build_image_gen(settings),
@@ -52,11 +53,11 @@ def build_inbound_handler(
                 store,
                 settings.public_backend_url,
                 settings.max_posts_per_day,
+                brand_of=BrandBrains(sessions).latest if sessions else None,
             )
             publishing = PostPublisher(
                 publisher, store, images, settings.public_backend_url, account_id
             )
-            sessions = get_sessionmaker() if settings.database_url else None
             buttons = ButtonRouter(store, posts, publishing, sessions)
             library = (
                 BrandLibrary(sessions, get_storage())
