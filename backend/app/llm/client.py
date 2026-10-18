@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import logging
@@ -7,7 +8,7 @@ from typing import Any, Literal, Protocol, Self, runtime_checkable
 
 import httpx
 from google import genai
-from google.genai import errors
+from google.genai import errors, types
 
 # The Interactions API raises its own error family (timeouts, connection and HTTP status
 # errors), not `errors.APIError`, and google-genai 2.31 exports it only from this module.
@@ -24,6 +25,14 @@ Tool = dict[str, Any]  # a function declaration: {"type": "function", "name", "d
 # Free-tier gemini-3.8-flash took 5–26 s per chat turn on 2026-10-17, and some turns over 30 s.
 REQUEST_TIMEOUT_S = 60.0
 STRUCTURED_TIMEOUT_S = 90.0
+
+# The SDK sleeps for a 429's Retry-After as-is, ignoring its own backoff cap
+# (google/genai/_gaos/utils/retries.py); a daily-quota 429 asked for 19 h on 2026-10-18.
+# So 429 is not retried, and each call also gets a wall-clock deadline (`_create`).
+RETRY_STATUS_CODES = [408, 500, 502, 503, 504]
+HTTP_OPTIONS = types.HttpOptions(
+    retry_options=types.HttpRetryOptions(http_status_codes=RETRY_STATUS_CODES)
+)
 
 # A turn that asks for function calls ends in `requires_action` with no text (checked live).
 ANSWERED_STATUSES = frozenset({"completed", "requires_action"})
@@ -102,7 +111,7 @@ class GeminiChat:
 
     @classmethod
     def from_api_key(cls, api_key: str, model: str) -> Self:
-        return cls(genai.Client(api_key=api_key).aio, model)
+        return cls(genai.Client(api_key=api_key, http_options=HTTP_OPTIONS).aio, model)
 
     async def reply(
         self,
@@ -170,15 +179,21 @@ class GeminiChat:
     ) -> Any:
         started = time.monotonic()
         try:
-            interaction = await self._client.interactions.create(
-                model=self._model,
-                system_instruction=system,
-                input=steps,
-                generation_config={"thinking_level": thinking_level},
-                store=False,
+            # `timeout` bounds each HTTP attempt; `wait_for` bounds the call, retries included.
+            interaction = await asyncio.wait_for(
+                self._client.interactions.create(
+                    model=self._model,
+                    system_instruction=system,
+                    input=steps,
+                    generation_config={"thinking_level": thinking_level},
+                    store=False,
+                    timeout=timeout_s,
+                    **options,
+                ),
                 timeout=timeout_s,
-                **options,
             )
+        except TimeoutError as exc:
+            raise LLMError(f"{agent}: no answer within {timeout_s:.0f} s") from exc
         except (GeminiNextGenAPIClientError, errors.APIError, httpx.HTTPError) as exc:
             raise LLMError(f"{agent}: {exc}") from exc
 
