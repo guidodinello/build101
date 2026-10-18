@@ -47,6 +47,7 @@ from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts, Post, PostImage
 from app.publishing.mock import MOCK_ACCOUNT_ID, MockPublisher
+from app.rendering.mock import MockRenderer
 from app.storage import StorageError
 from tests.conftest import FIXTURES, make_image
 from tests.fakes import (
@@ -72,10 +73,17 @@ def carousel_draft(slides: int) -> CarouselDraft:
     return CarouselDraft(
         caption="Mesa de roble a medida",
         hashtags=["#muebles", "#roble"],
+        family="editorial",
         style_prompt="warm",
         style_notes="cálido",
         slides=[
-            SlideDraft(role="content", headline=f"Slide {n}", body="", scene_prompt=f"scene {n}")
+            SlideDraft(
+                role="content",
+                kicker="",
+                headline=f"Slide {n}",
+                body="",
+                scene_prompt=f"scene {n}",
+            )
             for n in range(1, slides + 1)
         ],
     )
@@ -129,6 +137,7 @@ def build(
     posts = PostMaker(
         PostDrafter(model),
         image_gen or CountingImageGen(),
+        MockRenderer(),
         photos,
         images,
         store,

@@ -1,4 +1,4 @@
-import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from io import BytesIO
 
@@ -12,8 +12,9 @@ from app.conversation.photos import LOCAL_TZ, InMemoryPhotos
 from app.media.images import POST_SIZE, image_size
 from app.media.public import PublicImages
 from app.posts.drafts import SYSTEM_PROMPT, CarouselDraft, PostCopy, PostDrafter, SlideDraft
-from app.posts.maker import LOGO_SPACE_NOTE, WHATSAPP_CAPTION_MAX, PostMaker
+from app.posts.maker import WHATSAPP_CAPTION_MAX, PostMaker
 from app.posts.store import InMemoryPosts, Post, PostImage
+from app.rendering.mock import MockRenderer
 from tests.conftest import make_image
 from tests.fakes import CountingImageGen, FakeChannel, ScriptedModel, brand_brain
 
@@ -23,14 +24,21 @@ POST_TEXT = "Mesa de roble a medida\n\n#muebles #roble"
 PHOTO_SIZES = [(100, 100), (120, 100), (140, 100)]
 
 
-def carousel_draft(slides: int) -> CarouselDraft:
+def carousel_draft(slides: int, family: str = "editorial") -> CarouselDraft:
     return CarouselDraft(
         caption="Mesa de roble a medida",
         hashtags=["#muebles", "#roble"],
+        family=family,
         style_prompt="warm",
         style_notes="cálido",
         slides=[
-            SlideDraft(role="content", headline=f"Slide {n}", body="", scene_prompt=f"scene {n}")
+            SlideDraft(
+                role="content",
+                kicker=f"Tip {n}",
+                headline=f"Slide {n}",
+                body="",
+                scene_prompt=f"scene {n}",
+            )
             for n in range(1, slides + 1)
         ],
     )
@@ -46,6 +54,8 @@ def maker(
     events: list[Event] | None = None,
     brand: BrandBrain | None = None,
     brand_fails: bool = False,
+    renderer: MockRenderer | None = None,
+    notes_of: Callable[[str], Awaitable[list[str]]] | None = None,
 ) -> PostMaker:
     """A maker whose events go to `events` (a throwaway list when the test doesn't look)."""
     recorded = events if events is not None else []
@@ -61,6 +71,7 @@ def maker(
     posts = PostMaker(
         PostDrafter(model),
         image_gen,
+        renderer or MockRenderer(),
         photos,
         images or PublicImages(),
         store or InMemoryPosts(),
@@ -68,6 +79,7 @@ def maker(
         max_posts_per_day=max_posts_per_day,
         brand_of=brand_of,
         now=lambda: NOON,
+        notes_of=notes_of,
     )
     posts.on_event(record)
     return posts
@@ -302,6 +314,7 @@ async def test_without_a_registered_callback_the_generation_fails_loudly(
     posts = PostMaker(
         PostDrafter(model),
         CountingImageGen(),
+        MockRenderer(),
         photos,
         PublicImages(),
         InMemoryPosts(),
@@ -544,21 +557,65 @@ async def test_a_post_with_the_logo_stamps_it_on_every_image(photos: InMemoryPho
         assert red > 180 and green < 60 and blue < 60
 
 
-async def test_a_design_with_the_logo_keeps_its_corner_clear(photos: InMemoryPhotos) -> None:
+async def test_a_design_hands_the_logo_to_the_template_instead_of_stamping_it(
+    photos: InMemoryPhotos,
+) -> None:
     photos.set_logo(SENDER, make_image((300, 120), color="#dc0000", format="PNG"))
     model = ScriptedModel(drafts={CarouselDraft: carousel_draft(2)})
-    image_gen = CountingImageGen()
-    posts = maker(model, image_gen, photos)
+    renderer, store = MockRenderer(), InMemoryPosts()
+    posts = maker(model, CountingImageGen(), photos, store=store, renderer=renderer)
 
-    posts.create_post(
+    result = posts.create_post(
         SENDER,
         {"brief": "mesa", "asset_ids": ["f1", "f2"], "style": "design", "with_logo": True},
         FakeChannel(),
     )
     await posts.join()
 
-    assert len(image_gen.calls) == 2
-    assert all(LOGO_SPACE_NOTE in prompt for prompt in image_gen.calls)
+    assert [slide.logo is not None for slide in renderer.slides] == [True, True]
+    assert renderer.slides[0].logo is not None and renderer.slides[0].logo.tone == "dark"
+    post = store.get(SENDER, result["post_id"])
+    assert post is not None
+    assert all(bottom_right_pixel(image.data)[0] < 180 for image in post.images)
+
+
+async def test_every_designed_slide_is_rendered_from_its_copy_and_the_brand(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(3, family="numbers")})
+    renderer = MockRenderer()
+    posts = maker(model, CountingImageGen(), photos, brand=brand_brain(), renderer=renderer)
+
+    posts.create_post(
+        SENDER, {"brief": "mesa", "asset_ids": ["f1", "f2", "f3"], "style": "design"}, FakeChannel()
+    )
+    await posts.join()
+
+    assert [(s.family, s.index, s.count, s.role) for s in renderer.slides] == [
+        ("numbers", 1, 3, "cover"),
+        ("numbers", 2, 3, "content"),
+        ("numbers", 3, 3, "content"),
+    ]
+    second = renderer.slides[1]
+    assert (second.kicker, second.headline, second.body) == ("Tip 2", "Slide 2", None)
+    assert all(s.logo is None for s in renderer.slides)
+    assert renderer.slides[0].brand.name == brand_brain().business_name
+
+
+async def test_a_panorama_built_from_one_photo_per_slide_falls_back_to_editorial(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(3, family="panorama")})
+    image_gen, renderer = CountingImageGen(), MockRenderer()
+    posts = maker(model, image_gen, photos, renderer=renderer)
+
+    posts.create_post(
+        SENDER, {"brief": "mesa", "asset_ids": ["f1", "f2", "f3"], "style": "design"}, FakeChannel()
+    )
+    await posts.join()
+
+    assert {slide.family for slide in renderer.slides} == {"editorial"}
+    assert len(image_gen.calls) == 3
 
 
 async def test_a_post_with_the_logo_without_one_is_refused(photos: InMemoryPhotos) -> None:
@@ -682,18 +739,7 @@ async def test_the_owners_notes_reach_the_post_writer(photos: InMemoryPhotos) ->
     async def notes_of(sender: str) -> list[str]:
         return ["Siempre mencionar el envío gratis"]
 
-    posts = PostMaker(
-        PostDrafter(model),
-        CountingImageGen(),
-        photos,
-        PublicImages(),
-        InMemoryPosts(),
-        "https://backend.test/",
-        max_posts_per_day=5,
-        now=lambda: NOON,
-        notes_of=notes_of,
-    )
-    posts.on_event(lambda *_: asyncio.sleep(0))
+    posts = maker(model, CountingImageGen(), photos, notes_of=notes_of)
     arguments = {"brief": "mesa", "asset_ids": ["f1"], "style": "photos"}
     posts.create_post(SENDER, arguments, FakeChannel())
     await posts.join()

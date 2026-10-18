@@ -12,6 +12,7 @@ from app.carousel.schemas import (
     SlideCopy,
     SlideRole,
     SlideScene,
+    TemplateFamily,
 )
 from app.llm.client import ChatModel, Content, image_content, text_content
 
@@ -20,6 +21,8 @@ logger = logging.getLogger(__name__)
 AGENT = "post_drafter"
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "draft.md").read_text()
 BRAND_FIELDS_NOT_FOR_POSTS = {"whatsapp_summary", "posting"}
+# The renderer rejects longer slots (frontend/lib/post-render/spec.ts); the prompt asks for less
+SLOT_LIMITS = {"kicker": 40, "headline": 120, "body": 320}
 
 
 class PostCopy(BaseModel):
@@ -29,6 +32,7 @@ class PostCopy(BaseModel):
 
 class SlideDraft(BaseModel):
     role: SlideRole
+    kicker: str
     headline: str
     body: str
     scene_prompt: str
@@ -37,6 +41,7 @@ class SlideDraft(BaseModel):
 class CarouselDraft(BaseModel):
     caption: str
     hashtags: list[str]
+    family: TemplateFamily
     style_prompt: str
     style_notes: str
     slides: list[SlideDraft]
@@ -132,16 +137,26 @@ class PostDrafter:
             "medium",
         )
         slides = fit_slides(draft.slides, slide_count)
+        family = draft.family
+        if family == "panorama" and (one_per_photo or len(slides) == 1):
+            logger.info("panorama doesn't fit this design, using editorial")
+            family = "editorial"
         copy = CarouselCopy(
             caption=draft.caption,
             hashtags=draft.hashtags,
             slides=[
-                SlideCopy(role=slide.role, headline=slide.headline, body=slide.body or None)
+                SlideCopy(
+                    role=slide.role,
+                    kicker=slide.kicker or None,
+                    headline=slide.headline,
+                    body=slide.body or None,
+                )
                 for slide in slides
             ],
         )
         carousel_brief = CarouselBrief(
             reference_asset_ids=photo_ids,
+            family=family,
             style_prompt=draft.style_prompt,
             slides=[
                 SlideScene(index=n, scene_prompt=slide.scene_prompt)
@@ -159,7 +174,7 @@ class PostDrafter:
 
 def system_prompt(brand: BrandBrain | None, notes: list[str] | None = None) -> str:
     """The instructions, then the Business's Brand Brain (agents.md § Brand Brain) and the
-    Owner's notes (ADR 0028).
+    Owner's notes (ADR 0030).
 
     They go in the system prompt, not the request, so the prefix stays the same for every post
     of a Business and caches.
@@ -204,6 +219,18 @@ def fit_slides(slides: list[SlideDraft], count: int) -> list[SlideDraft]:
         raise ValueError("the design draft has no slides")
     if len(slides) != count:
         logger.warning("design draft has %d slides, %d requested", len(slides), count)
-    fitted = slides[: min(count, MAX_SLIDES)]
+    fitted = [clip_slots(slide) for slide in slides[: min(count, MAX_SLIDES)]]
     fitted[0] = fitted[0].model_copy(update={"role": "cover"})
     return fitted
+
+
+def clip_slots(slide: SlideDraft) -> SlideDraft:
+    """Cut a slot the renderer would reject, rather than lose the whole post."""
+    clipped = {
+        field: getattr(slide, field)[:limit].rstrip()
+        for field, limit in SLOT_LIMITS.items()
+        if len(getattr(slide, field)) > limit
+    }
+    if clipped:
+        logger.warning("design draft slot(s) over the renderer's limit, cut: %s", sorted(clipped))
+    return slide.model_copy(update=clipped)

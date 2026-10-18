@@ -1,5 +1,7 @@
 import json
 import logging
+import re
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,12 @@ SYSTEM_PROMPT = load_prompt(Path(__file__).parent / "prompts" / "brand_strategis
 )
 MAX_SUMMARY_CHARS = 600
 MAX_FEATURED = 5
+# The Owner's Instagram (ADR 0028): the captions that did best and the newest ones
+MAX_TOP_CAPTIONS = 10
+MAX_RECENT_CAPTIONS = 20
+MAX_PROMPT_CAPTION_CHARS = 500
+MAX_HASHTAGS = 20
+HASHTAG = re.compile(r"#(\w+)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +40,7 @@ class BrandInputs:
     logo_palette: list[str] = field(default_factory=list)
     logo_asset_id: str | None = None
     photo_descriptions: list[str] = field(default_factory=list)
+    instagram: dict[str, Any] | None = None  # onboarding_data["instagram"], when connected
     previous: BrandBrain | None = None
     correction: str | None = None
 
@@ -78,10 +87,45 @@ def _prompt_input(inputs: BrandInputs) -> str:
         block("colors", colors),
         block("photos", inputs.photo_descriptions),
     ]
+    if inputs.instagram:
+        blocks.append(block("instagram", _instagram_input(inputs.instagram)))
     if inputs.previous is not None and inputs.correction:
         blocks.append(block("previous_brand_brain", inputs.previous.model_dump()))
         blocks.append(f"<correction>{inputs.correction}</correction>")
     return "\n".join(blocks)
+
+
+def _instagram_input(instagram: dict[str, Any]) -> dict[str, Any]:
+    """The profile, a sample of captions (most engaged first, then the newest) and the hashtags
+    the Owner uses most, out of everything the import read."""
+    posts = [post for post in instagram.get("posts") or [] if post.get("caption")]
+    by_engagement = sorted(
+        range(len(posts)),
+        key=lambda i: (posts[i].get("likes") or 0) + (posts[i].get("comments") or 0),
+        reverse=True,
+    )
+    sample = dict.fromkeys(
+        [*by_engagement[:MAX_TOP_CAPTIONS], *range(min(len(posts), MAX_RECENT_CAPTIONS))]
+    )
+    hashtags = Counter(tag.lower() for post in posts for tag in HASHTAG.findall(post["caption"]))
+    return {
+        "username": instagram.get("username"),
+        "name": instagram.get("name"),
+        "biography": instagram.get("biography"),
+        "website": instagram.get("website"),
+        "followers_count": instagram.get("followers_count"),
+        "posts_read": len(instagram.get("posts") or []),
+        "captions": [
+            {
+                "caption": posts[i]["caption"][:MAX_PROMPT_CAPTION_CHARS],
+                "type": posts[i].get("type"),
+                "likes": posts[i].get("likes"),
+                "comments": posts[i].get("comments"),
+            }
+            for i in sample
+        ],
+        "top_hashtags": [f"#{tag}" for tag, _ in hashtags.most_common(MAX_HASHTAGS)],
+    }
 
 
 def _enforce(brain: BrandBrain, inputs: BrandInputs) -> BrandBrain:

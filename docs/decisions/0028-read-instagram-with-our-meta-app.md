@@ -1,0 +1,32 @@
+# 0028: Read the Owner's Instagram through our own Meta app to build the Brand Brain
+
+- Date: 2026-10-18
+- Status: proposed
+
+## Context
+
+[ADR 0024](0024-mvp-single-demo-instagram-account.md) put the per-Business Instagram connect (F2.3) and the feed import (F2.8) out of the MVP. We now want the Owner's existing Instagram to feed the Brand Brain: how they already write, what they post, what their audience responds to, and their real photos. The question left open in [integrations.md](../architecture/integrations.md#reading-the-owners-instagram-adr-0028) was how to read the account. Checked 2026-10-18:
+
+- **Zernio as is** (our publishing provider, [ADR 0008](0008-publishing-via-zernio.md)): `GET /v1/accounts/{accountId}/posts` returns "the 25 most recent posts", with no limit or pagination, a caption, and a `picture` described only as "Thumbnail or media URL", with no carousel slides. `GET /v1/accounts` has no bio or website for Instagram. The rich `GET /v1/accounts/{id}/instagram/business-discovery` (bio, website, full media, children) "Requires an Instagram account connected via Facebook Login … accounts connected with classic Instagram Login receive a 400", and our connection is Instagram Login ([Zernio OpenAPI spec](https://zernio.com/openapi.yaml) v1.292.0).
+- **Zernio + Analytics add-on**: `GET /v1/analytics?source=external` paginates the account's posts with carousel items, but answers 402 "Analytics access required" without the add-on, and still has no bio. Comments and DMs need the Inbox add-on (same spec). Zernio's [pricing page](https://zernio.com/pricing) says "No add-ons, no feature tiers", which contradicts the spec; not confirmed for our account.
+- **Our own Meta app with Instagram Login**, already planned for comments, DMs and Insights in [ADR 0015](0015-instagram-login.md): with `instagram_business_basic` it reads the profile (`biography`, `website`, `followers_count`, `media_count`, [IG User](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user.md)) and "a maximum of 10K of the most recently created media" ([IG User Media](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media.md)), each with `media_url`, `thumbnail_url` for videos, engagement counts and a `children` edge for carousels ([IG Media](https://developers.facebook.com/documentation/instagram-platform/reference/instagram-media.md)). Without App Review it serves only accounts with a role on the app, such as an accepted Instagram tester ([overview](https://developers.facebook.com/documentation/instagram-platform/overview.md), [App Review](https://developers.facebook.com/documentation/instagram-platform/app-review.md)). All read 2026-10-18.
+
+Also rejected: connecting Zernio per Business too (two OAuth hops for the Owner, and the free tier has 2 accounts for the whole team), and the step 6b review grid where the Owner unticks photos (three more endpoints and a screen, for a choice the Owner can make later in the chat).
+
+## Decision
+
+- **Read through our own Meta app with Instagram Login**, scope `instagram_business_basic` only, behind an `InstagramPort` (`MetaInstagram`, and `MockInstagram` for local dev and the demo fallback; `INSTAGRAM = meta | mock`).
+- **Connect from wizard step 6**: `POST /api/o/{token}/instagram/connect` returns Instagram's authorize URL; Meta sends the browser to the backend's `GET /oauth/instagram/callback`, which exchanges the code for a long-lived token, stores it on `social_accounts` (`provider = 'meta'`, or `'mock'`), queues `import_instagram` and redirects to the wizard. The OAuth `state` is the magic-link token, HMAC-signed with the app secret and valid 15 minutes, because the callback needs it to find the Business and to send the Owner back to `/o/{token}`.
+- **Import automatically, no review screen**: the `import_instagram` job saves the profile and up to `INSTAGRAM_IMPORT_MAX_POSTS` (100) posts' captions and engagement in `businesses.onboarding_data["instagram"]`, and downloads up to `INSTAGRAM_IMPORT_MAX_IMAGES` (24) of the newest images (photos, every carousel slide, video covers) as Brand assets with `source = 'instagram'` and the media id in `external_id`, each with an `analyze_asset` job. A second import skips what is already there.
+- **The Brand Strategist reads it**: an `<instagram>` block with the profile, a sample of captions (the 10 most engaged, then the 20 newest), and the 20 hashtags used most. The form wins where they disagree. `generate_brand` waits for the import as it waits for the analyses.
+- **Publishing does not change**: posts still go to the single demo account from env ([ADR 0024](0024-mvp-single-demo-instagram-account.md)). This connection only reads. Stories, highlights, comments and DMs are out.
+
+## Consequences
+
+- One connect step for the Owner, and the first real use of our Meta app ([ADR 0015](0015-instagram-login.md)). In development mode it works only for accounts added as Instagram testers who accepted the invite. Serving any other Business needs Advanced Access, App Review and Business Verification.
+- Meta's IG Media reference labels `caption` "Facebook Login only", and its Instagram Login getting-started page leaves `biography` and `website` out of `/me`. The adapter asks for them and retries without them on a 400, so a refusal costs voice signal instead of failing the import. Confirm both on the demo account.
+- The long-lived token lasts 60 days and is not refreshed: a one-shot import doesn't need it, but comments, DMs or a re-import later will.
+- The magic-link token travels through Meta inside `state`, as it did through Zernio in the old `redirect_url` design. A forwarded connect link stops working after 15 minutes, which limits binding someone else's account to a Business.
+- `social_accounts` now holds access tokens, so the migration turns on row level security there (the backend connects as the table owner, which RLS does not restrict).
+- Imported photos don't count toward the wizard's 3 to 15 photos and don't show in its grid. They reach the Agency as Brand assets, and the Owner can archive any of them later.
+- Stories cannot be imported after 24 hours, and highlights not at all, through either route.

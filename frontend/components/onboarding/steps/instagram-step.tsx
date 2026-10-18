@@ -2,7 +2,13 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowRightIcon, CircleCheckIcon, LockIcon, MessageCircleCheckIcon } from "lucide-react";
+import {
+  ArrowRightIcon,
+  CircleCheckIcon,
+  LockIcon,
+  MessageCircleCheckIcon,
+  SparklesIcon,
+} from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -11,32 +17,28 @@ import { useWizard } from "@/components/onboarding/wizard-context";
 import { messageOf, onboardingApi } from "@/lib/api";
 import { atHandle } from "@/lib/onboarding";
 
-const RETURN_PARAMS = ["step", "connected"];
+const CONNECT_FAILED = "No pudimos conectar tu Instagram. Probá de nuevo.";
 
 export function InstagramStep() {
   const { token, state, setState, goTo } = useWizard();
   const searchParams = useSearchParams();
-  const returning = searchParams.get("connected") === "1";
-  const [connecting, setConnecting] = useState(returning);
-  const [error, setError] = useState<string | null>(null);
-  const callbackSent = useRef(false);
+  const returned = searchParams.get("connected");
+  const [connecting, setConnecting] = useState(returned === "1");
+  const [error, setError] = useState<string | null>(returned === "0" ? CONNECT_FAILED : null);
+  const refreshed = useRef(false);
 
   useEffect(() => {
-    if (!returning || callbackSent.current) return;
-    callbackSent.current = true;
+    if (returned === null || refreshed.current) return;
+    refreshed.current = true;
 
-    const query = Object.fromEntries(
-      [...searchParams.entries()].filter(([key]) => !RETURN_PARAMS.includes(key)),
-    );
-    const accountId = query.accountId ?? query.account_id;
     onboardingApi
-      .instagramCallback(token, query, accountId)
-      .then(setState, (callbackError: unknown) => setError(messageOf(callbackError)))
+      .getState(token)
+      .then(setState, (refreshError: unknown) => setError(messageOf(refreshError)))
       .finally(() => {
         setConnecting(false);
         window.history.replaceState(null, "", "?step=instagram");
       });
-  }, [returning, searchParams, token, setState]);
+  }, [returned, token, setState]);
 
   async function connect() {
     setConnecting(true);
@@ -74,7 +76,7 @@ export function InstagramStep() {
         </div>
       }
       title="Conectá tu Instagram"
-      subtitle="Publicamos solo lo que vos apruebes."
+      subtitle="Leemos tu feed para conocer tu estilo y publicamos solo lo que vos apruebes."
       footer={
         connected ? (
           <Button size="xl" className="w-full" onClick={() => goTo("done")}>
@@ -107,6 +109,9 @@ export function InstagramStep() {
         <Reassurance icon={<LockIcon className="size-4.5" aria-hidden />}>
           Iniciás sesión en la página de Instagram, nunca nos das tu contraseña.
         </Reassurance>
+        <Reassurance icon={<SparklesIcon className="size-4.5" aria-hidden />}>
+          Traemos tus posts y fotos para aprender cómo hablás y qué le gusta a tu gente.
+        </Reassurance>
       </ul>
 
       {connected && (
@@ -119,7 +124,7 @@ export function InstagramStep() {
       {!connected && failed && !connecting && (
         <Alert variant="destructive">
           <AlertDescription>
-            {error ?? "No pudimos conectar tu Instagram. Probá de nuevo."}
+            {error ?? CONNECT_FAILED}
           </AlertDescription>
         </Alert>
       )}

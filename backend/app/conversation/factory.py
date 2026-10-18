@@ -15,6 +15,7 @@ from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts
 from app.publishing.base import PublisherPort
 from app.publishing.mock import MOCK_ACCOUNT_ID
+from app.rendering.factory import build_renderer
 from app.storage import get_storage
 
 from .button_router import ButtonRouter
@@ -52,13 +53,14 @@ def build_inbound_handler(
                     "PUBLISHER=zernio without ZERNIO_ACCOUNT_ID: posts can't be published"
                 )
             sessions = get_sessionmaker() if settings.database_url else None
-            # ADR 0028: with the database, the conversation and the notes survive a deploy.
+            # ADR 0030: with the database, the conversation and the notes survive a deploy.
             history: History = DbHistory(sessions) if sessions else InMemoryHistory()
             notes: OwnerNotes = DbNotes(sessions) if sessions else InMemoryNotes()
             trend_notes = load_trend_notes(settings.niche_report_path)
             posts = PostMaker(
                 PostDrafter(model, trend_notes),
                 build_image_gen(settings),
+                build_renderer(settings),
                 photos,
                 images,
                 store,

@@ -2,7 +2,7 @@
 
 Investigation of the orchestrator (the assistant the Owner talks to on WhatsApp): why it forgets what the Owner said and misreads what they want, and what to change. Read from the code at `fea71be` on 2026-10-18; every claim cites the file and line it comes from.
 
-**Status**: every recommendation below is implemented; decision in [ADR 0028](../decisions/0028-orchestrator-memory-and-context.md). Line numbers refer to the code before that change. Two items landed differently: posts and their images still live in memory (they need T17/T19), and the onboarding gate's messages stay out of the history because the Business block carries what they collected.
+**Status**: every recommendation below is implemented; decision in [ADR 0030](../decisions/0030-orchestrator-memory-and-context.md). Line numbers refer to the code before that change. Two items landed differently: posts and their images still live in memory (they need T17/T19), and the onboarding gate's messages stay out of the history because the Business block carries what they collected.
 
 ## Summary
 

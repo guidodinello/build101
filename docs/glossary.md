@@ -49,12 +49,12 @@ _Avoid_: Brand profile, brand kit, context
 _Status_: draft
 
 **Owner note**:
-A fact about the Business or a standing preference the Owner asked the Agency to keep ("no poner precios", "abrimos sábados"); every agent follows it, and it wins over the Brand Brain when they conflict. See [ADR 0028](decisions/0028-orchestrator-memory-and-context.md).
+A fact about the Business or a standing preference the Owner asked the Agency to keep ("no poner precios", "abrimos sábados"); every agent follows it, and it wins over the Brand Brain when they conflict. See [ADR 0030](decisions/0030-orchestrator-memory-and-context.md).
 _Avoid_: Memory, preference, setting
 _Status_: draft
 
 **Conversation summary**:
-What the Orchestrator keeps of the older part of its conversation with the Owner, once those messages leave its view. See [ADR 0028](decisions/0028-orchestrator-memory-and-context.md).
+What the Orchestrator keeps of the older part of its conversation with the Owner, once those messages leave its view. See [ADR 0030](decisions/0030-orchestrator-memory-and-context.md).
 _Avoid_: Memory, recap, context
 _Status_: draft
 

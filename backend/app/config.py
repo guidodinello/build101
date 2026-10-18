@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     gemini_thinking_level: Literal["minimal", "medium", "high"] = "medium"
     gemini_image_size: Literal["1K", "2K", "4K"] = "2K"
     image_gen_max_concurrency: int = 4
+    # Designed slides are rendered by the frontend's Takumi route (ADR 0029); RENDERER_SECRET is
+    # the frontend's RENDER_SECRET
+    renderer: Literal["takumi", "mock"] = "mock"
+    renderer_url: str | None = None
+    renderer_secret: str | None = None
 
     # Replies to the Owner (ADR 0023). INBOUND_HANDLER = chat (Gemini) | echo (no LLM)
     inbound_handler: Literal["chat", "echo"] = "chat"
@@ -55,6 +60,14 @@ class Settings(BaseSettings):
     zernio_base_url: str = "https://zernio.com/api/v1"
     zernio_profile_id: str | None = None
     zernio_account_id: str | None = None
+
+    # Reading the Owner's Instagram through our own Meta app (ADR 0028). INSTAGRAM = meta | mock
+    instagram: Literal["meta", "mock"] = "mock"
+    instagram_app_id: str | None = None
+    instagram_app_secret: str | None = None
+    instagram_graph_version: str = "v24.0"
+    instagram_import_max_posts: int = 100
+    instagram_import_max_images: int = 24
 
     @property
     def whatsapp_url(self) -> str:

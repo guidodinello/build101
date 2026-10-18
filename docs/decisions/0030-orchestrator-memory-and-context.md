@@ -1,4 +1,4 @@
-# 0028: The orchestrator's memory and context
+# 0030: The orchestrator's memory and context
 
 - Date: 2026-10-18
 - Status: proposed

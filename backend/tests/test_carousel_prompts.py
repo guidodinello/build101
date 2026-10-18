@@ -3,37 +3,41 @@ import pytest
 from app.carousel.prompts import (
     ANCHOR_INSTRUCTION,
     FIXED_RULES,
+    FRAMING,
+    PANORAMA_FRAMING,
+    build_panorama_prompt,
     build_slide_prompt,
-    text_retry_note,
+    panorama_ratio,
 )
-from app.carousel.schemas import CarouselBrief, CarouselCopy, TextCheck
+from app.carousel.schemas import CarouselBrief, CarouselCopy
 
 
-def test_slide_prompt_has_exact_text_style_scene_and_rules(
+def test_slide_prompt_has_style_scene_framing_and_rules_but_none_of_the_text(
     carousel_spec: tuple[CarouselCopy, CarouselBrief],
 ) -> None:
     copy, brief = carousel_spec
 
     prompt = build_slide_prompt(brief, copy, 3, anchored=True)
 
-    assert 'Headline: "Pensada para tu espacio"' in prompt
-    assert 'Body: "Medimos tu ambiente y diseñamos la mesa justa."' in prompt
     assert brief.style_prompt in prompt
     assert brief.slides[2].scene_prompt in prompt
-    assert "Slide 3 of 4" in prompt
+    assert FRAMING[("editorial", "content")] in prompt
+    assert "Photo 3 of 4" in prompt
     assert ANCHOR_INSTRUCTION in prompt
     assert prompt.endswith(FIXED_RULES)
+    assert all(slide.headline not in prompt for slide in copy.slides)
+    assert "Medimos tu ambiente" not in prompt
 
 
-def test_cover_prompt_is_not_anchored_and_omits_missing_body(
+def test_cover_prompt_is_not_anchored_and_framed_for_its_family(
     carousel_spec: tuple[CarouselCopy, CarouselBrief],
 ) -> None:
     copy, brief = carousel_spec
+    brief = brief.model_copy(update={"family": "numbers"})
 
     prompt = build_slide_prompt(brief, copy, 1, anchored=False)
 
-    assert 'Headline: "Tu comedor, a medida"' in prompt
-    assert "Body:" not in prompt
+    assert FRAMING[("numbers", "cover")] in prompt
     assert ANCHOR_INSTRUCTION not in prompt
 
 
@@ -47,11 +51,22 @@ def test_slide_prompt_fails_when_the_brief_has_no_scene_for_the_slide(
         build_slide_prompt(brief, copy, 3, anchored=True)
 
 
-def test_text_retry_note_names_the_issues() -> None:
-    check = TextCheck(matches=False, found="Robel macizo", issues=["'Roble' spelled 'Robel'"])
+def test_panorama_prompt_lists_the_panels_left_to_right_without_the_text(
+    carousel_spec: tuple[CarouselCopy, CarouselBrief],
+) -> None:
+    copy, brief = carousel_spec
 
-    assert "'Roble' spelled 'Robel'" in text_retry_note(check)
+    prompt = build_panorama_prompt(brief, copy)
+
+    assert PANORAMA_FRAMING.format(count=4) in prompt
+    panels = [prompt.index(f"- Panel {s.index}: {s.scene_prompt}") for s in brief.slides]
+    assert panels == sorted(panels)
+    assert prompt.endswith(FIXED_RULES)
+    assert all(slide.headline not in prompt for slide in copy.slides)
 
 
-def test_text_retry_note_falls_back_to_the_text_found() -> None:
-    assert '"Robel macizo"' in text_retry_note(TextCheck(matches=False, found="Robel macizo"))
+@pytest.mark.parametrize(
+    ("count", "ratio"), [(2, "16:9"), (3, "21:9"), (4, "4:1"), (5, "4:1"), (6, "8:1"), (10, "8:1")]
+)
+def test_panorama_ratio_is_the_closest_wide_ratio_to_the_slides(count: int, ratio: str) -> None:
+    assert panorama_ratio(count) == ratio

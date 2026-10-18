@@ -20,7 +20,7 @@ class Note:
 
 
 class OwnerNotes(Protocol):
-    """Facts and standing preferences the Owner told the orchestrator to keep (ADR 0028)."""
+    """Facts and standing preferences the Owner told the orchestrator to keep (ADR 0030)."""
 
     async def list(self, sender: str) -> list[Note]: ...
 

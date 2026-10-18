@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.dev import router as dev_router
 from app.api.errors import install_error_handlers
+from app.api.instagram import router as instagram_router
 from app.api.onboarding import router as onboarding_router
 from app.channels.router import get_channel
 from app.channels.router import router as whatsapp_router
@@ -50,6 +51,7 @@ install_error_handlers(app)
 app.include_router(whatsapp_router)
 app.include_router(media_router)
 app.include_router(onboarding_router)
+app.include_router(instagram_router)
 app.include_router(dev_router)
 
 

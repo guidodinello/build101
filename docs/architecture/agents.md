@@ -10,15 +10,14 @@ The "agency" is one **orchestrator** (the account manager the owner talks to) pl
 |---|---|---|---|---|
 | **Orchestrator** | Tool-use loop | Inbound handler | Conversation + context → reply text + tool calls | `low` |
 | **Asset Analyst** | Single call, vision, structured | `analyze_asset` job | Image, or video keyframes + metadata → description, tags, suggested Products, usable-for (+ Reel suitability) | `low` |
-| **Brand Strategist** | Single call, structured | `generate_brand` job | Onboarding data + Catalog + asset descriptions (+ correction) → Brand Brain | `high` |
+| **Brand Strategist** | Single call, structured | `generate_brand` job | Onboarding data + Catalog + asset descriptions + the Owner's Instagram, when connected (+ correction) → Brand Brain | `high` |
 | **Content Strategist** | Single call, structured | `generate_plan` job; `suggest_ideas` tool | Brand Brain + Catalog + active Offers + assets + recent posts + date + notes + trend notes → weekly plan (images and Reels), or 3 ideas | `medium` |
 | **Copywriter** | Single call, structured | `generate_post` job | Brand Brain + brief + the Owner's own words + trend notes (+ feedback, previous version) → copy; for a carousel: + slide count → caption + the text of each slide | `medium` |
 | **Art Director** | Single call, vision, structured | `generate_post` job | Brand Brain + brief + copy + candidate photos (the ones the Owner sent with the request, if any) + trend notes → image brief (reference photos + image prompt); for a Reel: candidate videos (keyframes) → video + cover frame; for a carousel: → reference photos + shared style + one scene per slide | `medium` |
 | **Niche Analyst** | Single call, URL context + Google Search, structured | `generate_niche_report` job; `niche_report` tool | Business category + location + Brand Brain + reference websites + niche search themes → Niche Report with source links ([ADR 0025](../decisions/0025-weekly-niche-report.md)) | `medium` |
 | **Feedback Classifier** | Single call, structured | `revise_post` job | Feedback text → `copy` / `image` / `both` (Reel: `copy` / `cover` / `video`) + normalized instruction | `low` |
-| **Text Checker** | Single call, vision, structured | `CarouselGenerator` (carousel slides) | Slide image + expected `SlideCopy` → `TextCheck` | `low` |
 
-Not agents (deterministic services): **Image generator** (`ImageGenPort`: image brief → variations from the third-party image service, resized to 1080×1350 JPEG, [ADR 0018](../decisions/0018-ai-image-generation-service.md); not used for Reels), **Carousel generator** (`app/carousel/generator.py`: `CarouselCopy` + `CarouselBrief` → slides through the same port, [ADR 0022](../decisions/0022-carousels-in-mvp.md)), **Frame Extractor** (Could; ffmpeg/ffprobe in the backend: video → metadata + keyframes JPEGs), **Publisher** (approved post → provider API, image, carousel or Reel), **Scheduler** (delegated to the provider).
+Not agents (deterministic services): **Image generator** (`ImageGenPort`: image brief → variations from the third-party image service, resized to 1080×1350 JPEG, [ADR 0018](../decisions/0018-ai-image-generation-service.md); not used for Reels), **Carousel generator** (`app/carousel/generator.py`: `CarouselCopy` + `CarouselBrief` → text-free scenes through the same port, one wide scene sliced for a panorama, [ADR 0022](../decisions/0022-carousels-in-mvp.md), [ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)), **Slide renderer** (`RendererPort`, `app/rendering/`: a slide's copy + scene + brand colors + logo → the designed 1080×1350 JPEG from the frontend's Takumi templates, [ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)), **Frame Extractor** (Could; ffmpeg/ffprobe in the backend: video → metadata + keyframes JPEGs), **Publisher** (approved post → provider API, image, carousel or Reel), **Scheduler** (delegated to the provider).
 
 ## LLM client conventions
 
@@ -170,10 +169,11 @@ A prompt can be composed from several files: a line that is only `{{include <pat
 **Purpose:** turn onboarding inputs into the Brand Brain. Also handles corrections.
 
 - Priority: create mode is Must; revise mode (corrections, F2.6) and palette proposals (F2.9) are Could.
-- Input: business fields, the Catalog (`<catalog>`: in the Must scope, the 1–5 Products from the wizard), questionnaire answers, owner's "3 words", asset analyses (descriptions only, not images), Pillow palette + owner-confirmed colors, optional `previous_brand_brain` + `correction` (revise mode).
+- Input: business fields, the Catalog (`<catalog>`: in the Must scope, the 1–5 Products from the wizard), questionnaire answers, owner's "3 words", asset analyses (descriptions only, not images; imported Instagram photos included), Pillow palette + owner-confirmed colors, optional `previous_brand_brain` + `correction` (revise mode). When the Owner connected Instagram ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)), `<instagram>`: username, name, bio, website, followers, how many posts were read, a sample of captions with likes and comments (the 10 most engaged, then the 20 newest, each cut at 500 characters) and the 20 hashtags used most. The sample and the hashtag count are picked in code from `onboarding_data["instagram"]`.
 - Output: `BrandBrain`.
 - Rules in the prompt:
-  - Use only facts given by the owner; mark nothing as fact that wasn't provided (no invented awards, years, locations).
+  - Use only facts given by the owner; mark nothing as fact that wasn't provided (no invented awards, years, locations). The bio and the captions were written by the Owner, so their facts count, except old prices and promos.
+  - With `<instagram>`: it is the best evidence of how the brand already sounds and what its audience responds to. Use it for the voice (sample phrases close to the Owner's real phrasing and emoji habits), the pillars (the topics of the most engaged captions) and the hashtags (the Owner's own first). Where it contradicts the form, the form wins.
   - Owner-confirmed colors win over model guesses.
   - `constraints` must include every "no quiero que..." answer verbatim.
   - In revise mode: change only what the correction implies; keep everything else.
@@ -233,13 +233,14 @@ A prompt can be composed from several files: a line that is only `{{include <pat
       role: SlideRole
       headline: str            # ≤ 6 words
       body: str | None = None  # ≤ 20 words
+      kicker: str | None = None  # 1–2 word label above the headline (ADR 0029)
   class CarouselCopy(BaseModel):          # Copywriter, carousel mode
       caption: str
       hashtags: list[str]
       slides: list[SlideCopy]  # 3–5 by default, the Owner's number up to 10; slides[0].role == "cover"
   ```
 
-  Same voice and fact rules as the caption: a price, discount or date goes on a slide only when it comes from a referenced Product, an Offer or `owner_words`. The slide text is what the image model renders, so it is short and spelled exactly as it should appear.
+  Same voice and fact rules as the caption: a price, discount or date goes on a slide only when it comes from a referenced Product, an Offer or `owner_words`. The slide text is set by the renderer's templates over the photo ([ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)), so it is exact, but it must stay short to fit the layout.
 
 ### Art Director
 
@@ -258,13 +259,13 @@ A prompt can be composed from several files: a line that is only `{{include <pat
 
 - **Prompt rules** (in the system prompt, and appended in code to every `prompt` so they can't be dropped):
   - Show the real product from the reference photos; keep its shape, color, material and proportions. Change the scene, light and styling, never the product.
-  - **No text of any kind** in the image (image Posts): no headlines, prices, discounts, offers, dates, slogans or watermarks. Prices and offers only appear in the caption, and only when they come from a Product, an Offer or the Owner's words. Carousel slides are the exception: they carry the copy's text and nothing else (see carousel mode below, [ADR 0022](../decisions/0022-carousels-in-mvp.md)).
-  - **No logos:** don't draw, invent or alter a logo. When the Owner asks for their real logo, code stamps the uploaded file on the finished images and the prompt only asks to keep the bottom-right corner clear ([ADR 0027](../decisions/0027-owner-logo-stamped-in-code.md)).
+  - **No text of any kind** in the image (image Posts): no headlines, prices, discounts, offers, dates, slogans or watermarks. Prices and offers only appear in the caption, and only when they come from a Product, an Offer or the Owner's words. This holds for carousel slides too: their text is set by the templates, not drawn by the model ([ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)).
+  - **No logos:** don't draw, invent or alter a logo. When the Owner asks for their real logo, code adds the uploaded file: stamped in the corner of photos posted as they are ([ADR 0027](../decisions/0027-owner-logo-stamped-in-code.md)), or placed in the template's brand mark on designed slides ([ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)).
   - Use the Brand Brain palette and `photo_style`; respect `constraints` (e.g. "sin mostrar caras").
   - Trend notes may change the scene or styling, never the facts.
 - **Post-validation (code):** reference ids belong to the business and are not archived; when the Owner sent photos, they are among the references (interim default: only those photos, until the open question on the library is settled); 1–10 references; the fixed rules are present. On violation, retry once with the error list appended; if it fails again, fall back to the candidate photos with a plain prompt built from the brief and `photo_style`.
-- The generated variations are not checked by an LLM before the Owner sees them: the Owner picks one and approves it ([ADR 0007](../decisions/0007-approve-every-post.md)), and nothing is published without that Approval. The one exception is carousel slides, whose rendered text the [Text Checker](#text-checker) compares with the copy ([ADR 0022](../decisions/0022-carousels-in-mvp.md)).
-- **Carousel mode (Must, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)):** input adds the `CarouselCopy`. The Art Director writes the look and the scene of each slide, never its text. Output `CarouselBrief` (`app/carousel/schemas.py`):
+- The generated variations are not checked by an LLM before the Owner sees them: the Owner picks one and approves it ([ADR 0007](../decisions/0007-approve-every-post.md)), and nothing is published without that Approval.
+- **Carousel mode (Must, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)):** input adds the `CarouselCopy`. The Art Director picks the template family and writes the photographic style and the scene of each slide, never its text or layout ([ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)). Output `CarouselBrief` (`app/carousel/schemas.py`):
 
   ```python
   class SlideScene(BaseModel):
@@ -272,12 +273,13 @@ A prompt can be composed from several files: a line that is only `{{include <pat
       scene_prompt: str        # English: what this slide shows (scene, composition); no text
   class CarouselBrief(BaseModel):         # Art Director, carousel mode
       reference_asset_ids: list[str]   # 1–10
-      style_prompt: str                # English: shared visual system (palette hex, typography, layout grid, text safe area)
+      family: TemplateFamily           # editorial | numbers | panorama: the renderer's template family (ADR 0029)
+      style_prompt: str                # English: shared photographic style (light, palette hex, props); no typography
       slides: list[SlideScene]         # one per CarouselCopy slide, same order
       style_notes: str                 # short Spanish summary for the Owner
   ```
 
-  Code builds each slide's prompt with `app/carousel/prompts.py:build_slide_prompt(brief, copy, index, *, anchored: bool)`: the shared style, the slide's scene, "render exactly this text and no other text" with that slide's `SlideCopy`, and the fixed rules (keep the product unchanged, no logos, no prices or numbers unless they are in the given text, text inside the central 90%). `anchored` adds that the attached style image (the cover) sets the look. Post-validation adds: one scene per slide, indexes 1..n in order.
+  Code builds each slide's prompt with `app/carousel/prompts.py:build_slide_prompt(brief, copy, index, *, anchored: bool)`: the shared style, the slide's scene, the framing its template needs (where the photo sits and what must stay calm for the text) and the fixed rules (keep the product unchanged, no text, numbers or logos of any kind). `anchored` adds that the attached photo (the cover) sets the light and palette. A `panorama` of two or more slides is one prompt instead (`build_panorama_prompt`): the scenes as panels from left to right, generated once at a wide ratio and 4K and sliced. Post-validation adds: one scene per slide, indexes 1..n in order; a `panorama` becomes `editorial` when each slide must show its own photo or there is one slide.
 - **Reel mode (Could):** input is the copy plus up to 3 candidate videos (each as metadata + its keyframes with offsets + `VideoAnalysis`). No image generation: the video is published as the Owner shot it. Output:
 
   ```python
@@ -316,28 +318,12 @@ A prompt can be composed from several files: a line that is only `{{include <pat
 
 ### Feedback Classifier
 
-Should (revisions, F4.4). Not built: for now the orchestrator itself picks the target when it calls `revise_post` (`part = caption | images`, [ADR 0028](../decisions/0028-orchestrator-memory-and-context.md)).
+Should (revisions, F4.4). Not built: for now the orchestrator itself picks the target when it calls `revise_post` (`part = caption | images`, [ADR 0030](../decisions/0030-orchestrator-memory-and-context.md)).
 
 - Input: feedback text, post `format`, current copy, current image brief summary (`style_notes`, image Posts) or current video + cover summary (Reel).
 - Output: `{"target": ..., "instruction": str}` (instruction = normalized, explicit version of the feedback, e.g. "Acortar el caption a 2 líneas y mencionar envío gratis en Montevideo").
   - Image Post: `target` is `copy` | `image` | `both` (`image` regenerates the variations from a revised image brief).
   - Reel (Could): `target` is `copy` | `cover` (pick another frame of the same video) | `video` (swap to another reel-suitable video). We don't edit video, so "cortalo más corto" or "ponele música" maps to `copy` with an instruction that the Orchestrator turns into a short "eso todavía no lo puedo hacer" reply plus an offer to swap the video.
-
-### Text Checker
-
-Must (carousels, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)). The only LLM check of a generated image.
-
-- Input: one generated slide (1080×1350 JPEG) + the expected `SlideCopy`.
-- Output:
-
-  ```python
-  class TextCheck(BaseModel):             # Text Checker
-      matches: bool
-      found: str
-      issues: list[str]
-  ```
-
-- One structured `gemini-3.8-flash` call with thinking level `low` ([LLM client conventions](#llm-client-conventions)), in `app/agents/text_checker.py`. `matches` is false when a word is missing, misspelled or added, or when other text (a price, a number, a logo) appears. Called by `CarouselGenerator`: a mismatch regenerates that slide once; if it still fails, the slide is kept with its `TextCheck` saved and flagged.
 
 ## Orchestrator
 
@@ -372,7 +358,7 @@ run_turn(business, inbound_text):
 - Tools are function declarations (`{"type": "function", "name", "description", "parameters"}`) with `additionalProperties: false` in every object. The model decides whether to call one; we never force a call.
 - If the model returns text **and** a long-running tool, send the text (the acknowledgement) and let the job send the result.
 
-### Memory and context (built, [ADR 0028](../decisions/0028-orchestrator-memory-and-context.md))
+### Memory and context (built, [ADR 0030](../decisions/0030-orchestrator-memory-and-context.md))
 
 - **System prompt** = the static instructions, then `<business>`, `<brand_brain>`, `<brand_summary_sent>`, `<catalog>`, `<owner_notes>`, `<trend_notes>` and `<conversation_summary>` (`app/conversation/context.py`). They change only when the data does, so the prefix still caches.
 - **History** in `conversation_steps` (`DbHistory`), in memory without a database. Past about 40,000 estimated tokens the oldest whole turns are folded into `businesses.conversation_summary` by `conversation_summarizer` and deleted (`Compactor`, after the turn, under the sender's lock).
@@ -402,7 +388,7 @@ From the second design pass ([../design/mockups/](../design/mockups/README.md), 
 - **Photos as they are, or a design (Must, 2026-10-17).** `create_post` takes a `style`: `photos` posts the Owner's photos cropped to 4:5 with a caption (no image generation); `design` makes new images from them with text on them. When the Owner hasn't said which, the bot's one question offers both, plus 3–5 numbered ideas for the post based on the photos (the orchestrator sees each photo once, attached to the turn it arrives in); the Owner's pick becomes the brief.
 - **Delivery (2026-10-17).** The finished post arrives as its images in order, numbered "1/3", "2/3"… on a carousel, with the caption and hashtags as the first image's caption, so no separate text can arrive before the images (a text WhatsApp's 1024-character caption can't hold follows the images).
 - **At most one question (Must).** Before `create_post`, ask **one** short question only when the answer changes the result: the angle (novedad, promo, detrás de escena), a price or condition the Owner hasn't given, or what to highlight. Otherwise create right away and say so ("Dale, lo armo con la foto del detalle de la veta ⏳"). Never ask again what the Owner already answered, here or in their notes; missing details become a neutral choice.
-- **Approve and publish by writing (Must, F5.6).** While a post is `pending_approval`, an explicit approval in text maps to the same handlers as the buttons: "subilo", "publicalo", "dale, subila" → `approve_post(next = "publish_now")`. Praise without an instruction ("me encanta", "está lindo") is not approval: the bot asks "¿Lo subo?". A bare "sí" or "dale" right after that question approves the post it asked about ([ADR 0028](../decisions/0028-orchestrator-memory-and-context.md)). An approval with a time ("subilo mañana a la tarde") → `approve_post(next = "schedule", when = ...)` (Should, F5.3); until scheduling exists the bot publishes only on an explicit "ahora". If more than one post is pending, the bot asks which one.
+- **Approve and publish by writing (Must, F5.6).** While a post is `pending_approval`, an explicit approval in text maps to the same handlers as the buttons: "subilo", "publicalo", "dale, subila" → `approve_post(next = "publish_now")`. Praise without an instruction ("me encanta", "está lindo") is not approval: the bot asks "¿Lo subo?". A bare "sí" or "dale" right after that question approves the post it asked about ([ADR 0030](../decisions/0030-orchestrator-memory-and-context.md)). An approval with a time ("subilo mañana a la tarde") → `approve_post(next = "schedule", when = ...)` (Should, F5.3); until scheduling exists the bot publishes only on an explicit "ahora". If more than one post is pending, the bot asks which one.
 - **Match the Owner's style (Should, F1.9).** Replies mirror how the Owner writes: short and casual when they write two words ("subila" → "arriba ✅"), fuller when they write long messages. `<owner_style>` in the context block gives the hint. Post captions keep the Brand Brain voice regardless.
 - **Carousels (Must, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)).** "Armame un carrusel con estas fotos" → `create_post(format = "carousel", slide_count)`, with `slide_count` only when the Owner gave a number (up to 10). One carousel per request, no Variations. While its preview is pending, "cambiá la 3" or "la portada más clara" → `redo_slides(post_id, slides, feedback)`; approval works as for image Posts.
 - **Ideas on request (Should, F3.5).** "¿Se te ocurre algo?" → `suggest_ideas`; the bot lists the 3 ideas as a short numbered message. When the Owner picks one ("la del taller, pero sin mostrar caras"), the model calls `create_post` with that idea as the brief and the Owner's extra instructions in it.
@@ -418,16 +404,16 @@ From the second design pass ([../design/mockups/](../design/mockups/README.md), 
 | `publish_post` | Must (`now`), Should (datetime) | `post_id`, `when: "now" \| ISO datetime` | Guard: status must be `approved`; enqueue `publish_post` | `{job_id}` or error |
 | `discard_post` | Must | `post_id` | Status → `discarded` | `{status}` |
 | `list_posts` | Must | — (built without filters) | The Owner's posts and their status ("¿ya se subió?") | `{posts: [{post_id, status, format, style, sent_at, caption_start, permalink}]}` |
-| `get_brand_summary` | Must | — | Not needed: the Brand Brain and its summary ride in the system prompt ([ADR 0028](../decisions/0028-orchestrator-memory-and-context.md)) | — |
-| `remember` / `forget` | Must (built) | `note: str` / `note_id: str` | Keep or archive a standing preference or fact in `owner_notes`; the orchestrator and the post writer read them ([ADR 0028](../decisions/0028-orchestrator-memory-and-context.md)) | `{saved: id}` / `{forgotten: true}` |
+| `get_brand_summary` | Must | — | Not needed: the Brand Brain and its summary ride in the system prompt ([ADR 0030](../decisions/0030-orchestrator-memory-and-context.md)) | — |
+| `remember` / `forget` | Must (built) | `note: str` / `note_id: str` | Keep or archive a standing preference or fact in `owner_notes`; the orchestrator and the post writer read them ([ADR 0030](../decisions/0030-orchestrator-memory-and-context.md)) | `{saved: id}` / `{forgotten: true}` |
 | `cancel_pending` | Must | — | Clear `conversation_state.awaiting` | `{ok}` |
-| `revise_post` | Should (built) | `post_id`, `change`, `part: "caption" \| "images"` | Remake a sent post from its previous version, changing only what was asked; `caption` keeps the images and generates nothing ([ADR 0028](../decisions/0028-orchestrator-memory-and-context.md)) | `{post_id, status: "generating"}` |
+| `revise_post` | Should (built) | `post_id`, `change`, `part: "caption" \| "images"` | Remake a sent post from its previous version, changing only what was asked; `caption` keeps the images and generates nothing ([ADR 0030](../decisions/0030-orchestrator-memory-and-context.md)) | `{post_id, status: "generating"}` |
 | `plan_week` | Should | `notes?: str`, `week_start?: date` | Enqueue `generate_plan`, only when the Owner asks for a plan | `{job_id, status: "started"}` |
 | `suggest_ideas` | Should | `request: str` | Not built: the orchestrator writes ideas from the pillars and trend notes in its prompt. Planned: Content Strategist ideas mode (synchronous); stores the 3 ideas in `conversation_state.ideas` so "la 2" or "la del taller" can be resolved | `{ideas: [{n, title, idea, suggested_asset_ids}]}` |
 | `niche_report` | Should | — | Return the latest Niche Report, or enqueue `generate_niche_report` when there is none from this week ([ADR 0025](../decisions/0025-weekly-niche-report.md)) | `{summary, insights}` or `{job_id, status: "started"}` |
 | `send_dashboard_link` | Should | — | Create a `dashboard` magic link (7 days) and send it as a CTA URL button ("Abrí tu panel") | `{sent: true}` |
 | `revise_plan` | Could | `plan_id`, `feedback` | Enqueue `generate_plan` (revise mode) | `{job_id}` |
-| `update_brand` | Must (built) | `change: str` | Enqueue `generate_brand` revise mode; the new summary goes to the Owner to confirm. Also takes the correction after [Corregir algo] ([ADR 0028](../decisions/0028-orchestrator-memory-and-context.md)) | `{status: "revising"}` |
+| `update_brand` | Must (built) | `change: str` | Enqueue `generate_brand` revise mode; the new summary goes to the Owner to confirm. Also takes the correction after [Corregir algo] ([ADR 0030](../decisions/0030-orchestrator-memory-and-context.md)) | `{status: "revising"}` |
 | `propose_palettes` | Could | `asset_id` | Palette proposals from one photo (F2.9, see [Brand Strategist](#brand-strategist)); the bot shows them as numbered swatches | `{palettes: [{name, colors}]}` |
 | `save_brand_colors` | Could | `colors: list[str]`, `confirmed: bool` | Save owner-confirmed colors and create a new Brand Brain version (same confirm rule as `save_product`) | `{saved}` |
 | `list_catalog` | Could | `query?: str` | Search active Products by name/category | `[{id, name, price, category}]` |
@@ -480,14 +466,14 @@ Guards are in the tool implementations, not in the prompt. `create_post` returns
 | Job | Priority | Steps | Sends to owner |
 |---|---|---|---|
 | `analyze_asset(asset_id)` | Must (photo, logo), Could (video) | Photo/logo: Asset Analyst → save analysis (+ Pillow palette for logos) → (Could) write analyst `asset_products`. Video: Frame Extractor (ffprobe + keyframes) → Asset Analyst (video mode) → save `VideoAnalysis`, `duration_ms`, `width`, `height` → write analyst `asset_products` → save best frames as derived photo assets and enqueue `analyze_asset` for each | nothing (WhatsApp photos without a request: `photo_saved`, sent by the inbound handler after the debounce) |
-| `generate_brand(business_id, correction?)` | Must (create), Could (correction) | wait for pending `analyze_asset` → Brand Strategist → save new version | `brand_summary` (onboarding/correction) |
+| `generate_brand(business_id, correction?)` | Must (create), Could (correction) | wait (≤ 60 s) for pending `import_instagram` and `analyze_asset` → Brand Strategist → save new version | `brand_summary` (onboarding/correction) |
 | `generate_post(post_id)` | Must (image, carousel), Could (Reel) | Image: wait for the candidate photos' analyses (≤ 30 s) → Copywriter → Art Director → validate → Image generator (the variations in parallel) → resize to 1080×1350 → upload → save `post_variations`. Carousel (`posts.format = 'carousel'`): wait for the photo analyses → Copywriter (carousel mode) → Art Director (carousel mode) → validate → `CarouselGenerator.generate` (cover first, the rest in parallel anchored on it, each text-checked) → upload → save `post_slides`. Reel: Copywriter (Reel variant) → Art Director (Reel mode) → validate → save `video_asset_id` + `cover_offset_ms` + cover JPEG (the keyframe at that offset) | several variations: `post_variations` (each image, numbered), then `post_preview` once the Owner picks; one variation: `post_preview` directly; Reel: `reel_preview` (video header when the preview transcode fits WhatsApp's 16 MB) or `reel_preview_link` (cover + dashboard link), see [integrations.md](integrations.md); carousel: the slides in order, captioned "1/5", "2/5"…, then `carousel_preview` |
 | `publish_post(post_id, when)` | Must (now), Should (scheduled) | guard → Publisher (now / schedule; image, carousel or Reel by `posts.format`) → save external id + permalink | `published` / `scheduled` / `publish_failed` |
 | `redo_slides(post_id, slides, feedback)` | Must (carousel) | (Copywriter, when the feedback changes the words of those slides) → Art Director (carousel mode, new scenes for those slides) → `CarouselGenerator.redo` (a redone slide anchors on the current cover; a redone cover anchors on slide 2) → upload → bump `posts.revision`, save the new rows and copy the unchanged ones to the new revision | the redone slides, numbered, then `carousel_preview` |
 | `generate_plan(business_id, notes?, plan_id?)` | Should | Content Strategist → save plan + items | `plan_preview` |
 | `generate_niche_report(business_id)` | Should | Niche Analyst (grounded search) → save `niche_reports` row. Runs every Monday for each onboarded Business, and from the `niche_report` tool | weekly run: nothing; on request: the report's `summary` (LLM text, Rioplatense Spanish) |
 | `revise_post(post_id, feedback)` | Should | Feedback Classifier → (Copywriter) → (Art Director → Image generator, image only) → save revision | `post_preview`, or `post_variations` first when the image was regenerated |
-| `import_instagram_media(business_id)` | Could (F2.8) | List the connected account's recent media ([integrations.md](integrations.md#reading-the-owners-existing-instagram-media-could)) → download the images the Owner kept → store as Brand assets (`source = 'instagram'`) → enqueue `analyze_asset` for each | nothing (the wizard shows progress) |
+| `import_instagram(business_id)` | Should (F2.8, [ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)) | Queued by the Instagram callback. Read the connected account's profile and up to 100 posts ([integrations.md](integrations.md#reading-the-owners-instagram-adr-0028)) → save them in `onboarding_data["instagram"]` → download up to 24 of the newest images not imported yet (photos, carousel slides, video covers) → store as Brand assets (`source = 'instagram'`, `external_id`) → enqueue `analyze_asset` for each. No connected account: does nothing | nothing |
 
 Posts from an approved plan are generated **sequentially** in plan order, so previews arrive in order and we stay under rate limits.
 

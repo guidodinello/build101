@@ -15,4 +15,4 @@ Owners fear losing control of their account and publishing something "not like u
 
 - Trust and safety by construction; good demo talking point.
 - More taps for the owner. A per-business "auto mode" can be added later as a setting without changing the state machine.
-- A bare "sí" or "dale" is explicit when it answers the assistant's own question about publishing that post; code detects the question and the yes ([ADR 0028](0028-orchestrator-memory-and-context.md)).
+- A bare "sí" or "dale" is explicit when it answers the assistant's own question about publishing that post; code detects the question and the yes ([ADR 0030](0030-orchestrator-memory-and-context.md)).

@@ -1,4 +1,4 @@
-"""Multi-turn evals of the orchestrator on the real model (ADR 0028).
+"""Multi-turn evals of the orchestrator on the real model (ADR 0030).
 
 Each scenario is a short conversation an Owner could have; the checks are on what the model did
 (tools, stored notes, post status) or on words its reply must contain. Run with `-m live`.
@@ -26,6 +26,7 @@ from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts, Post, PostImage
 from app.publishing.mock import MOCK_ACCOUNT_ID, MockPublisher
+from app.rendering.mock import MockRenderer
 from tests.conftest import make_image
 from tests.fakes import CountingImageGen, FakeChannel, brand_brain
 
@@ -88,7 +89,14 @@ def rig(compactor_budget: tuple[int, int] | None = None) -> Rig:
     photos = InMemoryPhotos()
     images, image_gen = PublicImages(), CountingImageGen()
     posts = PostMaker(
-        PostDrafter(model), image_gen, photos, images, store, "https://backend.test", 5
+        PostDrafter(model),
+        image_gen,
+        MockRenderer(),
+        photos,
+        images,
+        store,
+        "https://backend.test",
+        5,
     )
     publisher = PostPublisher(
         MockPublisher(delay_s=0), store, images, "https://backend.test", MOCK_ACCOUNT_ID

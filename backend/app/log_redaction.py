@@ -5,8 +5,9 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import httpx
 
 REDACTED = "REDACTED"
-# Kapso's media download URL embeds a signed `token`; `key` covers an API key in a query string.
-SENSITIVE_QUERY_PARAMS = frozenset({"token", "key"})
+# Kapso's media download URL embeds a signed `token`; `key` covers an API key in a query string;
+# the Instagram Graph API takes the Owner's `access_token` and our `client_secret` in the query.
+SENSITIVE_QUERY_PARAMS = frozenset({"token", "key", "access_token", "client_secret"})
 
 
 def redact_url(url: str) -> str:

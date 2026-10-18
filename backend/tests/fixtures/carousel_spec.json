@@ -3,15 +3,15 @@
     "caption": "Mesa de roble hecha a medida para un comedor chico. Contanos qué espacio querés transformar.",
     "hashtags": ["#muebles", "#hechoamano", "#roble"],
     "slides": [
-      {"role": "cover", "headline": "Tu comedor, a medida", "body": null},
-      {"role": "content", "headline": "Roble macizo", "body": "Elegimos cada tabla para que la veta se luzca."},
-      {"role": "content", "headline": "Pensada para tu espacio", "body": "Medimos tu ambiente y diseñamos la mesa justa."},
+      {"role": "cover", "headline": "Tu comedor, a medida", "body": null, "kicker": "Comedor"},
+      {"role": "content", "headline": "Roble macizo", "body": "Elegimos cada tabla para que la veta se luzca.", "kicker": "Madera"},
+      {"role": "content", "headline": "Pensada para tu espacio", "body": "Medimos tu ambiente y diseñamos la mesa justa.", "kicker": "Medida"},
       {"role": "cta", "headline": "¿Hablamos?", "body": "Escribinos y armamos la tuya."}
     ]
   },
   "brief": {
     "reference_asset_ids": ["demo-photo-1"],
-    "style_prompt": "Warm, natural editorial look. Palette: cream #F3EDE2 background areas, walnut brown #5B3A29 for headlines, muted sage #9BA88D accents. Headlines in a bold geometric sans-serif, body in a light sans-serif. Text sits in a clean band at the top third; the product fills the lower two thirds. Soft daylight from a window on the left.",
+    "style_prompt": "Warm, natural light from a window on the left. Palette of cream #F3EDE2 walls, walnut brown #5B3A29 wood and muted sage #9BA88D textiles. Linen, ceramics and dried branches as props; calm, uncluttered rooms.",
     "slides": [
       {"index": 1, "scene_prompt": "The table in a bright small dining room, three-quarter view, a ceramic vase with dried branches on top."},
       {"index": 2, "scene_prompt": "Close-up of the tabletop showing the oak grain in raking light."},

@@ -1,4 +1,4 @@
-"""What the orchestrator knows about the Business, appended to its system prompt (ADR 0028).
+"""What the orchestrator knows about the Business, appended to its system prompt (ADR 0030).
 
 It changes only when the Brand Brain, the Catalog, the notes or the summary change, so the
 system prompt stays a stable prefix across turns and Gemini's implicit caching can hit.

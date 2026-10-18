@@ -318,7 +318,7 @@ async def test_generate_brand_saves_a_version_and_asks_the_owner(
             ["brand_ok", "brand_fix"],
         )
     ]
-    # The orchestrator knows what the Owner was just shown (ADR 0028).
+    # The orchestrator knows what the Owner was just shown (ADR 0030).
     assert await DbHistory(sessions).get(PHONE) == [user_step(BRAND_SUMMARY_NOTE)]
 
 

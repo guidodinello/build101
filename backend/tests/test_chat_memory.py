@@ -1,4 +1,4 @@
-"""The orchestrator's memory and understanding (ADR 0028): context, notes, compaction, approval."""
+"""The orchestrator's memory and understanding (ADR 0030): context, notes, compaction, approval."""
 
 import json
 from datetime import datetime, timedelta

@@ -1,27 +1,26 @@
 import asyncio
 import logging
 from collections.abc import Coroutine, Iterable
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 
 from pydantic import BaseModel
 
 from app.imagegen.base import GeneratedImage, ImageGenBlocked, ImageGenNoImage, ImageGenPort
-from app.media.images import prepare_reference, to_post_image
+from app.media.images import prepare_reference, slice_panorama, to_post_image
 
-from .prompts import BLOCKED_RETRY_NOTE, build_slide_prompt, text_retry_note
-from .schemas import CarouselBrief, CarouselCopy, SlideCopy, TextCheck
+from .prompts import BLOCKED_RETRY_NOTE, build_panorama_prompt, build_slide_prompt, panorama_ratio
+from .schemas import CarouselBrief, CarouselCopy
 
 logger = logging.getLogger(__name__)
 
 COVER = 1
-
-
-@runtime_checkable
-class TextCheckerPort(Protocol):
-    async def check(self, image: bytes, expected: SlideCopy) -> TextCheck: ...
+# A panorama spans several slides, so it is generated at 4K to keep each slice sharp (ADR 0029)
+PANORAMA_IMAGE_SIZE = "4K"
 
 
 class GeneratedSlide(BaseModel):
+    """One slide's text-free scene; the renderer sets the design over it (ADR 0029)."""
+
     index: int
     image: bytes
     prompt: str
@@ -29,15 +28,11 @@ class GeneratedSlide(BaseModel):
     model: str | None
     usage: dict[str, int]
     attempts: int
-    text_check: TextCheck | None = None
 
 
 class CarouselGenerator:
-    def __init__(
-        self, image_gen: ImageGenPort, text_checker: TextCheckerPort | None = None
-    ) -> None:
+    def __init__(self, image_gen: ImageGenPort) -> None:
         self._image_gen = image_gen
-        self._text_checker = text_checker
 
     async def generate(
         self,
@@ -46,9 +41,14 @@ class CarouselGenerator:
         references: list[bytes],
         slide_references: dict[int, list[bytes]] | None = None,
     ) -> list[GeneratedSlide]:
-        """`slide_references` overrides `references` for the slides it lists (1-based)."""
+        """`slide_references` overrides `references` for the slides it lists (1-based).
+
+        A panorama is one wide scene from all the references, so it ignores `slide_references`.
+        """
         check_slides_match(copy, brief)
         prepared = await prepare_references(references)
+        if is_panorama(copy, brief):
+            return await self._panorama(copy, brief, prepared)
         per_slide = {
             index: await prepare_references(slide_refs)
             for index, slide_refs in (slide_references or {}).items()
@@ -70,8 +70,11 @@ class CarouselGenerator:
         current: list[GeneratedSlide],
         indexes: list[int],
     ) -> list[GeneratedSlide]:
+        """A panorama is regenerated whole: one slice alone would break the seams."""
         check_slides_match(copy, brief)
         check_redo_request(len(copy.slides), current, indexes)
+        if is_panorama(copy, brief):
+            return await self.generate(copy, brief, references)
         prepared = await prepare_references(references)
         slides = {slide.index: slide for slide in current}
 
@@ -94,53 +97,62 @@ class CarouselGenerator:
         references: list[bytes],
         style_image: bytes | None,
     ) -> GeneratedSlide:
-        expected = copy.slides[index - 1]
         prompt = build_slide_prompt(brief, copy, index, anchored=style_image is not None)
-        generated, image, prompt, attempts = await self._render(prompt, references, style_image)
-        usage = generated.usage
-        check = await self._check(image, expected)
-
-        if check is not None and not check.matches:
-            logger.info("slide %d text mismatch, regenerating: %s", index, check.issues)
-            retry_prompt = f"{prompt}\n\n{text_retry_note(check)}"
-            generated, image, prompt, retries = await self._render(
-                retry_prompt, references, style_image
-            )
-            usage = add_usage(usage, generated.usage)
-            attempts += retries
-            check = await self._check(image, expected)
-            if check is not None and not check.matches:
-                logger.warning("slide %d text still wrong after retry: %s", index, check.issues)
-
+        generated, prompt, attempts = await self._generate(prompt, references, style_image)
         return GeneratedSlide(
             index=index,
-            image=image,
+            image=await asyncio.to_thread(to_post_image, generated.data),
             prompt=prompt,
             provider=generated.provider,
             model=generated.model,
-            usage=usage,
+            usage=generated.usage,
             attempts=attempts,
-            text_check=check,
         )
 
-    async def _render(
-        self, prompt: str, references: list[bytes], style_image: bytes | None
-    ) -> tuple[GeneratedImage, bytes, str, int]:
-        attempts = 1
+    async def _panorama(
+        self, copy: CarouselCopy, brief: CarouselBrief, references: list[bytes]
+    ) -> list[GeneratedSlide]:
+        count = len(copy.slides)
+        generated, prompt, attempts = await self._generate(
+            build_panorama_prompt(brief, copy),
+            references,
+            None,
+            aspect_ratio=panorama_ratio(count),
+            image_size=PANORAMA_IMAGE_SIZE,
+        )
+        images = await asyncio.to_thread(slice_panorama, generated.data, count)
+        return [
+            GeneratedSlide(
+                index=index,
+                image=image,
+                prompt=prompt,
+                provider=generated.provider,
+                model=generated.model,
+                usage=generated.usage if index == COVER else {},
+                attempts=attempts,
+            )
+            for index, image in enumerate(images, start=1)
+        ]
+
+    async def _generate(
+        self,
+        prompt: str,
+        references: list[bytes],
+        style_image: bytes | None,
+        **size: str,
+    ) -> tuple[GeneratedImage, str, int]:
         try:
-            generated = await self._image_gen.generate(prompt, references, style_image)
+            generated = await self._image_gen.generate(prompt, references, style_image, **size)
+            return generated, prompt, 1
         except (ImageGenBlocked, ImageGenNoImage) as exc:
             logger.warning("image generation failed (%s), retrying with a simpler scene", exc)
             prompt = f"{prompt}\n\n{BLOCKED_RETRY_NOTE}"
-            generated = await self._image_gen.generate(prompt, references, style_image)
-            attempts += 1
-        image = await asyncio.to_thread(to_post_image, generated.data)
-        return generated, image, prompt, attempts
+            generated = await self._image_gen.generate(prompt, references, style_image, **size)
+            return generated, prompt, 2
 
-    async def _check(self, image: bytes, expected: SlideCopy) -> TextCheck | None:
-        if self._text_checker is None:
-            return None
-        return await self._text_checker.check(image, expected)
+
+def is_panorama(copy: CarouselCopy, brief: CarouselBrief) -> bool:
+    return brief.family == "panorama" and len(copy.slides) > 1
 
 
 def check_slides_match(copy: CarouselCopy, brief: CarouselBrief) -> None:
@@ -181,7 +193,3 @@ async def gather_slides(
     for failure in failures[1:]:
         logger.warning("another slide failed too: %r", failure)
     raise failures[0]
-
-
-def add_usage(first: dict[str, int], second: dict[str, int]) -> dict[str, int]:
-    return {key: first.get(key, 0) + second.get(key, 0) for key in first.keys() | second.keys()}

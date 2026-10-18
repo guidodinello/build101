@@ -213,14 +213,52 @@ Gotchas:
 - Webhook signature: `X-Zernio-Signature` = HMAC-SHA256 of the raw body with our secret.
 - Things not verified by research: the exact query param names on the connect redirect (log the full query on the first test and adapt `instagram/callback`), and whether old getlate.dev URLs still work (build only against `zernio.com/api/v1`).
 
-### Reading the Owner's existing Instagram media (Could)
+### Reading the Owner's Instagram (ADR 0028)
 
-The second design pass imports the Owner's feed after they connect Instagram (wizard step 6b, F2.8), so the Agency starts with more photos. Publishing access is not enough for that: we need to **read** the account's media. Checked 2026-10-17:
+The Owner connects their Instagram in wizard step 6, and we read it to build the Brand Brain: profile, captions, engagement and the newest images ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)). This uses **our own Meta app with Instagram Login**, not Zernio, and only reads: publishing stays on Zernio's single demo account ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). Code: `app/instagram/` behind `InstagramPort` (`MetaInstagram`, `MockInstagram`), the connect and callback in `app/api/instagram.py`, the job in `app/jobs/instagram.py`.
 
-- **Zernio** has `GET /v1/accounts/{accountId}/posts`: "the 25 most recent posts that exist on the platform for a connected account", read live from the platform API, including posts not created through Zernio. Each post has `id`, `permalink`, `message` (caption), `mediaType` and `picture` ("Thumbnail or media URL"); there is no pagination or limit parameter and no carousel children. Its docs don't say whether Instagram is supported (a `400` means "platform does not support posts listing"), and for videos `picture` is likely only a thumbnail ([Zernio: list posts](https://docs.zernio.com/accounts/get-account-posts), read 2026-10-17). Zernio's ads endpoints can list an account's Instagram media too, but only through a Meta ads connection, not the Instagram Login connection we use ([Zernio: list Instagram posts to boost](https://docs.zernio.com/ad-accounts/list-ads-instagram-posts), read 2026-10-17).
-- **Instagram Graph API**: `GET /{ig-user-id}/media` returns up to the 10K most recent media, not stories, with time-based pagination. It needs `instagram_basic` + `pages_read_engagement` (Facebook Login) ([IG User Media](https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media), read 2026-10-17), or `instagram_business_basic` with Instagram Login. Each media has `media_type` (image, video, carousel album), `media_url` (omitted when the media contains copyrighted material, such as Reel audio), `thumbnail_url` (videos only) and a `children` edge for albums ([IG Media](https://developers.facebook.com/docs/instagram-platform/reference/instagram-media), read 2026-10-17). This means our own Meta app with those permissions, which [ADR 0008](../decisions/0008-publishing-via-zernio.md) avoided; whether reading other businesses' media needs App Review was not checked.
+**Why not Zernio** (checked 2026-10-18, [Zernio OpenAPI spec](https://zernio.com/openapi.yaml) v1.292.0):
 
-Plan for F2.8: test the Zernio endpoint on the demo Instagram before the hackathon. If it returns Instagram posts with full-size `picture` URLs, import the last 25 posts' images (first image of carousels, thumbnails of videos skipped); if not, F2.8 stays out of the MVP and the wizard's step 6 copy must not promise it. Open question: [../open-questions.md](../open-questions.md#second-design-pass-adr-0016).
+- `GET /v1/accounts/{accountId}/posts` gives only "the 25 most recent posts", with no limit or pagination, a caption, and a `picture` described as "Thumbnail or media URL", and no carousel slides.
+- `GET /v1/accounts` has no bio or website for Instagram.
+- `GET /v1/accounts/{id}/instagram/business-discovery` (bio, website, full media, children) needs a **Facebook Login** connection: "accounts connected with classic Instagram Login receive a 400".
+- Paginated posts with carousel items (`GET /v1/analytics?source=external`) need the Analytics add-on (402 without it); comments and DMs need the Inbox add-on. Zernio's [pricing page](https://zernio.com/pricing) says "No add-ons", which contradicts the spec; not confirmed for our account.
+
+**Meta setup:** add the *Instagram API with Instagram Login* product to the app, add the Owner's account (Business or Creator) as an **Instagram Tester** and accept the invite from the account, and register `{PUBLIC_BACKEND_URL}/oauth/instagram/callback` as a valid OAuth redirect URI. Meta matches it exactly, so a deploy sets `PUBLIC_BACKEND_URL`. Without App Review this is Standard Access: it works only for accounts with a role on the app. Serving any other Business needs Advanced Access, App Review and Business Verification ([overview](https://developers.facebook.com/documentation/instagram-platform/overview.md), [App Review](https://developers.facebook.com/documentation/instagram-platform/app-review.md), read 2026-10-18).
+
+**Calls** ([Business Login](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login), read 2026-10-18):
+
+```python
+# 1. The wizard's POST /api/o/{token}/instagram/connect returns
+https://www.instagram.com/oauth/authorize?client_id={INSTAGRAM_APP_ID}&redirect_uri={callback}
+    &response_type=code&scope=instagram_business_basic&state={signed state}
+# The code Instagram sends back "is valid for 1 hour and can only be used once"
+
+# 2. GET /oauth/instagram/callback?code&state: code → short-lived token (form POST)
+POST https://api.instagram.com/oauth/access_token
+client_id, client_secret, grant_type=authorization_code, redirect_uri, code
+→ {"access_token": "...", "user_id": 178...}      # also seen as {"data": [{...}]}: both are read
+
+# 3. Short-lived → long-lived (60 days), server side only
+GET https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=...&access_token=...
+→ {"access_token": "...", "token_type": "bearer", "expires_in": 5184000}
+
+# 4. Profile
+GET https://graph.instagram.com/{INSTAGRAM_GRAPH_VERSION}/me
+    ?fields=user_id,username,name,followers_count,media_count,biography,website
+
+# 5. Media, newest first, 50 per page; follow paging.next up to INSTAGRAM_IMPORT_MAX_POSTS
+GET https://graph.instagram.com/{INSTAGRAM_GRAPH_VERSION}/me/media?limit=50&fields=id,media_type,
+    media_url,thumbnail_url,permalink,timestamp,like_count,comments_count,
+    children{id,media_type,media_url,thumbnail_url},caption
+```
+
+- **Optional fields.** Meta's [IG User](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user.md) reference lists `biography` and `website` for Instagram Login, but its getting-started `/me` table leaves them out. Its [IG Media](https://developers.facebook.com/documentation/instagram-platform/reference/instagram-media.md) reference labels `caption` "Available for Instagram API with Facebook Login only", yet Zernio returns captions over Instagram Login. The adapter asks for them and, on a `400`, asks again without them, so a refusal loses signal instead of failing the import. Not yet confirmed on the demo account ([open questions](../open-questions.md#instagram-import-adr-0028)).
+- **Images.** A photo's `media_url`; for a carousel, each child's (a video child gives its `thumbnail_url`); for a video, its `thumbnail_url` (the cover). `media_url` "is omitted … if the media contains copyrighted material" (Reels with licensed audio), and such an item is skipped. CDN URLs stop working "when the content has been deleted or has expired" ([overview](https://developers.facebook.com/documentation/instagram-platform/overview.md)), so images are downloaded and stored, never linked.
+- **Limits.** `/me/media` "Returns a maximum of 10K of the most recently created media" and never stories ([IG User Media](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media.md)). Stories exist only for 24 hours ([IG User Stories](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/stories.md)), and there is no highlights edge. Comments need `instagram_business_manage_comments` and DMs `instagram_business_manage_messages`; neither is requested. All read 2026-10-18.
+- **What the job does.** `import_instagram` reads the profile and up to `INSTAGRAM_IMPORT_MAX_POSTS` (100) posts into `businesses.onboarding_data["instagram"]`. It downloads up to `INSTAGRAM_IMPORT_MAX_IMAGES` (24) of the newest images not imported yet, 4 at a time, and stores each in the `assets` bucket with its agents' copy, as a `photo` Brand asset with `source = 'instagram'` and `external_id` = the media id. It queues one `analyze_asset` per image. An image that fails to download or decode is logged and skipped.
+- **Tokens.** The long-lived token is stored on `social_accounts.access_token` (RLS on, [data-model.md](data-model.md)). It can be refreshed with `GET /refresh_access_token?grant_type=ig_refresh_token` once it is 24 hours old, and expires if not refreshed within 60 days. Refresh is not built: the import runs once, right after the connect. httpx logs redact `access_token` and `client_secret` in query strings.
+- **Mock.** `INSTAGRAM=mock` (the default): the authorize URL points straight at our callback with a fake code, and the import brings three fake posts with plain-color images. Local dev and the demo work without a Meta app.
 
 ### Mock publisher
 
@@ -282,14 +320,26 @@ resp = await client.aio.models.generate_content(
 - **Reading the response:** skip parts with `part.thought` (interim thought images, not charged); the first remaining inline image is the result. No image → map `finish_reason` (`IMAGE_SAFETY`, `IMAGE_PROHIBITED_CONTENT`, `IMAGE_RECITATION`, `IMAGE_OTHER`, `NO_IMAGE`) or `prompt_feedback.block_reason` to `ImageGenBlocked(reason)` (a block) or `ImageGenNoImage`; SDK `ClientError` / `ServerError` after the retries → `ImageGenUnavailable`.
 - **References:** each photo goes through `app/media/images.py:prepare_reference` (HEIC ok, ≤ 1536 px long side, JPEG) and is sent as a labelled inline part, which keeps ~10 photos under Gemini's 20 MB inline request cap.
 - **Concurrency:** one process-wide semaphore of `IMAGE_GEN_MAX_CONCURRENCY` (default 4) around every provider call, shared by variations and carousel slides.
-- **Carousels** ([ADR 0022](../decisions/0022-carousels-in-mvp.md)): `CarouselGenerator` generates the cover first, then the other slides in parallel, each with the cover passed as `style_image` (sent after the product photos, labelled as the style reference) and a prompt from `build_slide_prompt(..., anchored=True)`. A redone slide anchors on the current cover; a redone cover anchors on slide 2. Each slide is resized with `to_post_image`, checked by the Text Checker ([agents.md](agents.md#text-checker)) and regenerated once on mismatch. Slides are about $0.05 each at 2K plus input tokens, so a 5-slide carousel is roughly $0.30 to $0.40 and two generation rounds; measure it.
-- **Post-processing** (`app/media/images.py`, Pillow): center-crop to 4:5 if needed (Gemini 2K is 1856×2304, slightly off 4:5) and resize to **1080×1350**, JPEG quality 90, then upload to the public `renders` bucket. This is resizing, not composing: nothing is drawn on the image.
+- **Carousels** ([ADR 0022](../decisions/0022-carousels-in-mvp.md), [ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)): `CarouselGenerator` generates text-free scenes: the cover first, then the other slides in parallel, each with the cover passed as `style_image` (sent after the product photos, labelled "Another slide of this carousel", since `gemini-nano-banana-2.1` has no style-reference slot) and a prompt from `build_slide_prompt(..., anchored=True)`. A redone slide anchors on the current cover; a redone cover anchors on slide 2. A `panorama` is one call at `16:9`, `21:9`, `4:1` or `8:1` (by slide count) and 4K, center-cropped to N × 4:5 and sliced with `slice_panorama`; its redo regenerates the whole scene. Slides are about $0.05 each at 2K plus input tokens; a panorama is one 4K image ($0.113). The [Slide renderer](#slide-renderer-takumi-on-vercel) then sets the design over each scene.
+- **Post-processing** (`app/media/images.py`, Pillow): center-crop to 4:5 if needed (Gemini 2K is 1856×2304, slightly off 4:5) and resize to **1080×1350**, JPEG quality 90, then upload to the public `renders` bucket. Image Posts are only resized; designed slides are composed by the Slide renderer below.
 - **Runs in the job runner**, never in the webhook ([ADR 0005](../decisions/0005-single-instance-in-process-jobs.md)). Variations of one Post run concurrently, under the shared semaphore so a Post doesn't exhaust the provider's rate limit.
 - **Cost:** every call logs the provider's `usage` (input images, prompt, thinking, output) in `agent_runs` (`agent = 'image_gen'`), so the dollars per variation can be computed. Gemini lists $0.0504 per 2K output image plus input and thinking tokens; OpenAI's per-image cost for 2.5 is not documented.
 - **Data:** only call Gemini from a project with billing linked: unpaid use (AI Studio, free quota) is used for training. Paid-tier Gemini and the OpenAI API don't train on our images.
 - **Limits:** Gemini Tier 1 has a $10 per 10-minute spend limit and a $250 billing cap; images per minute for 2.1 are not on the public page. OpenAI's Build tier allows 20 images per minute.
 - To confirm on the first real call ([ADR 0019](../decisions/0019-image-provider-gemini.md)): 4:5 at 2K on `gemini-nano-banana-2.1`, latency per image, the cost of `GEMINI_THINKING_LEVEL` (`minimal` vs `medium`), and that the crop keeps the product in frame.
 - Docker: no browser, no fonts; Pillow is already a dependency.
+
+## Slide renderer (Takumi on Vercel)
+
+[ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md). Designed slides are composed from code templates over the text-free scenes.
+
+- **Where:** `POST /api/render` in the Next.js app (`frontend/app/api/render/route.ts`), Node runtime, rendered by Takumi (`takumi-js` + `@takumi-rs/core`, MIT or Apache-2.0, no browser). Templates are React components in `frontend/lib/post-render/families/` (`editorial`, `numbers`, `panorama`), with shared chrome (brand mark, page counter, swipe cue, save pill) in `chrome.tsx`. Fonts are OFL files committed in `frontend/lib/post-render/fonts/` (Instrument Serif, DM Sans, Bricolage Grotesque); icons are Lucide path data (`lucide`, ISC), drawn as inline SVG because `lucide-react` icons are client components.
+- **Contract:** one slide per request, JSON `{family, index, count, role, kicker, headline, body, image, logo: {src, tone} | null, brand: {name, colors: {primary, secondary, accent, background, text}}}`; `image` and `logo.src` are base64 data URIs. Validated in `frontend/lib/post-render/spec.ts` (400 `invalid_spec` on a bad field). Answers a 1080×1350 JPEG.
+- **Auth:** `Authorization: Bearer <RENDER_SECRET>`; 401 on a mismatch, 503 when the frontend has no secret.
+- **Backend side:** `app/rendering/` (`RendererPort`; `TakumiRenderer` over httpx, 30 s timeout; `MockRenderer` returns the scene unchanged). `render_slides` sends every slide of a post in parallel with the Brand Brain's name and colors (a color that isn't `#RRGGBB` keeps the default) and, when the Owner asked, the logo trimmed to PNG with its tone (`logo_for_render`), so the template can put it on a chip.
+- **Settings:** `RENDERER` (`takumi` | `mock`, default `mock`), `RENDERER_URL` (the frontend's origin), `RENDERER_SECRET` (= the frontend's `RENDER_SECRET`).
+- **Limits:** Vercel caps request and response bodies at 4.5 MB; a 1080×1350 scene is a few hundred KB, so one slide per request stays far under it.
+- **Preview:** with `ENABLE_TEMPLATE_PREVIEW=true` the frontend serves `/dev/post-templates`, every family over sample copy and the landing photos.
 
 ## Speech-to-text
 

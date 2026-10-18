@@ -15,8 +15,9 @@ Commands run from this folder (`uv run ruff check .`, `uv run pytest tests/ -v`)
 
 - `app/main.py`: `/health` (`uv run uvicorn app.main:app --reload`).
 - `app/imagegen/`: `ImageGenPort` with the Gemini and mock adapters, selected by `IMAGE_GEN`.
-- `app/media/images.py`: reference photo normalization and the 1080×1350 resize.
-- `app/carousel/`: carousel schemas, slide prompts and `CarouselGenerator` (cover first, other slides anchored on it).
+- `app/media/images.py`: reference photo normalization, the 1080×1350 resize, panorama slicing and logo prep.
+- `app/carousel/`: carousel schemas, scene prompts and `CarouselGenerator` (text-free scenes: cover first, other slides anchored on it, or one wide panorama sliced).
+- `app/rendering/`: `RendererPort` with the Takumi (the frontend's `/api/render`) and mock adapters, selected by `RENDERER`; `render_slides` designs every slide of a post ([ADR 0029](../docs/decisions/0029-designed-slides-ai-scene-code-layout.md)).
 - `app/channels/`: `ChannelPort` with the Kapso adapter, `POST /webhooks/whatsapp` (signature check, dedupe, background handling) and an echo handler until the conversation router (T23) exists.
 
 Generate a carousel from a copy + brief spec without the database or the agents:
@@ -27,7 +28,7 @@ uv run python -m app.carousel.cli --spec tests/fixtures/carousel_spec.json \
   --photos ~/demo/photo1.jpg ~/demo/photo2.jpg --out out/carousel [--slides 1]
 ```
 
-It writes `slide-N.jpg`, each slide's prompt and a `report.json` with latency, raw size and token usage per call. Live tests run with `uv run pytest -m live` (skipped without `GEMINI_API_KEY`).
+With `RENDERER=takumi` and the frontend running (`RENDERER_URL=http://localhost:3000`, `RENDERER_SECRET` = its `RENDER_SECRET`), it writes the designed `slide-N.jpg` next to each `scene-N.jpg`; with `RENDERER=mock` both are the bare scene. It also writes each slide's prompt and a `report.json` with latency, raw size and token usage per call. Live tests run with `uv run pytest -m live` (skipped without `GEMINI_API_KEY`).
 
 Write this week's Niche Report ([ADR 0025](../docs/decisions/0025-weekly-niche-report.md)) for a Business in a known niche; set `NICHE_REPORT_PATH=out/niche-report.json` and post generation gets its insights as trend notes:
 
@@ -76,6 +77,7 @@ Set on the service (`railway variable set KEY --stdin --service backend`, value 
 | `FRONTEND_URL`, `FRONTEND_ORIGINS` | the Vercel domain, `https://build101-khaki.vercel.app` (no `localhost` in production CORS) |
 | `WHATSAPP_BOT_NUMBER` | `56920403095`, the shared Kapso sandbox number (only answers phones with an active sandbox session) |
 | `ENABLE_DEV_ENDPOINTS`, `DEV_TOKEN` | unset (dev endpoints off) |
+| `RENDERER`, `RENDERER_URL`, `RENDERER_SECRET` | `takumi`, the Vercel domain, and the same secret as the frontend's `RENDER_SECRET` |
 
 Everything else (`GEMINI_*`, `KAPSO_*`, `ZERNIO_*`, `PUBLISHER`, `IMAGE_GEN`, ...) carries the same value as local. Without `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `GEMINI_API_KEY` the app still boots but the job runner is off (the startup log says so).
 
@@ -96,7 +98,7 @@ Redeploy the previous deployment from the Railway dashboard (service, Deployment
 
 ### One instance
 
-State kept in memory is lost on every deploy or restart: running jobs (the job runner marks jobs stuck for more than 5 minutes as failed), the webhook dedupe store, served post images (`/media/*.jpg`) and the in-memory photo and post stores. The orchestrator's history, its conversation summary and the Owner's notes are in Postgres ([ADR 0028](../docs/decisions/0028-orchestrator-memory-and-context.md)), and so are the chat photos once kept as Brand assets. Keep one replica ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)).
+State kept in memory is lost on every deploy or restart: running jobs (the job runner marks jobs stuck for more than 5 minutes as failed), the webhook dedupe store, served post images (`/media/*.jpg`) and the in-memory photo and post stores. The orchestrator's history, its conversation summary and the Owner's notes are in Postgres ([ADR 0028](../docs/decisions/0030-orchestrator-memory-and-context.md)), and so are the chat photos once kept as Brand assets. Keep one replica ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)).
 
 ### Switching WhatsApp between Railway and local development
 

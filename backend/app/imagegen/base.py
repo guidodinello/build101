@@ -19,7 +19,12 @@ class ImageGenPort(Protocol):
         prompt: str,
         reference_images: list[bytes],
         style_image: bytes | None = None,
-    ) -> GeneratedImage: ...
+        *,
+        aspect_ratio: str | None = None,
+        image_size: str | None = None,
+    ) -> GeneratedImage:
+        """`aspect_ratio` and `image_size` override the adapter's 4:5 post defaults."""
+        ...
 
 
 class ImageGenError(Exception):

@@ -231,7 +231,7 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 
 ### T55: Carousels (F4.9) · AB · M
 
-- Read: [ADR 0022](../decisions/0022-carousels-in-mvp.md), [agents.md § Copywriter, Art Director, Text Checker, Job pipelines](../architecture/agents.md#text-checker), [data-model.md](../architecture/data-model.md) (`post_slides`), [api.md § Internal module interfaces](../architecture/api.md#internal-module-interfaces), [integrations.md § Image generation](../architecture/integrations.md#image-generation), [user-flows.md § Flow 5](../product/user-flows.md#carousel-must-f49), the carousel copy in [conversation-design.md](../product/conversation-design.md)
+- Read: [ADR 0022](../decisions/0022-carousels-in-mvp.md), [agents.md § Copywriter, Art Director, Job pipelines](../architecture/agents.md#art-director), [ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md), [data-model.md](../architecture/data-model.md) (`post_slides`), [api.md § Internal module interfaces](../architecture/api.md#internal-module-interfaces), [integrations.md § Image generation](../architecture/integrations.md#image-generation), [user-flows.md § Flow 5](../product/user-flows.md#carousel-must-f49), the carousel copy in [conversation-design.md](../product/conversation-design.md)
 - Prerequisite: T13 and T14 carousel modes, T15 with `style_image`, the image Post working end to end (Checkpoint 2).
 - Build (A): `app/carousel/schemas.py`, `prompts.py` (`build_slide_prompt(brief, copy, index, *, anchored)`), `generator.py` (`CarouselGenerator(image_gen, text_checker=None)` with `generate` and `redo`: cover first, the other slides in parallel anchored on the cover, a redo of the cover anchored on slide 2; each output through `to_post_image`, text-checked, regenerated once on mismatch and flagged if it still fails); `app/agents/text_checker.py`; the carousel branch of `generate_post` (save `post_slides`, storage path `renders/{business_id}/{post_id}-r{revision}-s{idx}.jpg`); the `redo_slides(post_id, slides, feedback)` job (bumps `posts.revision` and copies the unchanged rows); the `create_post(format = "carousel", slide_count)` and `redo_slides` tools; `post_change` on a carousel asks which slide.
 - Build (B): send the slides in order as images captioned "1/5", "2/5"…, then `carousel_preview`; `carousel_redo_ask` on `[Cambiar]`; `/dev/chat` shows the slides in order; `PublishMedia.urls` in `zernio.py` (several `mediaItems`, slide order) and `mock.py`.
@@ -286,11 +286,10 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 
 ### T53: Instagram feed import (F2.8) · B · C
 
-- Read: [integrations.md § Reading the Owner's existing Instagram media](../architecture/integrations.md#reading-the-owners-existing-instagram-media-could)
-- Out of the MVP with F2.8: it needs the Owner to connect their own Instagram ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)).
-- Prerequisite: the pre-hackathon test shows Zernio's `GET /v1/accounts/{accountId}/posts` returns Instagram posts with full-size images. If not, skip this task.
-- Build: `/api/o/{token}/instagram/import`, `/instagram/media`, `/instagram/media/selection`; `import_instagram_media` job; wizard step 6b (grid with progress, untick to exclude, "Listo, seguir").
-- Done when: after connecting the demo IG, step 6b shows its recent posts and the kept images become analyzed Brand assets with `source = 'instagram'`.
+- Read: [integrations.md § Reading the Owner's Instagram](../architecture/integrations.md#reading-the-owners-instagram-adr-0028), [ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)
+- **Built differently than first planned**: the read goes through our own Meta app with Instagram Login, not Zernio, whose read access was too thin; the import is automatic, with no step 6b review grid.
+- Built: `POST /api/o/{token}/instagram/connect`, `GET /oauth/instagram/callback`, the `import_instagram` job, the Brand Strategist's `<instagram>` input, migration `0002`, wizard step 6 re-reading the state on return.
+- Done when: after connecting the demo IG (an Instagram tester of our Meta app), its profile and captions reach the Brand Strategist and its newest images become analyzed Brand assets with `source = 'instagram'`. Not yet checked against the live account.
 
 ### T54: Colors and a simple logo in the chat (F2.9) · A · C
 

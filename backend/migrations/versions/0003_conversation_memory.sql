@@ -1,4 +1,4 @@
--- The orchestrator's memory (ADR 0028): its history, a summary of the turns cut from it, and
+-- The orchestrator's memory (ADR 0030): its history, a summary of the turns cut from it, and
 -- the facts the Owner asked it to keep.
 
 create table conversation_steps (

@@ -92,7 +92,7 @@ class ChatHandler:
     Photos wait `PHOTO_DEBOUNCE_S` after the last one and are answered together, with any text
     that arrives meanwhile. Buttons and other kinds are answered as events (`notify`, ADR 0026).
     The model sees the Business, its Brand Brain, the Owner's notes and the conversation summary
-    in its system prompt (ADR 0028).
+    in its system prompt (ADR 0030).
     """
 
     def __init__(
@@ -427,7 +427,7 @@ class ChatHandler:
         return "", turn
 
     async def _system_for(self, sender: str) -> str:
-        """The instructions, then what the model knows about this Business (ADR 0028)."""
+        """The instructions, then what the model knows about this Business (ADR 0030)."""
         context = OwnerContext()
         try:
             if self._contexts:

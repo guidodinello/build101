@@ -1,4 +1,4 @@
-"""What the orchestrator knows about the Business: notes, context, chat photos (ADR 0028)."""
+"""What the orchestrator knows about the Business: notes, context, chat photos (ADR 0030)."""
 
 import uuid
 

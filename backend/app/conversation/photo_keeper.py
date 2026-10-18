@@ -20,7 +20,7 @@ JPEG = "image/jpeg"
 
 class PhotoKeeper:
     """Describes each photo the Owner sends in the chat (Asset Analyst) and, with the database,
-    stores it as a Brand asset, so it outlives the 30 minutes of `<recent_photos>` (ADR 0028).
+    stores it as a Brand asset, so it outlives the 30 minutes of `<recent_photos>` (ADR 0030).
     """
 
     def __init__(

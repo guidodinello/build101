@@ -74,7 +74,7 @@ class InMemoryHistory:
 
 
 class DbHistory:
-    """History in `conversation_steps`, so a deploy or a crash doesn't erase it (ADR 0028).
+    """History in `conversation_steps`, so a deploy or a crash doesn't erase it (ADR 0030).
 
     Keyed by the Owner's phone: the onboarding gate creates the Business before the chat runs.
     The locks stay in memory: one backend instance (ADR 0005).

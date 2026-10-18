@@ -60,6 +60,17 @@ From [ADR 0022](decisions/0022-carousels-in-mvp.md).
 - [ ] **Redo feedback that changes the words** ("que la 3 diga envío gratis"): does `redo_slides` rewrite that slide's text with the Copywriter, or only its scene?
 - [ ] **On stage:** does the demo script show a carousel? Carousels are Must, but [product/demo-script.md](product/demo-script.md) shows one image Post.
 
+## Post and carousel design
+
+From [research/post-design/](research/post-design/recommendation.md). The proposal (AI makes text-free visuals, code templates add type, figures, logo and brand chrome) changes ADRs 0018, 0022 and 0027, so it needs an ADR first.
+
+- [x] **AI visual + code layout:** yes, Takumi on a Vercel route renders the slides ([ADR 0029](decisions/0029-designed-slides-ai-scene-code-layout.md)); hosted template APIs stay the fallback. Still to measure: Gemini panorama fidelity and how reliably scenes leave the template's text area calm.
+- [x] **First template families:** `editorial`, `numbers` and `panorama` ([ADR 0029](decisions/0029-designed-slides-ai-scene-code-layout.md)). Next candidates: before/after, notes and moodboard; the cut-out families (spec sheet, shop the look, colorways) wait for a cut-out provider.
+- [ ] **Cut-outs:** Gemini can't output transparency; Recraft remove-background ($0.01), Ideogram or OpenAI transparent output? Not rembg's default model (non-commercial weights).
+- [ ] **Brand typography:** the Brand Brain has no fonts or Instagram handle; how many curated font pairs, and how the wizard picks one.
+- [ ] **Who picks the family:** the Owner ("tipo revista") or always the Art Director?
+- [ ] **Scene anchoring:** `gemini-nano-banana-2.1` has no style-reference slot; the cover is now sent as "Another slide of this carousel" with a prompt that says to match its light and palette ([ADR 0029](decisions/0029-designed-slides-ai-scene-code-layout.md)). Does that keep the scenes consistent, or is it worth Nano Banana Pro's style references?
+
 ## Publishing
 
 - [ ] Confirm the exact query params Zernio appends to the connect redirect (log them in the pre-hackathon test).
@@ -69,9 +80,19 @@ From [ADR 0022](decisions/0022-carousels-in-mvp.md).
 
 From [ADR 0016](decisions/0016-demo-scope-one-post.md) and the [mockups](design/mockups/README.md).
 
-- [ ] **Instagram feed import (F2.8, Could): can we read the Owner's existing media?** Zernio's `GET /v1/accounts/{accountId}/posts` lists the 25 most recent posts with a `picture` URL, but its docs don't say whether Instagram is supported or whether `picture` is full size; the Instagram Graph API (`GET /{ig-user-id}/media`) needs our own Meta app with read permissions, which [ADR 0008](decisions/0008-publishing-via-zernio.md) avoided. Test the Zernio endpoint on the demo account before the hackathon ([integrations.md](architecture/integrations.md#reading-the-owners-existing-instagram-media-could)). Until it works, the wizard must not promise the import.
+- [x] **Instagram feed import (F2.8): can we read the Owner's existing media?** Not well through Zernio over Instagram Login (25 posts, a picture that may be a thumbnail, no bio, no carousel slides; the rich endpoints need Facebook Login or add-ons). Resolved by reading through our own Meta app with Instagram Login: [ADR 0028](decisions/0028-read-instagram-with-our-meta-app.md). Follow-ups in [Instagram import](#instagram-import-adr-0028).
 - [x] **Stories:** the mockups show one (Chat-6), but stories are **Won't** for the MVP (F4.7). They would need a 1080×1920 image and story publishing through Zernio; revisit after Reels.
 - [ ] **Approving by writing:** which phrases count as an explicit approval ("subilo", "publicalo", "dale") and which only as praise ("me encanta"). Start with the list in [agents.md](architecture/agents.md#conversation-rules) and tune it with the owner during rehearsal ([ADR 0007](decisions/0007-approve-every-post.md)).
+
+## Instagram import (ADR 0028)
+
+From [ADR 0028](decisions/0028-read-instagram-with-our-meta-app.md); calls and limits in [integrations.md](architecture/integrations.md#reading-the-owners-instagram-adr-0028).
+
+- [ ] **Captions and bio over Instagram Login:** Meta's docs label `caption` "Facebook Login only" and leave `biography` and `website` out of `/me`; Zernio returns captions on the same kind of connection. Connect the demo account with `INSTAGRAM=meta` and check what `/me` and `/me/media` return. Without captions the import still brings photos, but loses the voice signal.
+- [ ] **Serving real businesses:** our Meta app reads only Instagram testers in development mode. Reading any Owner's account needs Advanced Access for `instagram_business_basic`, App Review and Business Verification. When to start it, and how long it takes.
+- [ ] **Token refresh:** the long-lived token lasts 60 days and is not refreshed. Needed once we re-import, or read comments and DMs ([ADR 0015](decisions/0015-instagram-login.md)).
+- [ ] **One connection instead of two:** should publishing move from Zernio to our Meta app (`instagram_business_content_publish`), so the Owner connects once and posts go to their own account instead of the demo one ([ADR 0024](decisions/0024-mvp-single-demo-instagram-account.md))?
+- [ ] **Re-import and the Brand Brain:** an Owner who connects after finishing the wizard gets the import, but the Brand Brain is not regenerated from it. Should it be, or should the import be offered in the chat?
 
 ## Catalog, content and Reels (Could)
 

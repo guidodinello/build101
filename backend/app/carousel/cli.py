@@ -9,7 +9,9 @@ from pathlib import Path
 from app.config import get_settings
 from app.imagegen.base import GeneratedImage, ImageGenPort
 from app.imagegen.factory import build_image_gen
-from app.media.images import image_size
+from app.media import images
+from app.rendering.factory import build_renderer
+from app.rendering.slides import render_slides
 
 from .generator import CarouselGenerator
 from .schemas import CarouselBrief, CarouselCopy
@@ -31,11 +33,23 @@ class RecordingImageGen:
     records: list[CallRecord] = field(default_factory=list)
 
     async def generate(
-        self, prompt: str, reference_images: list[bytes], style_image: bytes | None = None
+        self,
+        prompt: str,
+        reference_images: list[bytes],
+        style_image: bytes | None = None,
+        *,
+        aspect_ratio: str | None = None,
+        image_size: str | None = None,
     ) -> GeneratedImage:
         started = time.perf_counter()
-        generated = await self.inner.generate(prompt, reference_images, style_image)
-        width, height = image_size(generated.data)
+        generated = await self.inner.generate(
+            prompt,
+            reference_images,
+            style_image,
+            aspect_ratio=aspect_ratio,
+            image_size=image_size,
+        )
+        width, height = images.image_size(generated.data)
         self.records.append(
             CallRecord(time.perf_counter() - started, width, height, generated.usage)
         )
@@ -52,16 +66,19 @@ async def run(
         copy = copy.model_copy(update={"slides": copy.slides[:slide_count]})
         brief = brief.model_copy(update={"slides": brief.slides[:slide_count]})
 
-    image_gen = RecordingImageGen(build_image_gen(get_settings()))
+    settings = get_settings()
+    image_gen = RecordingImageGen(build_image_gen(settings))
     started = time.perf_counter()
     slides = await CarouselGenerator(image_gen).generate(
         copy, brief, [path.read_bytes() for path in photo_paths]
     )
     total_seconds = time.perf_counter() - started
+    designed = await render_slides(build_renderer(settings), copy, brief, slides, None, None)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    for slide in slides:
-        (out_dir / f"slide-{slide.index}.jpg").write_bytes(slide.image)
+    for slide, image in zip(slides, designed, strict=True):
+        (out_dir / f"scene-{slide.index}.jpg").write_bytes(slide.image)
+        (out_dir / f"slide-{slide.index}.jpg").write_bytes(image)
         (out_dir / f"slide-{slide.index}.prompt.txt").write_text(slide.prompt)
     report = {
         "total_seconds": round(total_seconds, 1),

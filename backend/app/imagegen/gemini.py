@@ -44,11 +44,8 @@ class GeminiImageGen:
     ) -> None:
         self._client = client
         self._model = model
-        self._config = types.GenerateContentConfig(
-            response_modalities=["TEXT", "IMAGE"],
-            image_config=types.ImageConfig(aspect_ratio=ASPECT_RATIO, image_size=image_size),
-            thinking_config=types.ThinkingConfig(thinking_level=thinking_level.upper()),
-        )
+        self._image_size = image_size
+        self._thinking_level = thinking_level.upper()
         self._semaphore = asyncio.Semaphore(max_concurrency)
 
     @classmethod
@@ -66,12 +63,22 @@ class GeminiImageGen:
         prompt: str,
         reference_images: list[bytes],
         style_image: bytes | None = None,
+        *,
+        aspect_ratio: str | None = None,
+        image_size: str | None = None,
     ) -> GeneratedImage:
         contents = build_contents(prompt, reference_images, style_image)
+        config = types.GenerateContentConfig(
+            response_modalities=["TEXT", "IMAGE"],
+            image_config=types.ImageConfig(
+                aspect_ratio=aspect_ratio or ASPECT_RATIO, image_size=image_size or self._image_size
+            ),
+            thinking_config=types.ThinkingConfig(thinking_level=self._thinking_level),
+        )
         async with self._semaphore:
             try:
                 response = await self._client.aio.models.generate_content(
-                    model=self._model, contents=contents, config=self._config
+                    model=self._model, contents=contents, config=config
                 )
             except errors.APIError as exc:
                 raise ImageGenUnavailable(f"gemini {exc.code} {exc.status}: {exc.message}") from exc
@@ -86,7 +93,8 @@ def build_contents(
         parts.append(types.Part.from_text(text=f"Product reference {number}:"))
         parts.append(types.Part.from_bytes(data=image, mime_type=image_mime(image)))
     if style_image is not None:
-        parts.append(types.Part.from_text(text="Style reference:"))
+        # gemini-nano-banana-2.1 has no style-reference slot; the prompt says what this image is for
+        parts.append(types.Part.from_text(text="Another slide of this carousel:"))
         parts.append(types.Part.from_bytes(data=style_image, mime_type=image_mime(style_image)))
     return parts
 

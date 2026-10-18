@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import Business, Job
 
-JobKind = Literal["analyze_asset", "generate_brand"]
+JobKind = Literal["analyze_asset", "generate_brand", "import_instagram"]
 
 
 def enqueue(

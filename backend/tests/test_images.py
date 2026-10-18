@@ -11,7 +11,9 @@ from app.media.images import (
     fit_logo,
     image_mime,
     image_size,
+    logo_for_render,
     prepare_reference,
+    slice_panorama,
     to_post_image,
 )
 from tests.conftest import make_image
@@ -151,3 +153,38 @@ def test_a_logo_that_is_semi_transparent_everywhere_still_gets_a_backing() -> No
 
     margin = round(1080 * 0.04)
     assert near(pixel(result, (1080 - margin - 4, 1350 - margin - 30)), LIGHT_BACKING, 48)
+
+
+def test_slice_panorama_cuts_a_wide_scene_into_side_by_side_posts() -> None:
+    wide = Image.new("RGB", (8000, 2000), "white")
+    for n, color in enumerate(["red", "green", "blue", "yellow"]):
+        wide.paste(Image.new("RGB", (2000, 2000), color), (n * 2000, 0))
+    buffer = BytesIO()
+    wide.save(buffer, format="PNG")
+
+    slices = slice_panorama(buffer.getvalue(), 5)
+
+    assert len(slices) == 5
+    assert all(image_size(piece) == POST_SIZE for piece in slices)
+    with Image.open(BytesIO(slices[0])) as first, Image.open(BytesIO(slices[-1])) as last:
+        assert first.getpixel((10, 10))[0] > 200 and first.getpixel((10, 10))[1] < 60
+        assert last.getpixel((1070, 10))[:2] > (200, 200)
+
+
+def test_slice_panorama_needs_a_slide() -> None:
+    with pytest.raises(ValueError, match="at least one slide"):
+        slice_panorama(make_image((800, 200)), 0)
+
+
+def test_logo_for_render_trims_the_margins_and_reads_its_tone() -> None:
+    logo = Image.new("RGBA", (400, 200), (0, 0, 0, 0))
+    logo.paste(Image.new("RGBA", (200, 100), (20, 20, 20, 255)), (100, 50))
+    buffer = BytesIO()
+    logo.save(buffer, format="PNG")
+
+    png, tone = logo_for_render(buffer.getvalue())
+
+    assert image_size(png) == (200, 100)
+    assert image_mime(png) == "image/png"
+    assert tone == "dark"
+    assert logo_for_render(make_image((300, 100), color="white"))[1] == "light"
