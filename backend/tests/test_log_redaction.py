@@ -1,9 +1,17 @@
+import asyncio
 import logging
+from collections.abc import AsyncIterator
 
 import httpx
 import pytest
+import uvicorn
 
-from app.log_redaction import RedactQueryTokens, redact_url
+from app.log_redaction import (
+    RedactAccessLog,
+    RedactQueryTokens,
+    redact_request_target,
+    redact_url,
+)
 
 MEDIA_URL = "https://api.kapso.ai/meta/whatsapp/media_download?token=s3cr3t.abc&x=1"
 
@@ -71,3 +79,109 @@ async def test_a_real_httpx_request_logs_no_token(caplog: pytest.LogCaptureFixtu
     assert "s3cr3t" not in caplog.text
     assert "media_download?token=REDACTED&x=1" in caplog.text
     assert "200 OK" in caplog.text
+
+
+TOKEN = "Zm9vYmFyYmF6cXV4-SECRET_token123"
+
+
+def access_record(target: str, status: int = 200) -> logging.LogRecord:
+    """The shape uvicorn gives its access logger: client, method, target, HTTP version, status."""
+    return logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        __file__,
+        1,
+        '%s - "%s %s HTTP/%s" %d',
+        ("127.0.0.1:5000", "GET", target, "1.1", status),
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("target", "expected"),
+    [
+        (f"/api/o/{TOKEN}", "/api/o/REDACTED"),
+        (f"/api/o/{TOKEN}/assets/1/complete", "/api/o/REDACTED/assets/1/complete"),
+        (
+            f"/api/o/{TOKEN}/instagram/start?ticket=1.sig",
+            "/api/o/REDACTED/instagram/start?ticket=REDACTED",
+        ),
+        (
+            "/oauth/instagram/callback?code=AQD123&state=nonce&error=access_denied",
+            "/oauth/instagram/callback?code=REDACTED&state=REDACTED&error=access_denied",
+        ),
+        ("/health", "/health"),
+        ("/webhooks/whatsapp", "/webhooks/whatsapp"),
+        ("/media/abc.jpg?w=1", "/media/abc.jpg?w=1"),
+    ],
+)
+def test_request_targets_lose_the_token_code_and_state(target: str, expected: str) -> None:
+    assert redact_request_target(target) == expected
+
+
+def test_the_access_filter_masks_a_formatted_access_line() -> None:
+    record = access_record(f"/api/o/{TOKEN}/instagram/connect", status=200)
+
+    assert RedactAccessLog().filter(record) is True
+
+    assert record.getMessage() == (
+        '127.0.0.1:5000 - "GET /api/o/REDACTED/instagram/connect HTTP/1.1" 200'
+    )
+
+
+def test_the_access_filter_ignores_records_that_are_not_access_lines() -> None:
+    record = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 1, "plain %s", ("x",), None
+    )
+
+    assert RedactAccessLog().filter(record) is True
+    assert record.getMessage() == "plain x"
+
+
+async def test_a_real_uvicorn_server_logs_no_token_code_or_state() -> None:
+    """Drives real requests through uvicorn's own access logger, as main.py configures it."""
+    from app.db.session import get_session
+    from app.main import app  # importing it installs the filter on `uvicorn.access`
+
+    lines: list[str] = []
+
+    class Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            lines.append(record.getMessage())
+
+    async def no_database() -> AsyncIterator[None]:
+        # The callback is refused before it queries anything, so no session is ever used.
+        yield None
+
+    app.dependency_overrides[get_session] = no_database
+    capture = Capture()
+    access = logging.getLogger("uvicorn.access")
+    level = access.level
+    access.setLevel(logging.INFO)
+    access.addHandler(capture)
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=0, log_config=None, lifespan="off")
+    )
+    serving = asyncio.create_task(server.serve())
+    try:
+        while not server.started:
+            await asyncio.sleep(0.01)
+        port = server.servers[0].sockets[0].getsockname()[1]
+        async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client:
+            await client.get(f"/api/o/{TOKEN}/not-a-route")
+            await client.get("/oauth/instagram/callback?code=AQD-secret-code&state=secret-state")
+            await client.get("/health")
+    finally:
+        server.should_exit = True
+        await serving
+        access.removeHandler(capture)
+        access.setLevel(level)
+        app.dependency_overrides.pop(get_session, None)
+
+    text = "\n".join(lines)
+    assert len(lines) == 3
+    for secret in (TOKEN, "AQD-secret-code", "secret-state"):
+        assert secret not in text
+    assert 'GET /api/o/REDACTED/not-a-route HTTP/1.1" 404' in text
+    assert "code=REDACTED&state=REDACTED" in text
+    assert 'GET /health HTTP/1.1" 200' in text
