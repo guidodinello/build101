@@ -23,7 +23,7 @@ from app.llm.client import (
     text_content,
     user_step,
 )
-from app.media.images import prepare_reference
+from app.media.images import ImageTooLarge, UnreadableImage, decode, prepare_reference
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts, Post
@@ -39,6 +39,7 @@ from .events import (
     Event,
     PhotosReceived,
     PhotoTooBig,
+    PhotoTooLarge,
     PhotoUnreadable,
     PostApproved,
     PostSent,
@@ -224,8 +225,12 @@ class ChatHandler:
             if len(data) > self._max_photo_mb * BYTES_PER_MB:
                 await self._photo_too_big(message.sender, channel)
                 return
-            reference = await asyncio.to_thread(prepare_reference, data)
-        except (ChannelError, OSError):  # OSError: Pillow can't decode it
+            reference = await decode(prepare_reference, data)
+        except ImageTooLarge:
+            logger.warning("photo %s is over the pixel cap", media.media_id)
+            await self.notify(message.sender, PhotoTooLarge(), channel)
+            return
+        except (ChannelError, UnreadableImage):
             logger.warning("could not read photo %s", media.media_id, exc_info=True)
             await self.notify(message.sender, PhotoUnreadable(), channel)
             return
