@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agents.schemas import BrandBrain
 from app.db.models import AssetProduct, BrandAsset, Business, Product
 from app.jobs.brand import latest_brand_brain
+from app.jobs.niche import latest_trend_notes
 from app.onboarding.uploads import llm_copy_path
 from app.storage import ASSETS_BUCKET, StorageError, StoragePort
 
@@ -124,6 +125,21 @@ class BrandBrains:
             if business_id is None:
                 return None
             return await latest_brand_brain(db, business_id)
+
+
+class NicheTrends:
+    """The trend notes of the Owner's Business's niche (ADR 0025), for the posts made in the
+    chat. Read on every post, so a new week's report applies to the next one."""
+
+    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
+        self._sessions = sessions
+
+    async def latest(self, sender: str) -> str | None:
+        async with self._sessions() as db:
+            business = await db.scalar(select(Business).where(Business.owner_phone == sender))
+            if business is None:
+                return None
+            return await latest_trend_notes(db, business)
 
 
 def describe(asset: BrandAsset, product: str | None) -> str:

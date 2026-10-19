@@ -6,11 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import Business, Job
 
-JobKind = Literal["analyze_asset", "generate_brand", "import_instagram"]
+JobKind = Literal["analyze_asset", "generate_brand", "generate_niche_report", "import_instagram"]
 
 
 def enqueue(
-    session: AsyncSession, kind: JobKind, business_id: uuid.UUID, payload: dict[str, Any]
+    session: AsyncSession, kind: JobKind, business_id: uuid.UUID | None, payload: dict[str, Any]
 ) -> Job:
     """Add a queued job to the session; the runner starts it once the caller commits."""
     job = Job(business_id=business_id, kind=kind, payload=payload)

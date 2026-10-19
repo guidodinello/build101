@@ -15,7 +15,6 @@ erDiagram
     businesses ||--o{ brand_brains : "versions"
     businesses ||--o{ social_accounts : connects
     businesses ||--o{ content_plans : has
-    businesses ||--o{ niche_reports : "weekly"
     businesses ||--o{ posts : has
     businesses ||--o{ messages : "conversation"
     businesses ||--o{ jobs : runs
@@ -31,6 +30,9 @@ erDiagram
     offers ||--o{ offer_products : includes
     products ||--o{ offer_products : "part of"
     offers ||--o{ posts : "promoted by"
+    niche_reports {
+        text niche_id "one report per niche and week, shared by its Businesses"
+    }
 ```
 
 ## Schema
@@ -210,14 +212,16 @@ create table content_plans (
 );
 create index ix_content_plans_business_id_week_start on content_plans (business_id, week_start);
 
--- Weekly Niche Report (Should, ADR 0025): what works in the Business's niche, from grounded web search
+-- Weekly Niche Report (Should, ADR 0025): what works in a niche, from grounded web search. One per
+-- niche, shared by every Business in it; niches live in code (app/agents/data/niches.py), so
+-- niche_id is a plain key, not a foreign key
 create table niche_reports (
   id           uuid primary key default gen_random_uuid(),
-  business_id  uuid not null references businesses(id) on delete cascade,
-  week_start   date not null,                  -- Monday, in the Business's timezone
+  niche_id     text not null,                  -- e.g. 'curated-wood-furniture-uy'
+  week_start   date not null,                  -- Monday, in the niche's timezone
   report       jsonb not null,                 -- NicheReport (agents.md § Niche Analyst)
   created_at   timestamptz not null default now(),
-  unique (business_id, week_start)
+  constraint uq_niche_reports_niche_id_week_start unique (niche_id, week_start)
 );
 
 create table posts (
@@ -367,7 +371,8 @@ create table jobs (
   finished_at  timestamptz,
   created_at   timestamptz not null default now(),
   constraint ck_jobs_kind check (kind in ('analyze_asset','generate_brand','generate_plan',
-    'generate_post','revise_post','redo_slides','publish_post','import_instagram')),
+    'generate_post','revise_post','redo_slides','publish_post','import_instagram',
+    'generate_niche_report')),  -- generate_niche_report: business_id null, payload {"niche_id": ...}
   constraint ck_jobs_status check (status in ('queued','running','succeeded','failed'))
 );
 create index ix_jobs_business_id on jobs (business_id);
@@ -418,3 +423,4 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 | `0001` | The whole schema above as first designed |
 | `0002` | Instagram import ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)): `social_accounts.access_token`, `token_expires_at`, unique on `(business_id, platform, provider)`, RLS on; `brand_assets.external_id` and its partial unique index; job kind `import_instagram` |
 | `0003` | The orchestrator's memory ([ADR 0030](../decisions/0030-orchestrator-memory-and-context.md)): `conversation_steps`, `owner_notes`, `businesses.conversation_summary` |
+| `0004` | Weekly Niche Reports ([ADR 0025](../decisions/0025-weekly-niche-report.md)): `niche_reports`, one per niche and week (the first design had one per Business and was never migrated); job kind `generate_niche_report` |

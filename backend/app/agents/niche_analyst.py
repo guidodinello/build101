@@ -1,4 +1,4 @@
-"""The Niche Analyst: what is working in a Business's niche this week (ADR 0025).
+"""The Niche Analyst: what is working in a niche this week (ADR 0025).
 
 One grounded Gemini call (url_context + google_search) through `app/llm/client.py`, then code
 checks every source: links come from what the tools returned, never from the model's memory.
@@ -7,7 +7,6 @@ checks every source: links come from what the tools returned, never from the mod
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal, Protocol
@@ -67,7 +66,7 @@ class NicheReportDraft(BaseModel):
 class NicheInsight(BaseModel):
     kind: InsightKind
     insight: str  # Spanish, one or two sentences
-    post_idea: str | None  # how this Business could use it
+    post_idea: str | None  # how a business in the niche could use it
     source_urls: list[str] = Field(min_length=1)  # checked against what the tools returned
 
 
@@ -75,16 +74,6 @@ class NicheReport(BaseModel):
     week_start: date
     summary: str  # Spanish, 3–5 lines, for the chat (F3.7)
     insights: list[NicheInsight] = Field(min_length=MIN_INSIGHTS, max_length=MAX_INSIGHTS)
-
-
-@dataclass(frozen=True, slots=True)
-class BusinessProfile:
-    """What the analyst knows about the Business until the Brand Brain exists (T09)."""
-
-    name: str
-    category: str
-    location: str
-    about: str = ""  # products, audience, what sets it apart
 
 
 class RedirectResolver(Protocol):
@@ -116,19 +105,16 @@ class NicheAnalyst:
         self._model = model
         self._redirects = redirects
 
-    async def report(
-        self,
-        business: BusinessProfile,
-        niche: Niche,
-        today: date,
-        owner_websites: list[str] | None = None,
-    ) -> NicheReport:
-        """This week's Niche Report. Raises `LLMError` when too few insights have a source."""
-        websites = reference_websites(niche, owner_websites or [])
+    async def report(self, niche: Niche, today: date) -> NicheReport:
+        """This week's Niche Report of `niche`, the same for every Business in it.
+
+        Raises `LLMError` when too few insights have a source.
+        """
+        websites = reference_websites(niche)
         grounded = await self._model.grounded(
             AGENT,
             SYSTEM_PROMPT,
-            [text_content(request_text(business, niche, websites, today))],
+            [text_content(request_text(niche, websites, today))],
             NicheReportDraft,
             "medium",
             TOOLS,
@@ -158,7 +144,7 @@ class NicheAnalyst:
         return {url: page for url, page in zip(ordered, results, strict=True) if page}
 
 
-def request_text(business: BusinessProfile, niche: Niche, websites: list[str], today: date) -> str:
+def request_text(niche: Niche, websites: list[str], today: date) -> str:
     lines = [
         f"Niche: {niche.description}. Location: {niche.location}.",
         "",
@@ -168,18 +154,15 @@ def request_text(business: BusinessProfile, niche: Niche, websites: list[str], t
         "Search themes (search Google for these, in Spanish):",
         *(f"- {theme}" for theme in niche.search_themes),
         "",
-        f"The business: {business.name}, {business.category}, in {business.location}.",
+        f"Today is {today.isoformat()}. Write this week's Niche Report.",
     ]
-    if business.about:
-        lines.append(f"About it: {business.about}")
-    lines += ["", f"Today is {today.isoformat()}. Write this week's Niche Report."]
     return "\n".join(lines)
 
 
-def reference_websites(niche: Niche, owner_websites: list[str]) -> list[str]:
-    """The niche's sites, then the ones the Owner named, without repeats, up to 20."""
+def reference_websites(niche: Niche) -> list[str]:
+    """The niche's sites without repeats, up to the 20 URL context reads."""
     seen: dict[str, str] = {}
-    for url in [*owner_websites, *niche.reference_websites]:
+    for url in niche.reference_websites:
         if is_web_url(url):
             seen.setdefault(page_key(url), url)
     return list(seen.values())[:MAX_URLS]

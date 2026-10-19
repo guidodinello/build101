@@ -65,7 +65,7 @@ def test_the_context_lists_what_is_known() -> None:
     assert "<brand_summary_sent>\n• *Cómo hablamos:* cálidos\n</brand_summary_sent>" in text
     assert "- Mesa nórdica ($U 12.000): Roble macizo" in text
     assert "<owner_notes>\n- n1: No poner precios\n</owner_notes>" in text
-    assert "<trend_notes>\n- [hook] Pieza heredable\n</trend_notes>" in text
+    assert '<trend_notes>\n[\n "- [hook] Pieza heredable"\n]\n</trend_notes>' in text
     summary = "<conversation_summary>\nPidió un post de la mesa.\n</conversation_summary>"
     assert text.endswith(summary)
 

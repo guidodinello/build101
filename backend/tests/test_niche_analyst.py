@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
@@ -9,7 +9,6 @@ from pydantic import BaseModel
 from app.agents.data.niches import CURATED_WOOD_FURNITURE_UY, Niche
 from app.agents.niche_analyst import (
     TOOLS,
-    BusinessProfile,
     HttpRedirectResolver,
     InsightDraft,
     NicheAnalyst,
@@ -25,7 +24,6 @@ from app.llm.client import Content, Grounded, LLMError, Tool, WebSource
 REDIRECT = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AbC123"
 LOST_REDIRECT = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/Gone"
 ARTICLE = "https://caras.perfil.com/noticias/primavera-2026-una-paleta.phtml"
-BUSINESS = BusinessProfile("Roble & Co", "muebles de madera maciza", "Montevideo")
 MONDAY = date(2026, 10, 12)
 TODAY = date(2026, 10, 18)  # a Sunday
 
@@ -33,6 +31,7 @@ NICHE = Niche(
     id="test",
     description="Solid-wood furniture",
     location="Uruguay",
+    timezone="America/Montevideo",
     reference_websites=("https://www.laiberica.com.uy/", "https://kateiuy.lovable.app"),
     search_themes=("muebles madera maciza Uruguay",),
 )
@@ -100,7 +99,7 @@ async def test_sources_are_checked_and_redirects_resolved() -> None:
         sources=[WebSource("https://blog.example.com/tendencias")],
     )
 
-    report = await analyst.report(BUSINESS, NICHE, TODAY)
+    report = await analyst.report(NICHE, TODAY)
 
     assert [i.source_urls for i in report.insights] == [
         ["https://laiberica.com.uy/ambientes"],
@@ -122,7 +121,7 @@ async def test_an_insight_keeps_its_checked_sources_without_repeats() -> None:
         ]
     )
 
-    report = await analyst.report(BUSINESS, NICHE, TODAY)
+    report = await analyst.report(NICHE, TODAY)
 
     assert [i.source_urls for i in report.insights] == [
         ["https://www.laiberica.com.uy/"],
@@ -137,40 +136,37 @@ async def test_too_few_sourced_insights_is_an_error() -> None:
     )
 
     with pytest.raises(LLMError, match="1 of 2 insights"):
-        await analyst.report(BUSINESS, NICHE, TODAY)
+        await analyst.report(NICHE, TODAY)
 
 
 async def test_at_most_eight_insights_are_kept() -> None:
     analyst, _, _ = analyst_with([insight("https://kateiuy.lovable.app")] * 10)
 
-    report = await analyst.report(BUSINESS, NICHE, TODAY)
+    report = await analyst.report(NICHE, TODAY)
 
     assert len(report.insights) == 8
 
 
-async def test_the_request_names_the_websites_themes_business_and_date() -> None:
+async def test_the_request_names_the_niche_websites_themes_and_date() -> None:
     analyst, model, _ = analyst_with([insight("https://kateiuy.lovable.app")] * 3)
 
-    await analyst.report(BUSINESS, NICHE, TODAY, owner_websites=["https://otra-tienda.uy"])
+    await analyst.report(NICHE, TODAY)
 
     text = model.contents[0][0]["text"]
-    assert "- https://otra-tienda.uy\n- https://www.laiberica.com.uy/" in text
+    assert "Niche: Solid-wood furniture. Location: Uruguay." in text
+    assert "- https://www.laiberica.com.uy/\n- https://kateiuy.lovable.app" in text
     assert "- muebles madera maciza Uruguay" in text
-    assert "Roble & Co, muebles de madera maciza, in Montevideo" in text
     assert "Today is 2026-10-18" in text
-
-
-async def test_a_site_the_owner_named_counts_as_a_source() -> None:
-    analyst, _, _ = analyst_with([insight("https://otra-tienda.uy/blog/roble")] * 3)
-
-    report = await analyst.report(BUSINESS, NICHE, TODAY, owner_websites=["https://otra-tienda.uy"])
-
-    assert report.insights[0].source_urls == ["https://otra-tienda.uy/blog/roble"]
+    assert "business:" not in text.lower()  # one report for the whole niche
 
 
 def test_reference_websites_skip_repeats_and_stop_at_twenty() -> None:
-    owner = [f"https://store{n}.uy" for n in range(25)]
-    websites = reference_websites(CURATED_WOOD_FURNITURE_UY, ["https://laiberica.com.uy", *owner])
+    sites = ("https://laiberica.com.uy", "https://www.laiberica.com.uy/")
+    niche = replace(
+        NICHE, reference_websites=(*sites, *(f"https://store{n}.uy" for n in range(25)))
+    )
+
+    websites = reference_websites(niche)
 
     assert len(websites) == 20
     assert websites[0] == "https://laiberica.com.uy"

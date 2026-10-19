@@ -10,7 +10,8 @@ from app.storage import get_storage
 from .asset import analyze_asset
 from .brand import generate_brand
 from .instagram import import_instagram_job
-from .runner import JobFunction, JobRunner
+from .niche import CHECK_EVERY, enqueue_due_niche_reports, niche_report_job
+from .runner import JobFunction, JobRunner, PeriodicCheck
 
 logger = logging.getLogger(__name__)
 
@@ -45,5 +46,15 @@ def build_job_runner(settings: Settings, channel: ChannelPort) -> JobRunner | No
             settings.instagram_import_max_posts,
             settings.instagram_import_max_images,
         ),
+        # Silent and per niche: no Owner to notify when it fails (ADR 0025).
+        "generate_niche_report": niche_report_job(model),
     }
-    return JobRunner(get_sessionmaker(), jobs, get_storage(), channel, model, NOTIFY_ON_FAILURE)
+    return JobRunner(
+        get_sessionmaker(),
+        jobs,
+        get_storage(),
+        channel,
+        model,
+        NOTIFY_ON_FAILURE,
+        checks=(PeriodicCheck("niche reports", CHECK_EVERY, enqueue_due_niche_reports),),
+    )

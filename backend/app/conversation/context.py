@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agents.schemas import BrandBrain
 from app.db.models import Business, Product
 from app.jobs.brand import latest_brand_brain
+from app.jobs.niche import latest_trend_notes
+from app.prompts import tagged as escaped
 
 from .notes import Note
 
@@ -49,10 +51,12 @@ class OwnerContext:
     catalog: list[CatalogItem] = field(default_factory=list)
     notes: list[Note] = field(default_factory=list)
     summary: str | None = None
+    trend_notes: str | None = None  # the latest Niche Report of the Business's niche
 
 
 class BusinessContexts:
-    """The Business, its latest Brand Brain and its Catalog, read fresh on every turn."""
+    """The Business, its latest Brand Brain, its Catalog and its niche's trend notes, read fresh
+    on every turn."""
 
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self._sessions = sessions
@@ -72,6 +76,7 @@ class BusinessContexts:
                     .limit(MAX_PRODUCTS)
                 )
             ).all()
+            trends = await latest_trend_notes(db, business)
         preferences = business.onboarding_data.get("preferences") or {}
         facts = BusinessFacts(
             name=business.name,
@@ -91,11 +96,14 @@ class BusinessContexts:
             )
             for product in products
         ]
-        return OwnerContext(facts, brand, catalog)
+        return OwnerContext(facts, brand, catalog, trend_notes=trends)
 
 
 def render(context: OwnerContext, trend_notes: str | None = None) -> str:
-    """The blocks the prompt's "What you know" section describes; empty ones are left out."""
+    """The blocks the prompt's "What you know" section describes; empty ones are left out.
+
+    `trend_notes` stand in for the context's own when there is no database (NICHE_REPORT_PATH).
+    """
     blocks: list[str] = []
     if context.business:
         blocks.append(tagged("business", business_lines(context.business)))
@@ -108,8 +116,10 @@ def render(context: OwnerContext, trend_notes: str | None = None) -> str:
     if context.notes:
         lines = "\n".join(f"- {note.id}: {note.text}" for note in context.notes)
         blocks.append(tagged("owner_notes", lines))
-    if trend_notes:
-        blocks.append(tagged("trend_notes", trend_notes))
+    trends = context.trend_notes or trend_notes
+    if trends:
+        # Escaped, unlike the blocks above: the notes come from web pages, not from the Owner.
+        blocks.append(escaped("trend_notes", trends.splitlines()))
     if context.summary:
         blocks.append(tagged("conversation_summary", context.summary))
     return "\n".join(blocks)
