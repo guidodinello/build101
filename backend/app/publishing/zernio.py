@@ -56,7 +56,7 @@ class _Profile(BaseModel):
 
 
 class _Profiles(BaseModel):
-    profiles: list[object] | None = None
+    profiles: Annotated[list[object] | None, BeforeValidator(lambda value: value or None)] = None
 
 
 class _CreatedProfile(BaseModel):

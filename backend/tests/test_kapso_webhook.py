@@ -133,3 +133,26 @@ def test_null_optional_blocks_are_treated_as_absent() -> None:
     assert message.media is not None
     assert message.media.url is None
     assert message.timestamp is None
+
+
+@pytest.mark.parametrize("byte_size", ["12.7", None, {"n": 1}, [1]])
+def test_an_odd_byte_size_degrades_to_absent(byte_size: object) -> None:
+    payload = body("audio")
+    payload["message"]["kapso"]["media_data"] = {"byte_size": byte_size}
+
+    message = parse_message(payload)
+
+    assert message.kind == "audio"
+    assert message.audio is not None
+    assert message.audio.byte_size is None
+    assert message.media is not None
+    assert message.media.byte_size is None
+
+
+def test_a_block_that_does_not_belong_to_the_kind_is_never_validated() -> None:
+    payload = body("text")
+    payload["message"]["image"] = {"caption": 5}
+    payload["message"]["audio"] = "junk"
+    payload["message"]["interactive"] = {"button_reply": {"id": 1}}
+
+    assert parse_message(payload).kind == "text"

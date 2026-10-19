@@ -12,8 +12,9 @@ MESSAGE_RECEIVED_EVENT = "whatsapp.message.received"
 
 
 # Models for the parts of the webhook we read; unknown fields are ignored. Only what a message
-# kind needs is strict (`from`, the ids, the text body, the button, the audio mime type).
-# Everything else degrades to absent, as it always has: null, a wrong type or a non-object block.
+# kind needs is strict (`from`, the ids, the text body, the button, the audio mime type), and a
+# kind's block is validated only for that kind. Everything else degrades to absent, as it always
+# has: null, a wrong type or a non-object block.
 def _str_or_none(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
@@ -32,6 +33,7 @@ def _object_or_none(value: object) -> object:
 
 
 type _Optional[M: BaseModel] = Annotated[M | None, BeforeValidator(_object_or_none)]
+type _Block = Annotated[dict[str, Any] | None, BeforeValidator(_object_or_none)]
 type _OptStr = Annotated[str | None, BeforeValidator(_str_or_none)]
 
 
@@ -42,10 +44,6 @@ class _TextBody(BaseModel):
 class _ButtonReply(BaseModel):
     id: str
     title: str
-
-
-class _Interactive(BaseModel):
-    button_reply: _Optional[_ButtonReply] = None
 
 
 class _Image(BaseModel):
@@ -64,7 +62,7 @@ class _Unsupported(BaseModel):
 
 
 class _MediaData(BaseModel):
-    byte_size: int | None = None
+    byte_size: Annotated[int | None, BeforeValidator(_int_or_none)] = None
 
 
 class _MessageTypeData(BaseModel):
@@ -87,10 +85,10 @@ class _Message(BaseModel):
     sender: str = Field(validation_alias="from")
     type: object = None
     timestamp: Annotated[int | None, BeforeValidator(_int_or_none)] = None
-    text: _Optional[_TextBody] = None
-    interactive: _Optional[_Interactive] = None
-    image: _Optional[_Image] = None
-    audio: _Optional[_Audio] = None
+    text: _Block = None
+    interactive: _Block = None
+    image: _Block = None
+    audio: _Block = None
     unsupported: _Optional[_Unsupported] = None
     kapso: _Optional[_Kapso] = None
 
@@ -131,14 +129,14 @@ def _to_inbound(webhook: _Webhook, raw: dict[str, Any], fallback_id: str | None)
     }
     match message.type:
         case "text":
-            text = _required(message.text, "text")
+            text = _TextBody.model_validate(_required(message.text, "text"))
             return InboundMessage(kind="text", text=text.body, **common)
-        case "interactive" if message.interactive and message.interactive.button_reply:
-            reply = message.interactive.button_reply
+        case "interactive" if "button_reply" in (message.interactive or {}):
+            reply = _ButtonReply.model_validate((message.interactive or {})["button_reply"])
             button = Button(id=reply.id, title=reply.title)
             return InboundMessage(kind="button", button=button, **common)
         case "image":
-            image = _required(message.image, "image")
+            image = _Image.model_validate(_required(message.image, "image"))
             caption = image.caption or (kapso.message_type_data or _MessageTypeData()).caption
             return InboundMessage(
                 kind="image",
@@ -147,7 +145,7 @@ def _to_inbound(webhook: _Webhook, raw: dict[str, Any], fallback_id: str | None)
                 **common,
             )
         case "audio":
-            audio = _required(message.audio, "audio")
+            audio = _Audio.model_validate(_required(message.audio, "audio"))
             transcript = ((kapso.transcript or _Transcript()).text or "").strip()
             return InboundMessage(
                 kind="audio",

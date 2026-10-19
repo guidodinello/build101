@@ -171,13 +171,13 @@ async def test_a_token_answer_without_an_access_token_is_an_instagram_error() ->
 
 async def test_null_and_odd_optional_fields_degrade_instead_of_failing() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.instagram.com":
+            return httpx.Response(200, json={"access_token": "short", "user_id": None})
         if request.url.path.endswith("/access_token"):
             return httpx.Response(200, json={"access_token": "long", "expires_in": "soon"})
         if request.url.path.endswith("/me/media"):
             item = {"id": "5", "media_type": "IMAGE", "children": None, "media_url": "https://x/5"}
             return httpx.Response(200, json={"data": ["junk", item], "paging": None})
-        if request.url.host == "api.instagram.com":
-            return httpx.Response(200, json={"access_token": "short", "user_id": None})
         return httpx.Response(200, json={"user_id": None, "id": 99, "username": "katei"})
 
     client, _ = instagram(handler)

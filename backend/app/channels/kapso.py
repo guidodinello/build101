@@ -1,7 +1,7 @@
-from typing import Any, Self
+from typing import Annotated, Any, Self
 
 import httpx
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, BeforeValidator, Field, ValidationError
 
 from .base import Button, ChannelError
 from .whatsapp_format import to_whatsapp
@@ -11,9 +11,13 @@ MAX_BUTTONS = 3
 
 
 # Kapso's answers, as far as we read them; unknown fields are ignored
+def _str_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
 class _MediaInfo(BaseModel):
-    download_url: str | None = None
-    mime_type: str | None = None
+    download_url: Annotated[str | None, BeforeValidator(_str_or_none)] = None
+    mime_type: Annotated[str | None, BeforeValidator(_str_or_none)] = None
 
 
 class _SentMessage(BaseModel):
