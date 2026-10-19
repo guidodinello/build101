@@ -84,7 +84,7 @@ Not every change walks all seven steps: a typo fix goes straight to 5. Anything 
   2. [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`, ...). Keep PRs small.
   3. New dependency or integration: read the official docs first, pin the version, and record an ADR if it is a stack choice or carries lock-in.
   4. Follow the matching rule file in [`.claude/rules/`](.claude/rules/README.md) (Python, database, Docker, CI). Claude Code loads them automatically; everyone else reads the one matching the files they touch.
-  5. Backend commands run from `backend/` (per [python.md](.claude/rules/python.md)): `uv run ruff check .` clean and `uv run pytest tests/ -v` green before committing; never call `python3` directly, use `uv run python`.
+  5. Backend commands run from `backend/` (per [python.md](.claude/rules/python.md)): `uv run ruff check .` clean, `uv run pyright` at 0 errors and `uv run pytest tests/ -v` green before committing; never call `python3` directly, use `uv run python`.
 - **Done when**: acceptance criteria met, lint clean, tests green, and the `CI` check is green on the PR.
 - **With Claude Code**: `configure-dependency` for new dependencies (writes the ADR when it implies a stack choice). Frontend work: `impeccable` for design (`/impeccable init` once to write `PRODUCT.md`, then `shape` before building and `polish` before the PR), `shadcn` for components, `vercel-react-best-practices` while writing React, `next-dev-loop` to verify each change in the running app, and `web-design-guidelines` as a UI/accessibility check before opening the PR. **Without it**: same steps by hand.
 

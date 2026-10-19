@@ -242,12 +242,13 @@ class GeminiChat:
         except (GeminiNextGenAPIClientError, errors.APIError, httpx.HTTPError) as exc:
             raise LLMError(f"{agent}: {exc}") from exc
 
-        usage = interaction.usage
+        # `**options: Any` hides the non-stream overload from pyright: typed in #95
+        usage = interaction.usage  # pyright: ignore[reportAttributeAccessIssue]
         logger.info(
             "llm agent=%s model=%s status=%s in=%s out=%s thought=%s latency_ms=%d",
             agent,
             self._model,
-            interaction.status,
+            interaction.status,  # pyright: ignore[reportAttributeAccessIssue]
             usage.total_input_tokens if usage else None,
             usage.total_output_tokens if usage else None,
             usage.total_thought_tokens if usage else None,
