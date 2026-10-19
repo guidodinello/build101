@@ -17,7 +17,7 @@ from app.channels.base import Button, ChannelError
 from app.imagegen.base import GeneratedImage
 from app.llm.client import Content, FunctionCall, LLMError, Reply, Step, Tool
 from app.publishing.base import PublishMedia, PublishResult
-from app.storage import SignedUpload
+from app.storage import ObjectTooLarge, SignedUpload
 from tests.conftest import make_image
 
 
@@ -39,6 +39,7 @@ class FakeChannel:
     sent: list[tuple[str, str]] = field(default_factory=list)
     images: list[tuple[str, str, str | None]] = field(default_factory=list)
     buttons: list[tuple[str, str, list[str]]] = field(default_factory=list)
+    video_headers: list[str | None] = field(default_factory=list)
     read: list[tuple[str, bool]] = field(default_factory=list)
     downloads: list[str] = field(default_factory=list)
     media: bytes = field(default_factory=lambda: make_image((800, 1000)))
@@ -63,6 +64,7 @@ class FakeChannel:
         # The body is a message the Owner reads, in order with the rest: `sent` keeps it too.
         self.sent.append((to, body))
         self.buttons.append((to, body, [button.id for button in buttons]))
+        self.video_headers.append(header_video_url)
         return "wamid.BTN"
 
     async def mark_read(self, message_id: str, typing: bool = False) -> None:
@@ -202,8 +204,13 @@ class FakeStorage:
     async def create_signed_upload_url(self, bucket: str, path: str) -> SignedUpload:
         return SignedUpload(url=f"https://storage.test/upload/{bucket}/{path}?token=t", token="t")
 
-    async def download(self, bucket: str, path: str) -> bytes | None:
-        return self.objects.get(f"{bucket}/{path}")
+    async def download(
+        self, bucket: str, path: str, *, max_bytes: int | None = None
+    ) -> bytes | None:
+        data = self.objects.get(f"{bucket}/{path}")
+        if data is not None and max_bytes is not None and len(data) > max_bytes:
+            raise ObjectTooLarge(f"object is over {max_bytes} bytes")
+        return data
 
     async def upload(self, bucket: str, path: str, data: bytes, content_type: str) -> None:
         self.objects[f"{bucket}/{path}"] = data
@@ -217,6 +224,23 @@ class FakeStorage:
             for path in paths
             if f"{bucket}/{path}" in self.objects
         }
+
+    async def remove(self, bucket: str, paths: list[str]) -> None:
+        for path in paths:
+            self.objects.pop(f"{bucket}/{path}", None)
+            self.content_types.pop(f"{bucket}/{path}", None)
+
+
+class CountingStorage(FakeStorage):
+    """FakeStorage that counts the downloads asked of it."""
+
+    downloads: int = 0
+
+    async def download(
+        self, bucket: str, path: str, *, max_bytes: int | None = None
+    ) -> bytes | None:
+        self.downloads += 1
+        return await super().download(bucket, path, max_bytes=max_bytes)
 
 
 def brand_brain(**changes: Any) -> BrandBrain:

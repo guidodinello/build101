@@ -51,4 +51,5 @@ When an ADR is superseded, set its Status to `superseded`, add `- Superseded by:
 | [0030](0030-orchestrator-memory-and-context.md) | The orchestrator's memory and context | proposed | 2026-10-18 |
 | [0031](0031-pricing-free-basic-pro.md) | Launch pricing is Free, Basic US$29 and Pro US$49 | proposed | 2026-10-18 |
 | [0032](0032-instagram-first-onboarding.md) | Connect Instagram early in the wizard and let it answer for the Owner | proposed | 2026-10-18 |
+| [0033](0033-ai-generated-reels-veo.md) | AI-generated Reels from a product image with Veo, behind a flag (amends 0012) | proposed | 2026-10-19 |
 | [0034](0034-zod-api-response-schemas.md) | Check backend responses in the frontend with Zod schemas | proposed | 2026-10-19 |

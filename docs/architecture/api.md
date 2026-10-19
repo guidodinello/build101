@@ -44,22 +44,23 @@ All under `/api/o/{token}`. The token is the onboarding magic link. The Instagra
 | PUT | `/api/o/{token}/business` | `{name, category, one_liner, location?, description?, website?, instagram_handle?}` | `OnboardingState`. `description`, `website` and `instagram_handle` left out keep their value, so a save doesn't erase what the Instagram import filled in; the wizard no longer asks for the handle (the connect fills it) |
 | PUT | `/api/o/{token}/products` | `{products: [{id?, name, description, price?, category?, asset_ids?}]}` (1–5) | `OnboardingState`: upserts `products` rows in the given order; rows left out are archived. `asset_ids` (≤ 5, ready photos of this Business) replaces the Owner's links of that Product in `asset_products` (`source = 'owner'`; the Asset Analyst's links stay); left out, the links don't change. More than 5 Products → `422 too_many_products`; more than 5 photos → `422 too_many_product_photos`; an id that isn't a ready photo of the Business → `422 unknown_asset` |
 | PUT | `/api/o/{token}/brand` | `{three_words: [str] (1–3), colors: [hex...], no_brand_yet?: bool}` | `OnboardingState`. `no_brand_yet = true` ("Todavía no tengo logo ni colores") allows an empty `colors` list; the Brand Strategist uses the neutral default palette, and the colors are chosen later in the chat (F2.9, Could) |
-| POST | `/api/o/{token}/uploads` | `UploadRequest` (below) | `UploadTicket`: see [Uploads](#uploads). The wizard accepts `logo` and `photo` only, at most 15 photos (`422 too_many_photos`) |
+| POST | `/api/o/{token}/uploads` | `UploadRequest` (below) | `UploadTicket`: see [Uploads](#uploads). The wizard accepts `logo` and `photo` only. Caps per Business: 15 photos and 3 logos in use (`422 too_many_photos` / `422 too_many_logos`), and 30 photos and 10 logos uploaded over its lifetime, deleted ones included, so deleting never frees an unlimited number of uploads (same codes, with their own `message`) |
 | POST | `/api/o/{token}/assets/{asset_id}/complete` | — | `Asset` (logo includes `palette`) |
-| DELETE | `/api/o/{token}/assets/{asset_id}` | — | `204`: archives the asset (the ✕ on a wizard thumbnail) |
+| DELETE | `/api/o/{token}/assets/{asset_id}` | — | `204`: archives the asset (the ✕ on a wizard thumbnail) and deletes its files from Storage (the original, the JPEG made from a HEIC, and the agents' copy); a Storage failure is logged and doesn't change the `204` |
 | PUT | `/api/o/{token}/preferences` | `Questionnaire` (below) | `OnboardingState` |
-| POST | `/api/o/{token}/instagram/connect` | `{}` | `{"auth_url": "..."}`: Instagram's authorize URL for our Meta app (scope `instagram_business_basic`), with `redirect_uri = {PUBLIC_BACKEND_URL}/oauth/instagram/callback` and a signed `state` valid 15 minutes. With `INSTAGRAM=mock` the URL points straight at the callback with a fake code. `409 onboarding_completed` after `/complete` |
+| POST | `/api/o/{token}/instagram/connect` | `{}` | `{"auth_url": "..."}`: the backend's own start hop, `{PUBLIC_BACKEND_URL}/api/o/{token}/instagram/start?ticket=...`, which the wizard navigates to (`window.location.assign`). The ticket is signed, bound to the link and valid 2 minutes. `409 onboarding_completed` after `/complete` |
+| GET | `/api/o/{token}/instagram/start` | `ticket` | `303` to Instagram's authorize URL for our Meta app (scope `instagram_business_basic`, `redirect_uri = {PUBLIC_BACKEND_URL}/oauth/instagram/callback`), with a random `state` (a nonce: no magic-link token in it) and a `Set-Cookie: ig_oauth=...` (HttpOnly, SameSite=Lax, `Secure` on https, `Path=/oauth/instagram`, 15 minutes) that binds the callback to this browser. With `INSTAGRAM=mock` the redirect points straight at the callback with a fake code. A forged, foreign or expired ticket is `400 invalid_state`; `409 onboarding_completed` after `/complete`. Why a hop: a cookie set by the wizard's cross-site `fetch` to `/connect` is dropped by Safari and iOS, while a top-level navigation sets a first-party cookie that Instagram's redirect back carries |
 | POST | `/api/o/{token}/complete` | — | `202 {"status": "generating_brand"}`. Validates required fields (name, category, 1–5 products, at least 3 ready photos counting the ones imported from Instagram, at most 15 uploaded from the web; logo optional but recommended), sets state, enqueues `generate_brand`, sends `brand_generating` on WhatsApp. Calling it again after it succeeded returns `202` and does nothing |
 
 The Instagram callback is not under `/api/o/{token}`: Meta redirects the browser to one fixed URL, registered in the app.
 
 | Method | Path | Query | Response |
 |---|---|---|---|
-| GET | `/oauth/instagram/callback` | `code`, `state`, or `error` when the Owner refused | `303` to `{FRONTEND_URL}/o/{token}?step=instagram&connected=1` after exchanging the code for a long-lived token, upserting `social_accounts` (`provider = 'meta'`, `status = 'connected'`, `handle`), filling `businesses.instagram_handle` if empty and enqueuing `import_instagram`. `connected=0` when the Owner refused or Meta failed. A forged or expired `state` is `400 invalid_state`; the link's own errors (`404`, `410`) as below. When the link's onboarding is already completed it changes nothing (no account, no import) and redirects to `{FRONTEND_URL}/o/{token}`, which shows the done screen |
+| GET | `/oauth/instagram/callback` | `code`, `state`, or `error` when the Owner refused | `303` to `{FRONTEND_URL}/o/{token}?step=instagram&connected=1` after exchanging the code for a long-lived token, upserting `social_accounts` (`provider = 'meta'`, `status = 'connected'`, `handle`), filling `businesses.instagram_handle` if empty and enqueuing `import_instagram`. `connected=0` when the Owner refused or Meta failed. The callback requires the `ig_oauth` cookie: it takes the magic-link token from it (signed with the app secret, never from `state`) and its nonce must equal `state`. A missing, forged, expired or foreign cookie, or a `state` that doesn't match it, is `400 invalid_state`; the cookie is cleared on every outcome of the callback, errors included. The link's own errors (`404`, `410`) as below. When the link's onboarding is already completed it changes nothing (no account, no import) and redirects to `{FRONTEND_URL}/o/{token}`, which shows the done screen |
 
 The wizard's `assets` list the Owner's uploads (`source = 'web'`) and the photos imported from Instagram (`source = 'instagram'`, photos only). Imported photos show in the wizard's photo step, where the Owner can drop any of them (`DELETE …/assets/{id}`), and count toward the minimum of 3; the cap of 15 applies to web uploads only. `instagram` in `OnboardingState` is the Business's latest `social_accounts` row for Instagram (`not_connected` when there is none).
 
-Link errors: an unknown token is `404 link_not_found`, an expired one `410 link_expired`, and every write after `/complete` succeeded is `409 onboarding_completed` (`GET` still works and shows `completed: true`). A body that doesn't validate is `422 invalid_request`; a Supabase Storage failure is `502 storage_unavailable`.
+Link errors: an unknown token is `404 link_not_found`, an expired one `410 link_expired`, and every write after `/complete` succeeded is `409 onboarding_completed`, through any onboarding link of the Business, including ones never used (`GET` still works and shows `completed: true`). A body that doesn't validate is `422 invalid_request`; a Supabase Storage failure is `502 storage_unavailable`.
 
 ```ts
 type OnboardingState = {
@@ -117,7 +118,7 @@ The wizard (`/api/o/{token}`, Must, photos and logo only) and the dashboard (`/a
 | Method | Path | Body | Response |
 |---|---|---|---|
 | POST | `/api/{o\|b}/{token}/uploads` | `UploadRequest` | `UploadTicket`. Validates type and size, creates a `brand_assets` row with `status = 'uploading'`, returns a signed upload URL for `assets/{business_id}/{asset_id}.{ext}` |
-| POST | `/api/{o\|b}/{token}/assets/{asset_id}/complete` | — | `Asset`. Only assets uploaded through `/uploads` (the web form) can be completed; any other asset (imported from Instagram, kept from a WhatsApp chat) is `404 asset_not_found`, like an unknown or archived one. Checks the object exists in Storage (else `409 upload_missing`), sets `status = 'ready'` and `size_bytes`, converts HEIC to JPEG (`pillow-heif`), writes the copy the agents read (`{asset_id}-llm.jpg`, ≤ 1536 px), runs logo palette extraction synchronously, enqueues `analyze_asset` for photos and videos. A file that isn't an image, or is over the limit once uploaded, is `422 unsupported_file` and the asset `failed` |
+| POST | `/api/{o\|b}/{token}/assets/{asset_id}/complete` | — | `Asset`. Only assets uploaded through `/uploads` (the web form) can be completed; any other asset (imported from Instagram, kept from a WhatsApp chat) is `404 asset_not_found`, like an unknown or archived one. Checks the object exists in Storage (else `409 upload_missing`), sets `status = 'ready'` and `size_bytes`, converts HEIC to JPEG (`pillow-heif`), writes the copy the agents read (`{asset_id}-llm.jpg`, ≤ 1536 px), runs logo palette extraction synchronously, enqueues `analyze_asset` for photos and videos. A file that isn't an image, or is over the limit once uploaded, is `422 unsupported_file` and the asset `failed`; the object is read as a stream and dropped as soon as it passes the limit, so it is never held whole in memory. An image over 25 megapixels is `422 image_too_large` (also `failed`). A `failed` asset answers `422 unsupported_file` again without being read, so the Owner uploads a new file |
 
 1. `POST .../uploads` → `UploadTicket`.
 2. The browser uploads to `upload_url`: a single `PUT` when `resumable = false`, or TUS with `x-signature: upload_token` when `resumable = true`. Photos and logos (≤ 10 MB) are always `resumable = false`; TUS is only for videos (Could).
@@ -130,7 +131,7 @@ Accepted files:
 | `photo`, `logo` | `image/jpeg`, `image/png`, `image/webp`, `image/heic` | 10 MB |
 | `video` (Could: dashboard only, not the wizard) | `video/mp4`, `video/quicktime` (MOV) | 300 MB |
 
-Anything else → `422 unsupported_file` with a Spanish `message` the UI shows as is. Video duration and size in pixels are read with `ffprobe` during `analyze_asset`, not at upload.
+Anything else → `422 unsupported_file` with a Spanish `message` the UI shows as is. The bytes must be the declared type: `/complete` opens the file with only that format enabled, so a TIFF declared as `image/png` is `422 unsupported_file` and the asset `failed`. Video duration and size in pixels are read with `ffprobe` during `analyze_asset`, not at upload.
 
 ```ts
 type UploadRequest = { kind: "logo" | "photo" | "video"; filename: string; content_type: string;
@@ -186,6 +187,8 @@ type SimMessage = {
 ## Button IDs
 
 Free-text approvals ("subilo", "publicalo") reach the same handlers through the orchestrator's `approve_post` tool ([agents.md](agents.md#conversation-rules)). Format: `<action>:<entity_id>`, or `<action>:<entity_id>:<n>` for `variation_pick` (≤ 256 chars). Parsed by `conversation/button_router.py`. Unknown or stale IDs (entity in a state that doesn't allow the action) → send `stale_button` and do nothing else.
+
+**Video Posts** (`create_video`, [agents.md](agents.md#when-video-generation-runs)) reuse the `post_*` IDs below with no new button: the video message carries `post_approve`, `post_change` and `post_discard` with the video Post's id and the clip as the header (`send_buttons(header_video_url=...)`). `post_publish` publishes it as a Reel (`PublishMedia.format = "reel"`, `ai_generated = true`). `post_replace` after discarding a video makes another video from the same photo (it counts against the daily video limit) and is one-shot: the discarded video becomes `replaced`, so a second tap is stale and cannot bill another clip. The original image Post is untouched. `post_change` on a video has no revise: the Owner asks for another take by writing.
 
 | ID | Allowed when | Handler |
 |---|---|---|
@@ -297,7 +300,13 @@ class PublishMedia(BaseModel):
     format: Literal["image", "reel", "carousel"]
     url: str | None                    # image/reel: public or long-lived signed URL of the picked variation or the Owner's video
     urls: list[str] = []               # carousel, in slide order, ≤ 10 JPEGs (ADR 0022)
-    cover_offset_ms: int | None = None # reel only
+    cover_offset_ms: int | None = None # reel only: ms into the video for the cover; Zernio `thumbOffset`, ≥ 0
+    ai_generated: bool = False         # any format: Zernio `isAiGenerated`, Instagram's "AI-generated" label; sent only when true
+
+# ZernioPublisher mapping: image/carousel → image mediaItems; reel → one {"type": "video", "url"} item,
+# no contentType (a single video publishes as a Reel). A reel without `url`, or with a negative
+# `cover_offset_ms`, raises ValueError before any request. Reels can take a minute or more to
+# process, so the result may come back `pending` (same poll as images).
 
 # app/imagegen/base.py  (ADR 0018, 0019; IMAGE_GEN = gemini | openai | mock)
 class GeneratedImage(BaseModel):
@@ -313,6 +322,37 @@ class ImageGenPort(Protocol):
                        style_image: bytes | None = None, *, aspect_ratio: str | None = None,
                        image_size: str | None = None) -> GeneratedImage: ...   # one image per call; style_image = carousel anchor; ratio/size override 4:5 (panorama)
 # errors: ImageGenError (base), ImageGenBlocked(reason), ImageGenNoImage, ImageGenUnavailable
+
+# app/videogen/base.py  (ADR 0033; VIDEO_GEN = gemini | mock, only built when VIDEO_GEN_ENABLED=true)
+class GeneratedVideo(BaseModel):
+    data: bytes                        # an MP4
+    mime: str                          # video/mp4
+    provider: str                      # gemini | mock
+    model: str | None
+    duration_seconds: int              # Veo bills per second
+
+class VideoGenPort(Protocol):
+    async def generate(self, prompt: str, reference_images: list[bytes], *,
+                       aspect_ratio: str = "9:16", duration_seconds: int = 8) -> GeneratedVideo: ...
+    # one clip per call; ratio 9:16 | 16:9, duration 4 | 6 | 8 (anything else: ValueError, no call made).
+    # Lite (default model): reference_images[0] is the first frame, the rest are dropped.
+    # Fast/Standard: up to 3 ASSET references, which force 8 s.
+# errors: VideoGenError (base), VideoGenBlocked(reason), VideoGenNoVideo, VideoGenRejected (4xx
+#         except 408/429: the request was refused), VideoGenUnavailable (5xx, 408, 429, network,
+#         failed operation), VideoGenTimeout (a VideoGenUnavailable)
+# Never auto-retry generate(): a timeout abandons an operation Google may still finish and bill,
+# so a retry can bill a second clip. Only VideoGenBlocked is known not to bill. Surface the error.
+# person_generation: "allow_adult" is sent only with a first frame or references; text-only calls
+# leave it unset (Veo accepts only "allow_all" there, the default).
+# app/videogen/factory.py: build_video_gen(settings) -> VideoGenPort | None   # None while the flag is off
+
+# app/media/public.py  (MP4s next to the JPEGs; in memory, lost on restart)
+class PublicVideos:
+    def add(self, data: bytes) -> str: ...            # "/media/{token}.mp4", relative to the public URL
+    def keep(self, path: str, data: bytes) -> None: ... # serve again as the newest; cap 20 clips
+    def serve_from(self, lookup: Callable[[str], bytes | None]) -> None: ...  # wired with InMemoryPosts.video
+    def get(self, token: str) -> bytes | None: ...    # cache, else the clip of a Post still in the store
+# GET | HEAD /media/{token}.mp4 -> video/mp4 (no Range support yet)
 
 # app/media/images.py
 def to_post_image(data: bytes) -> bytes: ...       # center-crop to 4:5 and resize to 1080x1350 JPEG

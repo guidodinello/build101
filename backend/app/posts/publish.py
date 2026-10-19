@@ -9,7 +9,7 @@ from app.channels.base import ChannelPort
 from app.channels.inbound import mask
 from app.conversation.approval import Approval
 from app.conversation.events import Event, Notify, Published, PublishFailed, PublishPending
-from app.media.public import PublicImages
+from app.media.public import PublicImages, PublicVideos
 from app.publishing.base import (
     PublisherError,
     PublisherPort,
@@ -54,10 +54,13 @@ class PostPublisher:
         public_base_url: str,
         account_id: str | None,
         sleep: Sleep = asyncio.sleep,
+        *,
+        videos: PublicVideos | None = None,
     ) -> None:
         self._publisher = publisher
         self._posts = posts
         self._images = images
+        self._videos = videos or PublicVideos()
         self._public_base_url = public_base_url.rstrip("/")
         self._account_id = account_id
         self._sleep = sleep
@@ -125,23 +128,33 @@ class PostPublisher:
             result = PublishResult(status="failed", error="unexpected error")
         await self._finish(post, result, channel)
 
+    def _media(self, post: Post) -> PublishMedia:
+        if post.video is not None:
+            return PublishMedia(
+                format="reel",
+                url=self._public_base_url + post.video.path,
+                cover_offset_ms=post.video_cover_offset_ms,
+                ai_generated=True,  # every Post.video is a Veo clip (ADR 0033): Instagram labels it
+            )
+        urls = [self._public_base_url + image.path for image in post.images]
+        if post.format == "image":
+            return PublishMedia(format="image", url=urls[0])
+        return PublishMedia(format="carousel", urls=urls)
+
     async def _attempt(self, post: Post, account_id: str) -> PublishResult:
         """Publish with the same idempotency key every time, so a retry can't post twice.
 
         Only a definite failure comes back as `failed`. When the outcome stays unknown (timeouts,
         5xx, a request still in flight) the post may be live, so that is `pending`.
         """
-        urls = [self._public_base_url + image.path for image in post.images]
-        media = (
-            PublishMedia(format="image", url=urls[0])
-            if post.format == "image"
-            else PublishMedia(format="carousel", urls=urls)
-        )
+        media = self._media(post)
         uncertain: PublisherError | None = None
         retried = False
         for attempt in range(1, MAX_PUBLISH_ATTEMPTS + 1):
             for image in post.images:  # still served, however many images came after it
                 self._images.keep(image.path, image.data)
+            if post.video is not None:
+                self._videos.keep(post.video.path, post.video.data)
             try:
                 return await self._publisher.publish(
                     account_id, post.caption, media, idempotency_key=post.idempotency_key

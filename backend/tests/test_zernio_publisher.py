@@ -167,11 +167,119 @@ async def test_image_needs_a_url() -> None:
         await publisher.publish(ACCOUNT_ID, "x", PublishMedia(format="image"))
 
 
-async def test_reel_and_scheduling_are_not_built() -> None:
+REEL = PublishMedia(format="reel", url="https://video.test/1.mp4", cover_offset_ms=4200)
+
+
+async def test_publish_reel_sends_one_video_with_its_cover_offset() -> None:
+    publisher, requests = publisher_with(
+        respond(201, post_body("published", platformPostUrl=PERMALINK))
+    )
+
+    result = await publisher.publish(ACCOUNT_ID, "hola", REEL)
+
+    assert result.status == "published"
+    [request] = requests
+    assert json.loads(request.content) == {
+        "content": "hola",
+        "mediaItems": [{"type": "video", "url": "https://video.test/1.mp4"}],
+        "platforms": [
+            {
+                "platform": "instagram",
+                "accountId": ACCOUNT_ID,
+                "platformSpecificData": {"thumbOffset": 4200},
+            }
+        ],
+        "publishNow": True,
+    }
+
+
+async def test_reel_without_a_cover_offset_sends_no_platform_data() -> None:
+    publisher, requests = publisher_with(
+        respond(201, post_body("published", platformPostUrl=PERMALINK))
+    )
+
+    await publisher.publish(
+        ACCOUNT_ID, "x", PublishMedia(format="reel", url="https://video.test/1.mp4")
+    )
+
+    [target] = json.loads(requests[0].content)["platforms"]
+    assert target == {"platform": "instagram", "accountId": ACCOUNT_ID}
+
+
+@pytest.mark.parametrize("media", [REEL, IMAGE])
+async def test_ai_generated_adds_the_instagram_label(media: PublishMedia) -> None:
+    publisher, requests = publisher_with(
+        respond(201, post_body("published", platformPostUrl=PERMALINK))
+    )
+
+    await publisher.publish(ACCOUNT_ID, "x", media.model_copy(update={"ai_generated": True}))
+
+    [target] = json.loads(requests[0].content)["platforms"]
+    assert target["platformSpecificData"]["isAiGenerated"] is True
+
+
+async def test_ai_generated_is_off_by_default() -> None:
+    publisher, requests = publisher_with(
+        respond(201, post_body("published", platformPostUrl=PERMALINK))
+    )
+
+    await publisher.publish(ACCOUNT_ID, "x", IMAGE)
+
+    [target] = json.loads(requests[0].content)["platforms"]
+    assert "platformSpecificData" not in target
+
+
+@pytest.mark.parametrize(
+    ("media", "message"),
+    [
+        (PublishMedia(format="reel"), "media.url"),
+        (PublishMedia(format="reel", url="https://video.test/1.mp4", cover_offset_ms=-1), ">= 0"),
+    ],
+)
+async def test_invalid_reel_is_rejected_before_any_request(
+    media: PublishMedia, message: str
+) -> None:
+    publisher, requests = publisher_with(respond(201, {}))
+
+    with pytest.raises(ValueError, match=message):
+        await publisher.publish(ACCOUNT_ID, "x", media)
+    assert requests == []
+
+
+async def test_reel_207_failure_is_reported_as_failed() -> None:
+    publisher, _ = publisher_with(
+        respond(207, post_body("failed", platform_status="failed", errorMessage="bad video"))
+    )
+
+    result = await publisher.publish(ACCOUNT_ID, "x", REEL)
+
+    assert (result.status, result.error) == ("failed", "bad video")
+
+
+async def test_reel_still_publishing_is_polled_until_published() -> None:
+    publisher, requests = publisher_with(
+        scripted(
+            reply(201, post_body("publishing", platform_status="processing")),
+            reply(200, post_body("published", platformPostUrl=PERMALINK)),
+        )
+    )
+
+    result = await publisher.publish(ACCOUNT_ID, "x", REEL)
+
+    assert result.status == "published"
+    assert len(posts(requests, "POST")) == 1
+
+
+async def test_reel_server_error_is_retryable() -> None:
+    publisher, _ = publisher_with(respond(502, {"error": "bad gateway"}))
+
+    with pytest.raises(PublishRetryable):
+        await publisher.publish(ACCOUNT_ID, "x", REEL)
+
+
+async def test_scheduling_is_not_built() -> None:
     publisher, _ = publisher_with(respond(201, {}))
 
-    with pytest.raises(NotImplementedError, match="reels"):
-        await publisher.publish(ACCOUNT_ID, "x", PublishMedia(format="reel", url="u"))
     with pytest.raises(NotImplementedError, match="T30"):
         await publisher.publish(ACCOUNT_ID, "x", IMAGE, when=datetime.now(UTC))
 
