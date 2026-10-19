@@ -36,6 +36,7 @@ from .onboarding import (
     SettingsDep,
     get_onboarding,
     get_open_onboarding,
+    is_submitted,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,7 @@ async def start_instagram(
     except InvalidState as exc:
         logger.warning("instagram start with a bad ticket: %s", exc)
         raise ApiError(400, "invalid_state", CONNECT_EXPIRED) from None
-    await get_open_onboarding(await get_onboarding(token, session))
+    await get_open_onboarding(await get_onboarding(token, session), session)
     nonce, cookie = new_binding(token, secret)
     response = RedirectResponse(
         instagram.authorize_url(_redirect_uri(request, settings), nonce), status_code=303
@@ -149,7 +150,9 @@ async def _finish_connect(
     onboarding = await get_onboarding(token, session)
     business = onboarding.business
     wizard = onboarding_url(settings.frontend_url, token)
-    if onboarding.link.completed_at is not None:
+    # Locked before the check, as in get_open_onboarding: a submit in flight finishes first.
+    await session.refresh(business, with_for_update=True)
+    if await is_submitted(session, business.id):
         # Same rule as the connect endpoint: a submitted form takes no more answers, and the
         # Brand Brain it started would never see this import (ADR 0032).
         logger.info("instagram callback for %s after the onboarding was completed", business.id)

@@ -296,6 +296,31 @@ async def test_analyze_asset_fails_without_the_agents_copy(
         )
 
 
+async def test_analyze_asset_skips_a_photo_archived_after_the_job_started(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    class ArchivedMidJob(FakeStorage):
+        """The Owner's ✕ lands after the job read the asset: its files are gone."""
+
+        async def download(
+            self, bucket: str, path: str, *, max_bytes: int | None = None
+        ) -> bytes | None:
+            async with sessions() as db:
+                (await db.get_one(BrandAsset, asset.id)).archived_at = datetime.now(UTC)
+                await db.commit()
+            self.objects.clear()
+            return await super().download(bucket, path, max_bytes=max_bytes)
+
+    business, storage = await add_business(sessions), ArchivedMidJob()
+    asset = await add_photo(sessions, business, storage)
+
+    result = await analyze_asset(
+        context(sessions, business, SequenceModel([]), storage), {"asset_id": str(asset.id)}
+    )
+
+    assert result == {"skipped": "archived while queued"}
+
+
 async def test_generate_brand_saves_a_version_and_asks_the_owner(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:

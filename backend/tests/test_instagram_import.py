@@ -22,6 +22,7 @@ from app.instagram.oauth_state import sign_ticket
 from app.jobs.instagram import import_instagram_job
 from app.jobs.runner import JobContext
 from app.main import app
+from app.onboarding.links import hash_token
 from app.storage import get_storage
 from tests.conftest import requires_db
 from tests.fakes import FakeChannel, FakeStorage, SequenceModel
@@ -633,3 +634,84 @@ async def test_imported_photos_show_in_the_wizard_without_taking_upload_slots(
     sources = [asset["source"] for asset in state["assets"]]
     assert sorted(sources) == ["instagram"] * 5 + ["web"]
     assert {asset["kind"] for asset in state["assets"]} == {"photo"}
+
+
+async def submit_through(sessions: async_sessionmaker[AsyncSession], token: str) -> None:
+    """What `/complete` leaves behind on the link it was called with."""
+    async with sessions() as db:
+        link = await db.scalar(select(MagicLink).where(MagicLink.token_hash == hash_token(token)))
+        assert link is not None
+        link.completed_at = datetime.now(UTC)
+        await db.commit()
+
+
+async def test_a_callback_through_a_sibling_link_after_submitting_changes_nothing(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    first = await new_link(client)
+    second = await new_link(client)
+    started = await start(client, second)
+    await submit_through(sessions, first)
+
+    response = await client.get(
+        urlsplit(started.headers["location"]).path,
+        params=callback_params(started, code="c"),
+        headers=binding_cookie(started),
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"{FRONTEND}/o/{second}"
+    assert_cookie_cleared(response)
+    async with sessions() as db:
+        assert await db.scalar(select(SocialAccount)) is None
+        assert (await db.scalars(select(Job.kind))).all() == []
+
+
+async def test_the_start_hop_through_a_sibling_link_is_refused_after_submitting(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    first = await new_link(client)
+    second = await new_link(client)
+    ticket_url = (await client.post(f"/api/o/{second}/instagram/connect")).json()["auth_url"]
+    await submit_through(sessions, first)
+
+    started = await client.get(f"{urlsplit(ticket_url).path}?{urlsplit(ticket_url).query}")
+
+    assert started.status_code == 409
+    assert started.json()["error"]["code"] == "onboarding_completed"
+    assert "set-cookie" not in started.headers
+
+
+async def test_a_callback_waiting_on_the_submit_imports_nothing_once_it_commits(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    """A callback that reaches the check while `/complete` holds the Business waits for the lock,
+    then sees the submit: no import is queued after the Brand Brain started."""
+    first = await new_link(client)
+    second = await new_link(client)
+    started = await start(client, second)
+    async with sessions() as db:
+        business = await db.scalar(select(Business))
+        assert business is not None
+        await db.refresh(business, with_for_update=True)  # what /complete holds while it stamps
+        callback = asyncio.create_task(
+            client.get(
+                urlsplit(started.headers["location"]).path,
+                params=callback_params(started, code="c"),
+                headers=binding_cookie(started),
+            )
+        )
+        await asyncio.sleep(0.3)
+        assert not callback.done()
+        link = await db.scalar(select(MagicLink).where(MagicLink.token_hash == hash_token(first)))
+        assert link is not None
+        link.completed_at = datetime.now(UTC)
+        await db.commit()
+
+    response = await asyncio.wait_for(callback, timeout=5)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"{FRONTEND}/o/{second}"
+    async with sessions() as db:
+        assert await db.scalar(select(SocialAccount)) is None
+        assert (await db.scalars(select(Job.kind))).all() == []

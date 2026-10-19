@@ -22,7 +22,7 @@ from app.onboarding.uploads import (
     UnreadableImage,
     asset_path,
     llm_copy_path,
-    process_upload,
+    read_upload,
 )
 from app.storage import ASSETS_BUCKET
 
@@ -170,7 +170,7 @@ async def _store_image(
         data, content_type = await instagram.download(image.url)
         if content_type not in EXTENSIONS or content_type == HEIC:
             raise UnreadableImage(f"unexpected content type {content_type!r}")
-        processed = await asyncio.to_thread(process_upload, data, content_type, "photo")
+        processed = await read_upload(data, content_type, "photo")
     except (InstagramError, UnreadableImage) as exc:
         logger.warning("instagram image %s not imported: %s", image.id, exc)
         return None

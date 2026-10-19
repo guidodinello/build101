@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -8,15 +9,18 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.api import onboarding
 from app.channels.router import get_channel
 from app.config import Settings, get_settings
 from app.copy import messages_es
 from app.db.models import BrandAsset, Business, Job, MagicLink
 from app.db.session import get_session
 from app.main import app
-from app.storage import get_storage
+from app.onboarding import uploads
+from app.onboarding.links import hash_token
+from app.storage import StorageError, get_storage
 from tests.conftest import make_image, requires_db
-from tests.fakes import FakeChannel, FakeStorage
+from tests.fakes import CountingStorage, FakeChannel, FakeStorage
 
 DEV_TOKEN = "dev-secret"
 PHONE = "59899123456"
@@ -765,3 +769,340 @@ async def test_a_second_link_cannot_start_the_brand_again(
     async with sessions() as db:
         kinds = (await db.scalars(select(Job.kind))).all()
     assert kinds.count("generate_brand") == 1
+
+
+async def submitted_business_with_a_sibling_link(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> tuple[str, str, str]:
+    """Link A submits the form; returns A, an untouched link B and a photo's asset id."""
+    first = await new_link(client)
+    second = await new_link(client)
+    await client.put(f"/api/o/{first}/business", json=BUSINESS)
+    await client.put(
+        f"/api/o/{first}/products", json={"products": [{"name": "Mesa", "description": ""}]}
+    )
+    assets = [await upload(client, storage, first) for _ in range(3)]
+    assert (await client.post(f"/api/o/{first}/complete")).status_code == 202
+    return first, second, assets[0]["id"]
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("PUT", "/business", BUSINESS),
+        ("PUT", "/products", {"products": [{"name": "Silla", "description": ""}]}),
+        ("PUT", "/brand", {"three_words": ["cálido"], "colors": ["#112233"]}),
+        ("PUT", "/preferences", PREFERENCES),
+        (
+            "POST",
+            "/uploads",
+            {"kind": "photo", "filename": "a.jpg", "content_type": "image/jpeg", "size_bytes": 1},
+        ),
+        ("POST", "/assets/{asset_id}/complete", None),
+        ("DELETE", "/assets/{asset_id}", None),
+        ("POST", "/instagram/connect", {}),
+    ],
+)
+async def test_a_sibling_link_takes_no_edits_once_the_form_is_submitted(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    method: str,
+    path: str,
+    body: dict[str, Any] | None,
+) -> None:
+    _, sibling, asset_id = await submitted_business_with_a_sibling_link(client, storage)
+
+    response = await client.request(
+        method, f"/api/o/{sibling}{path.format(asset_id=asset_id)}", json=body
+    )
+
+    assert response.status_code == 409
+    assert error_code(response) == "onboarding_completed"
+
+
+async def test_a_sibling_link_shows_the_form_as_completed(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    _, sibling, _ = await submitted_business_with_a_sibling_link(client, storage)
+
+    state = await client.get(f"/api/o/{sibling}")
+
+    assert state.status_code == 200
+    assert state.json()["completed"] is True
+
+
+async def ticket_with_object(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    token: str,
+    data: bytes,
+    kind: str = "photo",
+    content_type: str = "image/png",
+    declared_bytes: int | None = None,
+) -> str:
+    """A ticket whose object the browser already put in Storage; returns the asset id.
+
+    `declared_bytes` is the size the browser claims; the signed URL doesn't enforce it."""
+    ticket = (
+        await client.post(
+            f"/api/o/{token}/uploads",
+            json={
+                "kind": kind,
+                "filename": "x.png",
+                "content_type": content_type,
+                "size_bytes": declared_bytes or len(data),
+            },
+        )
+    ).json()
+    storage.put("assets", ticket["upload_url"].split("/upload/assets/")[1].split("?")[0], data)
+    return ticket["asset_id"]
+
+
+async def test_a_tiff_declared_as_png_is_unsupported(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    asset_id = await ticket_with_object(client, storage, token, make_image((60, 40), format="TIFF"))
+
+    response = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+
+    assert response.status_code == 422
+    assert error_code(response) == "unsupported_file"
+    async with sessions() as db:
+        asset = await db.get(BrandAsset, uuid.UUID(asset_id))
+    assert asset and asset.status == "failed"
+
+
+@pytest.mark.parametrize(
+    ("format", "content_type"),
+    [("JPEG", "image/jpeg"), ("PNG", "image/png"), ("WEBP", "image/webp")],
+)
+async def test_jpeg_png_and_webp_uploads_still_pass(
+    client: httpx.AsyncClient, storage: FakeStorage, format: str, content_type: str
+) -> None:
+    token = await new_link(client)
+
+    asset = await upload(
+        client,
+        storage,
+        token,
+        data=make_image((120, 80), format=format),
+        content_type=content_type,
+    )
+
+    assert asset["status"] == "ready"
+
+
+async def test_an_object_over_the_size_limit_is_refused_and_fails_the_asset(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    token = await new_link(client)
+    asset_id = await ticket_with_object(
+        client,
+        storage,
+        token,
+        b"x" * (10 * 1024 * 1024 + 1),
+        content_type="image/jpeg",
+        declared_bytes=1024,
+    )
+
+    response = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+
+    assert response.status_code == 422
+    assert error_code(response) == "unsupported_file"
+    async with sessions() as db:
+        asset = await db.get(BrandAsset, uuid.UUID(asset_id))
+    assert asset and asset.status == "failed"
+
+
+async def test_a_failed_asset_is_refused_again_without_downloading_it(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    counting = CountingStorage()
+    app.dependency_overrides[get_storage] = lambda: counting
+    token = await new_link(client)
+    asset_id = await ticket_with_object(client, counting, token, b"not an image")
+    first = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+    assert first.status_code == 422
+    downloads = counting.downloads
+
+    again = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+
+    assert again.status_code == 422
+    assert error_code(again) == "unsupported_file"
+    assert counting.downloads == downloads
+
+
+async def test_an_image_over_the_pixel_cap_gets_its_own_error(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(uploads, "MAX_PIXELS", 100 * 100)
+    token = await new_link(client)
+    asset_id = await ticket_with_object(
+        client, storage, token, make_image((101, 100)), content_type="image/jpeg"
+    )
+
+    response = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+
+    assert response.status_code == 422
+    assert error_code(response) == "image_too_large"
+    assert response.json()["error"]["message"] == onboarding.IMAGE_TOO_LARGE
+    async with sessions() as db:
+        asset = await db.get(BrandAsset, uuid.UUID(asset_id))
+    assert asset and asset.status == "failed"
+
+
+async def upload_complete_delete(
+    client: httpx.AsyncClient, storage: FakeStorage, token: str, kind: str = "photo"
+) -> None:
+    asset = await upload(client, storage, token, kind=kind)
+    deleted = await client.delete(f"/api/o/{token}/assets/{asset['id']}")
+    assert deleted.status_code == 204
+
+
+async def request_upload(client: httpx.AsyncClient, token: str, kind: str) -> httpx.Response:
+    return await client.post(
+        f"/api/o/{token}/uploads",
+        json={"kind": kind, "filename": "a.jpg", "content_type": "image/jpeg", "size_bytes": 1},
+    )
+
+
+async def test_archiving_photos_does_not_free_uploads_forever(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    for _ in range(onboarding.MAX_PHOTO_UPLOADS):
+        await upload_complete_delete(client, storage, token)
+
+    response = await request_upload(client, token, "photo")
+
+    assert response.status_code == 422
+    assert error_code(response) == "too_many_photos"
+    assert response.json()["error"]["message"] == onboarding.PHOTO_UPLOADS_USED_UP
+
+
+async def test_photos_in_use_are_still_capped_at_fifteen(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    for _ in range(onboarding.MAX_PHOTOS):
+        await upload(client, storage, token)
+
+    response = await request_upload(client, token, "photo")
+
+    assert error_code(response) == "too_many_photos"
+    assert response.json()["error"]["message"] == onboarding.TOO_MANY_PHOTOS
+
+
+async def test_logos_are_capped_while_in_use(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    for _ in range(onboarding.MAX_LOGOS):
+        await upload(client, storage, token, kind="logo", data=make_image((200, 100)))
+
+    response = await request_upload(client, token, "logo")
+
+    assert response.status_code == 422
+    assert error_code(response) == "too_many_logos"
+    assert response.json()["error"]["message"] == onboarding.TOO_MANY_LOGOS
+
+
+async def test_archiving_logos_does_not_free_uploads_forever(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    for _ in range(onboarding.MAX_LOGO_UPLOADS):
+        await upload_complete_delete(client, storage, token, kind="logo")
+
+    response = await request_upload(client, token, "logo")
+
+    assert response.status_code == 422
+    assert error_code(response) == "too_many_logos"
+    assert response.json()["error"]["message"] == onboarding.LOGO_UPLOADS_USED_UP
+
+
+async def test_a_new_photo_still_fits_after_deleting_one_below_the_lifetime_cap(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    await upload_complete_delete(client, storage, token)
+
+    assert (await request_upload(client, token, "photo")).status_code == 200
+
+
+async def test_archiving_deletes_the_files_from_storage(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    kept = await upload(client, storage, token)
+    heic = await upload(
+        client,
+        storage,
+        token,
+        data=make_image((120, 80), format="HEIF"),
+        content_type="image/heic",
+    )
+    before = set(storage.objects)
+    assert len(before) == 2 + 3  # kept: JPEG and copy; HEIC: original, its JPEG and copy
+
+    response = await client.delete(f"/api/o/{token}/assets/{heic['id']}")
+
+    assert response.status_code == 204
+    gone = before - set(storage.objects)
+    assert {path.rsplit("/", 1)[1].split(".")[0] for path in gone} == {
+        heic["id"],
+        f"{heic['id']}-llm",
+    }
+    assert len(gone) == 3
+    assert any(kept["id"] in path for path in storage.objects)
+
+
+async def test_archiving_still_answers_204_when_storage_fails(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    async def broken(bucket: str, paths: list[str]) -> None:
+        raise StorageError("down")
+
+    token = await new_link(client)
+    asset = await upload(client, storage, token)
+    storage.remove = broken  # type: ignore[method-assign]
+
+    response = await client.delete(f"/api/o/{token}/assets/{asset['id']}")
+
+    assert response.status_code == 204
+    async with sessions() as db:
+        row = await db.get(BrandAsset, uuid.UUID(asset["id"]))
+    assert row and row.archived_at is not None
+
+
+async def test_an_edit_waiting_on_the_submit_is_refused_once_it_commits(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    """A sibling write that reaches the check while `/complete` holds the Business can't slip in
+    after the form was submitted: it waits for the lock, then sees the submit."""
+    first = await new_link(client)
+    second = await new_link(client)
+    async with sessions() as db:
+        business = await db.scalar(select(Business))
+        assert business is not None
+        await db.refresh(business, with_for_update=True)  # what /complete holds while it stamps
+        edit = asyncio.create_task(client.put(f"/api/o/{second}/business", json=BUSINESS))
+        await asyncio.sleep(0.3)
+        assert not edit.done()
+        link = await db.scalar(select(MagicLink).where(MagicLink.token_hash == hash_token(first)))
+        assert link is not None
+        link.completed_at = datetime.now(UTC)
+        await db.commit()
+
+    response = await asyncio.wait_for(edit, timeout=5)
+
+    assert response.status_code == 409
+    assert error_code(response) == "onboarding_completed"
+    async with sessions() as db:
+        assert (await db.scalar(select(Business.name))) != BUSINESS["name"]

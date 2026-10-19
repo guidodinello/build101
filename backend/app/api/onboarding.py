@@ -4,7 +4,6 @@ Files go from the browser straight to Supabase Storage through a signed upload U
 only issues the URL, then reads the file back once the browser says it finished.
 """
 
-import asyncio
 import logging
 import uuid
 from collections import Counter
@@ -27,12 +26,13 @@ from app.onboarding import schemas
 from app.onboarding.links import hash_token
 from app.onboarding.uploads import (
     EXTENSIONS,
+    ImageTooLarge,
     UnreadableImage,
     asset_path,
     llm_copy_path,
-    process_upload,
+    read_upload,
 )
-from app.storage import ASSETS_BUCKET, StoragePort, get_storage
+from app.storage import ASSETS_BUCKET, ObjectTooLarge, StorageError, StoragePort, get_storage
 
 from .errors import ApiError
 
@@ -44,6 +44,11 @@ UPLOAD_TICKET_TTL = timedelta(hours=2)
 WIZARD_KINDS = frozenset({"logo", "photo"})
 MIN_PHOTOS = 3
 MAX_PHOTOS = 15
+# Deleting a photo frees a slot, but not an upload: every web upload ever made counts, so a loop
+# of upload, complete and delete can't keep adding objects to the bucket and Gemini calls.
+MAX_PHOTO_UPLOADS = 2 * MAX_PHOTOS
+MAX_LOGOS = 3
+MAX_LOGO_UPLOADS = 10
 BYTES_PER_MB = 1024 * 1024
 
 LINK_NOT_FOUND = "Este link no es válido. Escribinos por WhatsApp y te mandamos uno nuevo."
@@ -56,7 +61,15 @@ UNKNOWN_ASSET = "No encontramos una de las fotos. Recargá la página y probá d
 MISSING_COLORS = 'Sumá al menos un color, o elegí "Todavía no tengo logo ni colores".'
 UNSUPPORTED_FILE = "Este archivo no lo podemos usar. Subí fotos."
 UNREADABLE_FILE = "No pudimos abrir esta foto. Probá con otra."
+IMAGE_TOO_LARGE = "Esta foto es demasiado grande. Probá con una de menos resolución."
 TOO_MANY_PHOTOS = f"Ya tenés {MAX_PHOTOS} fotos."
+PHOTO_UPLOADS_USED_UP = (
+    "Llegaste al máximo de fotos que se pueden subir. Seguimos con las que ya tenés."
+)
+TOO_MANY_LOGOS = f"Ya tenés {MAX_LOGOS} logos. Sacá uno para subir otro."
+LOGO_UPLOADS_USED_UP = (
+    "Llegaste al máximo de logos que se pueden subir. Seguimos con los que ya tenés."
+)
 ASSET_NOT_FOUND = "No encontramos ese archivo."
 UPLOAD_MISSING = "El archivo no terminó de subir. Probá de nuevo."
 MISSING_BUSINESS = "Nos faltan los datos de tu negocio."
@@ -66,6 +79,27 @@ MISSING_PHOTOS = f"Sumá al menos {MIN_PHOTOS} fotos."
 
 def file_too_big(max_mb: int) -> str:
     return f"Esta foto pesa más de {max_mb} MB. Probá con otra."
+
+
+@dataclass(frozen=True, slots=True)
+class UploadCap:
+    """What a Business may upload through the wizard, by kind. Both limits refuse with `code`."""
+
+    code: str
+    active: int  # not archived
+    active_message: str
+    lifetime: int  # archived ones included
+    lifetime_message: str
+
+
+UPLOAD_CAPS = {
+    "photo": UploadCap(
+        "too_many_photos", MAX_PHOTOS, TOO_MANY_PHOTOS, MAX_PHOTO_UPLOADS, PHOTO_UPLOADS_USED_UP
+    ),
+    "logo": UploadCap(
+        "too_many_logos", MAX_LOGOS, TOO_MANY_LOGOS, MAX_LOGO_UPLOADS, LOGO_UPLOADS_USED_UP
+    ),
+}
 
 
 @dataclass(slots=True)
@@ -93,11 +127,32 @@ async def get_onboarding(token: str, session: SessionDep) -> Onboarding:
     return Onboarding(link, business)
 
 
+async def is_submitted(session: AsyncSession, business_id: uuid.UUID) -> bool:
+    """Whether any onboarding link of the Business was submitted: an Owner holds several links
+    (one per reminder), and a submitted form takes no more answers through any of them."""
+    completed = await session.scalar(
+        select(MagicLink.id)
+        .where(
+            MagicLink.business_id == business_id,
+            MagicLink.purpose == "onboarding",
+            MagicLink.completed_at.is_not(None),
+        )
+        .limit(1)
+    )
+    return completed is not None
+
+
 async def get_open_onboarding(
-    onboarding: Annotated[Onboarding, Depends(get_onboarding)],
+    onboarding: Annotated[Onboarding, Depends(get_onboarding)], session: SessionDep
 ) -> Onboarding:
-    """The link is reusable until the form is submitted (user-flows.md, Flow 1)."""
-    if onboarding.link.completed_at is not None:
+    """The link is reusable until the form is submitted (user-flows.md, Flow 1).
+
+    The Business row is locked before the check, like `/complete` does before stamping a link: a
+    write that passed the check waits there and can't commit after the form was submitted (the
+    brand job would not see it). The lock lasts until the request's transaction ends.
+    """
+    await session.refresh(onboarding.business, with_for_update=True)
+    if await is_submitted(session, onboarding.business.id):
         raise ApiError(409, "onboarding_completed", ALREADY_COMPLETED)
     return onboarding
 
@@ -264,11 +319,9 @@ async def request_upload(
     if body.size_bytes > settings.max_photo_mb * BYTES_PER_MB:
         raise ApiError(422, "unsupported_file", file_too_big(settings.max_photo_mb))
     business = onboarding.business
-    if body.kind == "photo":
-        # The wizard uploads several photos at once; the row lock makes the cap hold for all.
-        await session.refresh(business, with_for_update=True)
-        if await _photos_holding_a_slot(session, business.id) >= MAX_PHOTOS:
-            raise ApiError(422, "too_many_photos", TOO_MANY_PHOTOS)
+    # The wizard uploads several files at once; the Business lock taken by OpenOnboardingDep
+    # makes the caps hold for all.
+    await _check_upload_caps(session, business.id, body.kind)
 
     asset_id = uuid.uuid4()
     path = asset_path(business.id, asset_id, body.content_type)
@@ -303,6 +356,9 @@ async def complete_upload(
 ) -> schemas.Asset:
     business = onboarding.business
     asset = await _active_asset(session, business.id, asset_id)
+    if asset.status == "failed":
+        # Already read and refused once: don't download and decode it again.
+        raise ApiError(422, "unsupported_file", UNREADABLE_FILE)
     if asset.status != "ready":
         await _finish_upload(asset, business, session, storage, settings)
     urls = await storage.create_signed_urls(ASSETS_BUCKET, [asset.storage_path], SIGNED_URL_TTL_S)
@@ -311,12 +367,13 @@ async def complete_upload(
 
 @router.delete("/assets/{asset_id}", status_code=204)
 async def archive_asset(
-    asset_id: uuid.UUID, onboarding: OpenOnboardingDep, session: SessionDep
+    asset_id: uuid.UUID, onboarding: OpenOnboardingDep, session: SessionDep, storage: StorageDep
 ) -> Response:
     asset = await session.get(BrandAsset, asset_id)
     if asset is not None and asset.business_id == onboarding.business.id:
         asset.archived_at = asset.archived_at or datetime.now(UTC)
         await session.commit()
+        await _delete_objects(storage, asset)
     return Response(status_code=204)
 
 
@@ -331,16 +388,7 @@ async def complete_onboarding(
     # The lock serializes a double submit; any completed link of the Business counts, so a
     # second open link can't start the brand again.
     await session.refresh(business, with_for_update=True)
-    already_completed = await session.scalar(
-        select(MagicLink.id)
-        .where(
-            MagicLink.business_id == business.id,
-            MagicLink.purpose == "onboarding",
-            MagicLink.completed_at.is_not(None),
-        )
-        .limit(1)
-    )
-    if already_completed is not None:
+    if await is_submitted(session, business.id):
         if link.completed_at is None:
             link.completed_at = datetime.now(UTC)
             await session.commit()
@@ -363,15 +411,21 @@ async def _finish_upload(
     storage: StoragePort,
     settings: Settings,
 ) -> None:
-    data = await storage.download(ASSETS_BUCKET, asset.storage_path)
+    try:
+        # The signed URL doesn't enforce the size the browser declared: stop reading past the cap.
+        data = await storage.download(
+            ASSETS_BUCKET, asset.storage_path, max_bytes=settings.max_photo_mb * BYTES_PER_MB
+        )
+    except ObjectTooLarge:
+        await _fail(asset, session)
+        raise ApiError(422, "unsupported_file", file_too_big(settings.max_photo_mb)) from None
     if data is None:
         raise ApiError(409, "upload_missing", UPLOAD_MISSING)
-    # The signed URL doesn't enforce the size the browser declared.
-    if len(data) > settings.max_photo_mb * BYTES_PER_MB:
-        await _fail(asset, session)
-        raise ApiError(422, "unsupported_file", file_too_big(settings.max_photo_mb))
     try:
-        processed = await asyncio.to_thread(process_upload, data, asset.mime_type, asset.kind)
+        processed = await read_upload(data, asset.mime_type, asset.kind)
+    except ImageTooLarge:
+        await _fail(asset, session)
+        raise ApiError(422, "image_too_large", IMAGE_TOO_LARGE) from None
     except UnreadableImage:
         await _fail(asset, session)
         raise ApiError(422, "unsupported_file", UNREADABLE_FILE) from None
@@ -409,13 +463,52 @@ async def _active_asset(
     return asset
 
 
-async def _photos_holding_a_slot(session: AsyncSession, business_id: uuid.UUID) -> int:
+async def _delete_objects(storage: StoragePort, asset: BrandAsset) -> None:
+    """Remove what an archived asset left in Storage: the original, whatever its extension (a HEIC
+    upload is replaced by a JPEG), the JPEG made from it, and the agents' copy.
+
+    Nothing reads an archived asset's files: the Brand Brain, the library and the wizard all skip
+    archived rows. A Storage failure is logged and not raised: the Owner's ✕ already took effect.
+    """
+    paths = [asset_path(asset.business_id, asset.id, content_type) for content_type in EXTENSIONS]
+    paths.append(llm_copy_path(asset.business_id, asset.id))
+    try:
+        await storage.remove(ASSETS_BUCKET, paths)
+    except StorageError:
+        logger.exception("the files of archived asset %s were not deleted", asset.id)
+
+
+async def _check_upload_caps(session: AsyncSession, business_id: uuid.UUID, kind: str) -> None:
+    cap = UPLOAD_CAPS.get(kind)
+    if cap is None:
+        return
+    if await _uploads_ever(session, business_id, kind) >= cap.lifetime:
+        raise ApiError(422, cap.code, cap.lifetime_message)
+    if await _holding_a_slot(session, business_id, kind) >= cap.active:
+        raise ApiError(422, cap.code, cap.active_message)
+
+
+async def _uploads_ever(session: AsyncSession, business_id: uuid.UUID, kind: str) -> int:
+    """Every wizard upload of this kind, archived, failed and abandoned ones included."""
+    return (
+        await session.scalar(
+            select(func.count()).where(
+                BrandAsset.business_id == business_id,
+                BrandAsset.kind == kind,
+                BrandAsset.source == "web",
+            )
+        )
+        or 0
+    )
+
+
+async def _holding_a_slot(session: AsyncSession, business_id: uuid.UUID, kind: str) -> int:
     recent_ticket = BrandAsset.created_at > datetime.now(UTC) - UPLOAD_TICKET_TTL
     return (
         await session.scalar(
             select(func.count()).where(
                 BrandAsset.business_id == business_id,
-                BrandAsset.kind == "photo",
+                BrandAsset.kind == kind,
                 BrandAsset.source == "web",
                 BrandAsset.archived_at.is_(None),
                 (BrandAsset.status == "ready")
@@ -536,7 +629,7 @@ async def _state(
         ],
         preferences=schemas.Questionnaire.model_validate(preferences) if preferences else None,
         instagram=await _instagram(session, business),
-        completed=onboarding.link.completed_at is not None,
+        completed=await is_submitted(session, business.id),
         whatsapp_url=settings.whatsapp_url,
     )
 
