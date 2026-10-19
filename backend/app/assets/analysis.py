@@ -1,11 +1,10 @@
 import uuid
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.asset_analyst import CatalogProduct, analyze_photo
 from app.agents.schemas import AssetAnalysis
-from app.db.models import Product
+from app.knowledge.db import active_products
 from app.llm.client import ChatModel
 
 
@@ -26,17 +25,7 @@ async def analyze_brand_photo(
     catalog: list[CatalogProduct] = []
     if sessions is not None and business_id is not None:
         async with sessions() as db:
-            catalog = await _catalog(db, business_id)
+            products = await active_products(db, business_id)
+            catalog = [CatalogProduct(str(p.id), p.name, p.description) for p in products]
     linked = str(linked_product_id) if linked_product_id else None
     return await analyze_photo(model, image, catalog, owner_hint, linked)
-
-
-async def _catalog(db: AsyncSession, business_id: uuid.UUID) -> list[CatalogProduct]:
-    products = (
-        await db.scalars(
-            select(Product)
-            .where(Product.business_id == business_id, Product.archived_at.is_(None))
-            .order_by(Product.position)
-        )
-    ).all()
-    return [CatalogProduct(str(p.id), p.name, p.description) for p in products]
