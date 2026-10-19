@@ -2,7 +2,9 @@
 
 Allowed moves (ADR 0007 keeps the publisher behind the Owner's explicit approval):
 
-    pending_approval -> approved -> publishing -> published | failed | publish_pending
+    pending_approval -> approved -> publishing   ([Aprobar], then [Publicar ahora])
+    pending_approval | approved -> publishing    (the Owner's words: a plain "subilo")
+    publishing -> published | failed | publish_pending
     pending_approval | approved -> discarded | replaced
     failed -> publishing   ([Reintentar])
 
