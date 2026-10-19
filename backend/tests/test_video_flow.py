@@ -413,3 +413,30 @@ async def test_an_unwired_maker_refuses_before_any_generation() -> None:
         unwired.create_video(SENDER, {"post_id": "p1"}, rig.channel)
 
     assert video_gen.calls == []
+
+
+async def test_a_sent_video_stays_served_after_the_cache_cap_of_later_clips() -> None:
+    """The Owner's header link and Zernio's fetch must not 404 once other clips evict it."""
+    rig = Rig(ScriptedModel(replies=[create_video(), STARTED, READY, TOLD]), CountingVideoGen())
+    rig.videos = PublicVideos(max_videos=2)
+    rig.videos.serve_from(rig.store.video)  # what the factory wires
+    rig.maker._videos = rig.videos  # type: ignore[union-attr]
+    rig.add_post()
+    await rig.say()
+    [video] = rig.videos_of()
+    assert video.video is not None
+    token = video.video.path.removeprefix("/media/").removesuffix(".mp4")
+
+    for _ in range(5):  # clips of other senders
+        rig.videos.add(b"other")
+
+    assert rig.videos.get(token) == video.video.data
+
+
+def test_the_factory_lets_the_clip_cache_fall_back_to_the_posts() -> None:
+    videos = PublicVideos()
+    settings = Settings(inbound_handler="chat", gemini_api_key="k", public_backend_url=BASE_URL)
+
+    build_inbound_handler(settings, PublicImages(), FakePublisher(), videos)
+
+    assert videos._lookup is not None

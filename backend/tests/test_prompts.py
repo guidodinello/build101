@@ -45,3 +45,19 @@ def test_self_include_raises(tmp_path: Path) -> None:
     (tmp_path / "a.md").write_text("{{include a.md}}\n")
     with pytest.raises(ValueError, match="include cycle"):
         load_prompt(tmp_path / "a.md")
+
+
+def test_video_events_and_tool_reach_the_prompt_only_with_the_flag() -> None:
+    off, on = system_prompt("Vera"), system_prompt("Vera", with_video=True)
+
+    for text in (
+        "create_video",
+        "video sent to the Owner",
+        "[video ... failed]",
+        "video_daily_limit",
+    ):
+        assert text not in off
+        assert text in on
+    assert "invalid_arguments" in on
+    assert "{" not in on
+    assert "}" not in on

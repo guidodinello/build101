@@ -69,3 +69,23 @@ def test_keep_serves_an_evicted_video_again_and_makes_it_the_newest() -> None:
 
     assert videos.get(first.removeprefix("/media/").removesuffix(".mp4")) == b"1"
     assert videos.get(second.removeprefix("/media/").removesuffix(".mp4")) is None
+
+
+def test_an_evicted_clip_is_still_served_while_its_post_holds_it() -> None:
+    videos = PublicVideos(max_videos=1)
+    held = {"clip": b"1"}
+    path = videos.add(held["clip"])
+    videos.serve_from(lambda p: held["clip"] if p == path else None)
+    videos.add(b"2")  # evicts the first from the LRU
+    try:
+        with serve(videos) as client:
+            got, head = client.get(path), client.head(path)
+            missing = client.get("/media/not-a-token.mp4")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert got.status_code == 200
+    assert got.content == b"1"
+    assert head.status_code == 200
+    assert head.headers["content-length"] == "1"
+    assert missing.status_code == 404

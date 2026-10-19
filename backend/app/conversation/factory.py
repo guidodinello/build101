@@ -78,6 +78,7 @@ def build_inbound_handler(
                 trends_of=NicheTrends(sessions).latest if sessions else fixed(trend_notes),
             )
             public_videos = videos or PublicVideos()
+            public_videos.serve_from(store.video)
             publishing = PostPublisher(
                 publisher,
                 store,

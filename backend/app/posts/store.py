@@ -98,6 +98,18 @@ class InMemoryPosts:
     def get(self, sender: str, post_id: str) -> Post | None:
         return next((post for post in self._posts[sender] if post.id == post_id), None)
 
+    def video(self, path: str) -> bytes | None:
+        """The clip served at `path`, if a Post still in the store holds it."""
+        return next(
+            (
+                post.video.data
+                for posts in self._posts.values()
+                for post in posts
+                if post.video is not None and post.video.path == path
+            ),
+            None,
+        )
+
     def pending(self, sender: str) -> list[Post]:
         """The posts "subilo" can publish, oldest first: the numbering the Owner sees."""
         return [post for post in self._posts[sender] if post.status in APPROVABLE]

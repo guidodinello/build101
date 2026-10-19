@@ -1,5 +1,6 @@
 import secrets
 from collections import OrderedDict
+from collections.abc import Callable
 from functools import cache
 from typing import Annotated
 
@@ -54,6 +55,15 @@ class PublicVideos:
     def __init__(self, max_videos: int = MAX_VIDEOS) -> None:
         self._max_videos = max_videos
         self._videos: OrderedDict[str, bytes] = OrderedDict()
+        self._lookup: Callable[[str], bytes | None] | None = None
+
+    def serve_from(self, lookup: Callable[[str], bytes | None]) -> None:
+        """Where to find a clip the LRU dropped: the Post that still holds it (same bytes object).
+
+        A clip stays served while its Post exists, so the Owner's WhatsApp header and Zernio's
+        fetch never 404 just because 20 later clips came in. Wired where the store is built.
+        """
+        self._lookup = lookup
 
     def add(self, data: bytes) -> str:
         """Store an MP4 and return its path, relative to the backend's public URL."""
@@ -72,7 +82,10 @@ class PublicVideos:
             self._videos.popitem(last=False)
 
     def get(self, token: str) -> bytes | None:
-        return self._videos.get(token)
+        data = self._videos.get(token)
+        if data is None and self._lookup is not None:
+            return self._lookup(f"/media/{token}.mp4")
+        return data
 
 
 @cache

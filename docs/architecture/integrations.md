@@ -302,7 +302,7 @@ Behind `VideoGenPort` (`app/videogen/`), only built when `VIDEO_GEN_ENABLED=true
 - **Call**: `aio.models.generate_videos(model, source=GenerateVideosSource(prompt, image), config)` starts a long-running operation; `aio.operations.get` polls it every 10 s, up to `VIDEO_GEN_TIMEOUT_S` (600; the docs say 11 s to 6 min at peak); `aio.files.download` fetches the MP4. The server keeps a video 2 days, so it is downloaded at once.
 - **Retries**: polling and download retry like the image client. The **submit call never retries**: a retried submit after a timeout could start, and bill, a second clip.
 - **Errors**: `operation.error` and API errors are `VideoGenUnavailable`; a deadline is `VideoGenTimeout`; RAI filtering is `VideoGenBlocked(reason)`; a finished operation without a video is `VideoGenNoVideo`.
-- **Serving**: `PublicVideos` serves the MP4 at `/media/{token}.mp4` (GET and HEAD) for WhatsApp and Zernio to fetch. No `Range` support yet; check whether they need it when the flag is first turned on.
+- **Serving**: `PublicVideos` serves the MP4 at `/media/{token}.mp4` (GET and HEAD) for WhatsApp and Zernio to fetch. The 20-clip LRU only bounds clips whose Post is gone: on a miss it serves the clip of any Post still in `InMemoryPosts` (`serve_from`, same bytes object, no extra memory), so the Owner's header link and Zernio's fetch never 404 while the Post exists. No `Range` support yet; check whether they need it when the flag is first turned on.
 - **Unconfirmed**: Veo with reference images at 9:16 (Fast/Standard) and how the 4:5 crop looks as a first frame; one live call settles both.
 
 ## Image generation
