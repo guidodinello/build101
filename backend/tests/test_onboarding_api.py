@@ -139,6 +139,27 @@ async def test_dev_link_is_off_unless_enabled(client: httpx.AsyncClient) -> None
     assert response.status_code == 404
 
 
+async def test_dev_link_rejects_a_non_ascii_token(client: httpx.AsyncClient) -> None:
+    # Bytes: httpx refuses a non-ASCII str header, but a real client can send them (latin-1).
+    response = await client.post(
+        "/dev/onboarding-link", json={"phone": PHONE}, headers={"X-Dev-Token": "ñandú".encode()}
+    )
+
+    assert response.status_code == 401
+
+
+async def test_dev_link_is_off_in_prod_even_when_enabled(client: httpx.AsyncClient) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        env="prod", enable_dev_endpoints=True, dev_token=DEV_TOKEN
+    )
+
+    response = await client.post(
+        "/dev/onboarding-link", json={"phone": PHONE}, headers={"X-Dev-Token": DEV_TOKEN}
+    )
+
+    assert response.status_code == 404
+
+
 async def test_dev_link_reuses_the_business_of_a_phone(
     client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
 ) -> None:

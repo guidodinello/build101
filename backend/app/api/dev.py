@@ -22,9 +22,13 @@ def require_dev_token(
     settings: Annotated[Settings, Depends(get_settings)],
     x_dev_token: Annotated[str | None, Header()] = None,
 ) -> None:
-    if not settings.enable_dev_endpoints:
+    # Never in production, whatever the flag says.
+    if settings.env == "prod" or not settings.enable_dev_endpoints:
         raise HTTPException(status_code=404)
-    if not settings.dev_token or not hmac.compare_digest(x_dev_token or "", settings.dev_token):
+    # Bytes: compare_digest raises TypeError on a non-ASCII str, which would be a 500.
+    if not settings.dev_token or not hmac.compare_digest(
+        (x_dev_token or "").encode(), settings.dev_token.encode()
+    ):
         raise HTTPException(status_code=401)
 
 

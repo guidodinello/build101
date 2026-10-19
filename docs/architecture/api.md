@@ -9,7 +9,7 @@ FastAPI. JSON in and out, `snake_case` fields. Errors use `{"error": {"code": ".
 | WhatsApp webhook (Kapso) | `X-Webhook-Signature`: hex HMAC-SHA256 of the **raw body** with `KAPSO_WEBHOOK_SECRET` (confirmed 2026-10-17, [Kapso's docs](https://docs.kapso.ai/docs/platform/webhooks/security.md)). `401` on a mismatch, a missing header or no configured secret. Plan B (Meta direct): `X-Hub-Signature-256` HMAC with `META_APP_SECRET` |
 | Zernio webhook | `X-Zernio-Signature` HMAC with `ZERNIO_WEBHOOK_SECRET` |
 | Web app (owner) | Magic-link token in the path: `/api/o/{token}/...`. Server hashes it, looks up `magic_links`, checks expiry → `business_id` |
-| Dev tools | Header `X-Dev-Token: $DEV_TOKEN`, only if `ENABLE_DEV_ENDPOINTS=true` |
+| Dev tools | Header `X-Dev-Token: $DEV_TOKEN`, only if `ENABLE_DEV_ENDPOINTS=true` and `ENV` is not `prod` (404 otherwise) |
 
 CORS: allow every origin in `FRONTEND_ORIGINS` (comma-separated: Vercel URL + `http://localhost:3000`).
 
