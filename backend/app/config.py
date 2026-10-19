@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     gemini_thinking_level: Literal["minimal", "medium", "high"] = "medium"
     gemini_image_size: Literal["1K", "2K", "4K"] = "2K"
     image_gen_max_concurrency: int = 4
+    # AI-generated Reels (ADR 0033). Off by default: with VIDEO_GEN_ENABLED=false no video adapter
+    # is built and nothing can call Veo. Its own key, never GEMINI_API_KEY.
+    video_gen_enabled: bool = False
+    video_gen: Literal["gemini", "mock"] = "mock"
+    gemini_video_api_key: str | None = None
+    gemini_video_model: str = "veo-3.1-lite-generate-preview"
+    video_gen_max_concurrency: int = 1
+    video_gen_timeout_s: int = 600
     # Designed slides are rendered by the frontend's Takumi route (ADR 0029); RENDERER_SECRET is
     # the frontend's RENDER_SECRET
     renderer: Literal["takumi", "mock"] = "mock"
