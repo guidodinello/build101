@@ -33,7 +33,7 @@ from app.onboarding.uploads import (
     llm_copy_path,
     process_upload,
 )
-from app.storage import ASSETS_BUCKET, ObjectTooLarge, StoragePort, get_storage
+from app.storage import ASSETS_BUCKET, ObjectTooLarge, StorageError, StoragePort, get_storage
 
 from .errors import ApiError
 
@@ -45,6 +45,11 @@ UPLOAD_TICKET_TTL = timedelta(hours=2)
 WIZARD_KINDS = frozenset({"logo", "photo"})
 MIN_PHOTOS = 3
 MAX_PHOTOS = 15
+# Deleting a photo frees a slot, but not an upload: every web upload ever made counts, so a loop
+# of upload, complete and delete can't keep adding objects to the bucket and Gemini calls.
+MAX_PHOTO_UPLOADS = 2 * MAX_PHOTOS
+MAX_LOGOS = 3
+MAX_LOGO_UPLOADS = 10
 BYTES_PER_MB = 1024 * 1024
 
 LINK_NOT_FOUND = "Este link no es válido. Escribinos por WhatsApp y te mandamos uno nuevo."
@@ -59,6 +64,13 @@ UNSUPPORTED_FILE = "Este archivo no lo podemos usar. Subí fotos."
 UNREADABLE_FILE = "No pudimos abrir esta foto. Probá con otra."
 IMAGE_TOO_LARGE = "Esta foto es demasiado grande. Probá con una de menos resolución."
 TOO_MANY_PHOTOS = f"Ya tenés {MAX_PHOTOS} fotos."
+PHOTO_UPLOADS_USED_UP = (
+    "Llegaste al máximo de fotos que se pueden subir. Seguimos con las que ya tenés."
+)
+TOO_MANY_LOGOS = f"Ya tenés {MAX_LOGOS} logos. Sacá uno para subir otro."
+LOGO_UPLOADS_USED_UP = (
+    "Llegaste al máximo de logos que se pueden subir. Seguimos con los que ya tenés."
+)
 ASSET_NOT_FOUND = "No encontramos ese archivo."
 UPLOAD_MISSING = "El archivo no terminó de subir. Probá de nuevo."
 MISSING_BUSINESS = "Nos faltan los datos de tu negocio."
@@ -68,6 +80,27 @@ MISSING_PHOTOS = f"Sumá al menos {MIN_PHOTOS} fotos."
 
 def file_too_big(max_mb: int) -> str:
     return f"Esta foto pesa más de {max_mb} MB. Probá con otra."
+
+
+@dataclass(frozen=True, slots=True)
+class UploadCap:
+    """What a Business may upload through the wizard, by kind. Both limits refuse with `code`."""
+
+    code: str
+    active: int  # not archived
+    active_message: str
+    lifetime: int  # archived ones included
+    lifetime_message: str
+
+
+UPLOAD_CAPS = {
+    "photo": UploadCap(
+        "too_many_photos", MAX_PHOTOS, TOO_MANY_PHOTOS, MAX_PHOTO_UPLOADS, PHOTO_UPLOADS_USED_UP
+    ),
+    "logo": UploadCap(
+        "too_many_logos", MAX_LOGOS, TOO_MANY_LOGOS, MAX_LOGO_UPLOADS, LOGO_UPLOADS_USED_UP
+    ),
+}
 
 
 @dataclass(slots=True)
@@ -281,11 +314,9 @@ async def request_upload(
     if body.size_bytes > settings.max_photo_mb * BYTES_PER_MB:
         raise ApiError(422, "unsupported_file", file_too_big(settings.max_photo_mb))
     business = onboarding.business
-    if body.kind == "photo":
-        # The wizard uploads several photos at once; the row lock makes the cap hold for all.
-        await session.refresh(business, with_for_update=True)
-        if await _photos_holding_a_slot(session, business.id) >= MAX_PHOTOS:
-            raise ApiError(422, "too_many_photos", TOO_MANY_PHOTOS)
+    # The wizard uploads several files at once; the row lock makes the caps hold for all.
+    await session.refresh(business, with_for_update=True)
+    await _check_upload_caps(session, business.id, body.kind)
 
     asset_id = uuid.uuid4()
     path = asset_path(business.id, asset_id, body.content_type)
@@ -331,12 +362,13 @@ async def complete_upload(
 
 @router.delete("/assets/{asset_id}", status_code=204)
 async def archive_asset(
-    asset_id: uuid.UUID, onboarding: OpenOnboardingDep, session: SessionDep
+    asset_id: uuid.UUID, onboarding: OpenOnboardingDep, session: SessionDep, storage: StorageDep
 ) -> Response:
     asset = await session.get(BrandAsset, asset_id)
     if asset is not None and asset.business_id == onboarding.business.id:
         asset.archived_at = asset.archived_at or datetime.now(UTC)
         await session.commit()
+        await _delete_objects(storage, asset)
     return Response(status_code=204)
 
 
@@ -426,13 +458,52 @@ async def _active_asset(
     return asset
 
 
-async def _photos_holding_a_slot(session: AsyncSession, business_id: uuid.UUID) -> int:
+async def _delete_objects(storage: StoragePort, asset: BrandAsset) -> None:
+    """Remove what an archived asset left in Storage: the original, whatever its extension (a HEIC
+    upload is replaced by a JPEG), the JPEG made from it, and the agents' copy.
+
+    Nothing reads an archived asset's files: the Brand Brain, the library and the wizard all skip
+    archived rows. A Storage failure is logged and not raised: the Owner's ✕ already took effect.
+    """
+    paths = [asset_path(asset.business_id, asset.id, content_type) for content_type in EXTENSIONS]
+    paths.append(llm_copy_path(asset.business_id, asset.id))
+    try:
+        await storage.remove(ASSETS_BUCKET, paths)
+    except StorageError:
+        logger.exception("the files of archived asset %s were not deleted", asset.id)
+
+
+async def _check_upload_caps(session: AsyncSession, business_id: uuid.UUID, kind: str) -> None:
+    cap = UPLOAD_CAPS.get(kind)
+    if cap is None:
+        return
+    if await _uploads_ever(session, business_id, kind) >= cap.lifetime:
+        raise ApiError(422, cap.code, cap.lifetime_message)
+    if await _holding_a_slot(session, business_id, kind) >= cap.active:
+        raise ApiError(422, cap.code, cap.active_message)
+
+
+async def _uploads_ever(session: AsyncSession, business_id: uuid.UUID, kind: str) -> int:
+    """Every wizard upload of this kind, archived, failed and abandoned ones included."""
+    return (
+        await session.scalar(
+            select(func.count()).where(
+                BrandAsset.business_id == business_id,
+                BrandAsset.kind == kind,
+                BrandAsset.source == "web",
+            )
+        )
+        or 0
+    )
+
+
+async def _holding_a_slot(session: AsyncSession, business_id: uuid.UUID, kind: str) -> int:
     recent_ticket = BrandAsset.created_at > datetime.now(UTC) - UPLOAD_TICKET_TTL
     return (
         await session.scalar(
             select(func.count()).where(
                 BrandAsset.business_id == business_id,
-                BrandAsset.kind == "photo",
+                BrandAsset.kind == kind,
                 BrandAsset.source == "web",
                 BrandAsset.archived_at.is_(None),
                 (BrandAsset.status == "ready")

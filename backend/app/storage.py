@@ -12,6 +12,7 @@ REQUEST_TIMEOUT_S = 30.0
 HTTP_NOT_FOUND = 404
 HTTP_BAD_REQUEST = 400
 ERROR_BODY_CHARS = 300
+MAX_REMOVE_PATHS = 1000
 
 
 class StorageError(Exception):
@@ -44,6 +45,10 @@ class StoragePort(Protocol):
         self, bucket: str, paths: list[str], expires_in_s: int
     ) -> dict[str, str]:
         """Signed read URLs by path; paths that don't exist are left out."""
+        ...
+
+    async def remove(self, bucket: str, paths: list[str]) -> None:
+        """Delete the objects; a path that doesn't exist is not an error."""
         ...
 
 
@@ -117,6 +122,17 @@ class SupabaseStorage:
             for item in response.json()
             if item.get("signedURL") and not item.get("error")
         }
+
+    async def remove(self, bucket: str, paths: list[str]) -> None:
+        # DELETE /object/{bucket} with {"prefixes": [...]}, up to 1000 paths per call: what
+        # storage-js's `remove` sends (src/packages/StorageFileApi.ts, src/lib/fetch.ts) and
+        # https://supabase.com/docs/guides/storage/management/delete-objects documents.
+        for start in range(0, len(paths), MAX_REMOVE_PATHS):
+            await self._request(
+                "DELETE",
+                f"/object/{bucket}",
+                json={"prefixes": paths[start : start + MAX_REMOVE_PATHS]},
+            )
 
     async def aclose(self) -> None:
         await self._client.aclose()

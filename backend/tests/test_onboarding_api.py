@@ -16,7 +16,7 @@ from app.db.models import BrandAsset, Business, Job, MagicLink
 from app.db.session import get_session
 from app.main import app
 from app.onboarding import uploads
-from app.storage import get_storage
+from app.storage import StorageError, get_storage
 from tests.conftest import make_image, requires_db
 from tests.fakes import CountingStorage, FakeChannel, FakeStorage
 
@@ -953,3 +953,127 @@ async def test_an_image_over_the_pixel_cap_gets_its_own_error(
     async with sessions() as db:
         asset = await db.get(BrandAsset, uuid.UUID(asset_id))
     assert asset and asset.status == "failed"
+
+
+async def upload_complete_delete(
+    client: httpx.AsyncClient, storage: FakeStorage, token: str, kind: str = "photo"
+) -> None:
+    asset = await upload(client, storage, token, kind=kind)
+    deleted = await client.delete(f"/api/o/{token}/assets/{asset['id']}")
+    assert deleted.status_code == 204
+
+
+async def request_upload(client: httpx.AsyncClient, token: str, kind: str) -> httpx.Response:
+    return await client.post(
+        f"/api/o/{token}/uploads",
+        json={"kind": kind, "filename": "a.jpg", "content_type": "image/jpeg", "size_bytes": 1},
+    )
+
+
+async def test_archiving_photos_does_not_free_uploads_forever(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    for _ in range(onboarding.MAX_PHOTO_UPLOADS):
+        await upload_complete_delete(client, storage, token)
+
+    response = await request_upload(client, token, "photo")
+
+    assert response.status_code == 422
+    assert error_code(response) == "too_many_photos"
+    assert response.json()["error"]["message"] == onboarding.PHOTO_UPLOADS_USED_UP
+
+
+async def test_photos_in_use_are_still_capped_at_fifteen(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    for _ in range(onboarding.MAX_PHOTOS):
+        await upload(client, storage, token)
+
+    response = await request_upload(client, token, "photo")
+
+    assert error_code(response) == "too_many_photos"
+    assert response.json()["error"]["message"] == onboarding.TOO_MANY_PHOTOS
+
+
+async def test_logos_are_capped_while_in_use(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    for _ in range(onboarding.MAX_LOGOS):
+        await upload(client, storage, token, kind="logo", data=make_image((200, 100)))
+
+    response = await request_upload(client, token, "logo")
+
+    assert response.status_code == 422
+    assert error_code(response) == "too_many_logos"
+    assert response.json()["error"]["message"] == onboarding.TOO_MANY_LOGOS
+
+
+async def test_archiving_logos_does_not_free_uploads_forever(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    for _ in range(onboarding.MAX_LOGO_UPLOADS):
+        await upload_complete_delete(client, storage, token, kind="logo")
+
+    response = await request_upload(client, token, "logo")
+
+    assert response.status_code == 422
+    assert error_code(response) == "too_many_logos"
+    assert response.json()["error"]["message"] == onboarding.LOGO_UPLOADS_USED_UP
+
+
+async def test_a_new_photo_still_fits_after_deleting_one_below_the_lifetime_cap(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    await upload_complete_delete(client, storage, token)
+
+    assert (await request_upload(client, token, "photo")).status_code == 200
+
+
+async def test_archiving_deletes_the_files_from_storage(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    kept = await upload(client, storage, token)
+    heic = await upload(
+        client,
+        storage,
+        token,
+        data=make_image((120, 80), format="HEIF"),
+        content_type="image/heic",
+    )
+    before = set(storage.objects)
+    assert len(before) == 2 + 3  # kept: JPEG and copy; HEIC: original, its JPEG and copy
+
+    response = await client.delete(f"/api/o/{token}/assets/{heic['id']}")
+
+    assert response.status_code == 204
+    gone = before - set(storage.objects)
+    assert {path.rsplit("/", 1)[1].split(".")[0] for path in gone} == {
+        heic["id"],
+        f"{heic['id']}-llm",
+    }
+    assert len(gone) == 3
+    assert any(kept["id"] in path for path in storage.objects)
+
+
+async def test_archiving_still_answers_204_when_storage_fails(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    async def broken(bucket: str, paths: list[str]) -> None:
+        raise StorageError("down")
+
+    token = await new_link(client)
+    asset = await upload(client, storage, token)
+    storage.remove = broken  # type: ignore[method-assign]
+
+    response = await client.delete(f"/api/o/{token}/assets/{asset['id']}")
+
+    assert response.status_code == 204
+    async with sessions() as db:
+        row = await db.get(BrandAsset, uuid.UUID(asset["id"]))
+    assert row and row.archived_at is not None

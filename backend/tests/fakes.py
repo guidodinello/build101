@@ -223,6 +223,11 @@ class FakeStorage:
             if f"{bucket}/{path}" in self.objects
         }
 
+    async def remove(self, bucket: str, paths: list[str]) -> None:
+        for path in paths:
+            self.objects.pop(f"{bucket}/{path}", None)
+            self.content_types.pop(f"{bucket}/{path}", None)
+
 
 class CountingStorage(FakeStorage):
     """FakeStorage that counts the downloads asked of it."""

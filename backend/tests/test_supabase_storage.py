@@ -115,6 +115,34 @@ async def test_upload_overwrites_with_the_content_type() -> None:
     assert seen[0].content == b"jpeg"
 
 
+async def test_remove_deletes_the_paths_in_one_request() -> None:
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=[])
+
+    await storage(httpx.MockTransport(handle)).remove("assets", ["b1/a1.jpg", "b1/a1-llm.jpg"])
+
+    assert [request.method for request in seen] == ["DELETE"]
+    assert seen[0].url.path == "/storage/v1/object/assets"
+    assert json.loads(seen[0].content) == {"prefixes": ["b1/a1.jpg", "b1/a1-llm.jpg"]}
+
+
+async def test_remove_splits_past_the_per_request_limit() -> None:
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=[])
+
+    await storage(httpx.MockTransport(handle)).remove(
+        "assets", [f"b1/{n}.jpg" for n in range(1001)]
+    )
+
+    assert [len(json.loads(request.content)["prefixes"]) for request in seen] == [1000, 1]
+
+
 async def test_signed_urls_leave_out_paths_that_failed() -> None:
     seen: list[httpx.Request] = []
 
