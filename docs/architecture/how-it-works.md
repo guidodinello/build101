@@ -111,7 +111,9 @@ Timeouts are 60 s for chat and 90 s for structured calls. Server errors are retr
 
 **What the Agency knows about a Business.** `knowledge/` has one interface, `Knowledge.of(sender)`, that answers with the Business's facts, latest Brand Brain, Catalog, Owner notes, conversation summary and the trend notes of its niche, all read fresh. `DbKnowledge` resolves the Owner's phone to the Business once (`business_of`) and reads everything in one session; if the database fails it logs one warning and answers with nothing known, so a turn or a post goes ahead without it. `LocalKnowledge` serves runs without a database from the in-memory notes and history, and gives every sender the Niche Report saved at `NICHE_REPORT_PATH`. `build_conversation` builds one and gives it to both the orchestrator (which renders it into the system prompt, `conversation/context.py`) and `PostMaker`.
 
-**The model cannot approve a publish on its own.** `approve_post` publishes only the post that `conversation/approval.py` allows, and that check runs in code on the Owner's own words. "subilo" approves; "me encanta", questions and negations do not. Whatever post id the model passes, nothing else goes out ([ADR 0007](../decisions/0007-approve-every-post.md)).
+**One module owns a Post's state.** `posts/lifecycle.py` (`PostLifecycle`) is the only code that assigns `Post.status`: pending → approved → publishing → published, failed or publish_pending, plus discarded and replaced. The button router, the makers, the publisher and the chat ask it ("approve this tap", "retire this post", "may this publish?") and never compare or write status strings. It also holds the Approval inputs per Owner: the numbered list `subilo` showed (`listed`), the post the last reply asked to publish (`offered`) and whether photos came after the pending posts (`has_photos`). Posts live in memory behind it ([ADR 0005](../decisions/0005-single-instance-in-process-jobs.md)); moving them to the database changes its store, not its callers. A test (`tests/test_post_status_writes.py`) fails if another module under `posts/` or `conversation/` assigns a Post's status.
+
+**The model cannot approve a publish on its own.** `approve_post` publishes only the post that `conversation/approval.py` allows, and that check runs in code on the Owner's own words. The publisher accepts only an `ApprovedPost`, which `PostLifecycle` hands out after that check (text) or after the [Aprobar] tap, and after a failure for [Reintentar]. "subilo" approves; "me encanta", questions and negations do not. Whatever post id the model passes, nothing else goes out ([ADR 0007](../decisions/0007-approve-every-post.md)).
 
 ## Making a post
 
@@ -124,7 +126,7 @@ A post is made in the background after the orchestrator calls `create_post` with
     - `design` style: the drafter writes the copy and a carousel brief. `CarouselGenerator` makes the cover first, then the other slides in parallel, each using the cover as its style reference.
 4. **Logo.** It is stamped in code (`media/images.add_logo`), never drawn by the AI ([ADR 0027](../decisions/0027-owner-logo-stamped-in-code.md)).
 5. **Send.** The JPEGs go into `PublicImages` and out to WhatsApp as numbered images, with the caption on the first.
-6. **Keep.** The post is saved in `InMemoryPosts` as `pending_approval`. If it replaces an older post, that one becomes `replaced` and can no longer be published.
+6. **Keep.** The post is saved through `PostLifecycle` (in memory) as `pending_approval`. If it replaces an older post, that one becomes `replaced` and can no longer be published.
 7. **Announce.** A `PostSent` event lets the orchestrator write the message, with Aprobar, Cambiar and Descartar buttons under it. If anything failed, a `PostFailed` event goes out instead.
 
 ## Publishing to Instagram, through Zernio
@@ -178,7 +180,7 @@ Only onboarding data is stored for good; the conversation and the posts live in 
 |---|---|
 | Businesses, onboarding state, magic links | Conversation history (`InMemoryHistory`) |
 | Products and brand assets (wizard photos, logo) | Photos sent on WhatsApp (`InMemoryPhotos`) |
-| Brand Brain versions, Niche Reports | Posts and their status (`InMemoryPosts`) |
+| Brand Brain versions, Niche Reports | Posts and their status (`PostLifecycle`, over `InMemoryPosts`) |
 | Jobs | Generated JPEGs (`PublicImages`, newest 200) |
 | | Webhook dedupe store |
 

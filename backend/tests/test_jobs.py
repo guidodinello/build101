@@ -34,7 +34,7 @@ from app.jobs.brand import generate_brand
 from app.jobs.queue import enqueue, retry_failed
 from app.jobs.runner import JobContext, JobRunner
 from app.llm.client import user_step
-from app.posts.store import InMemoryPosts
+from app.posts.lifecycle import PostLifecycle
 from tests.conftest import make_image, requires_db
 from tests.fakes import EventLog, FakeChannel, FakeStorage, SequenceModel, brand_brain
 
@@ -430,7 +430,7 @@ async def test_a_correction_makes_a_new_version_from_the_previous_one(
 
 
 def router(sessions: async_sessionmaker[AsyncSession]) -> ButtonRouter:
-    return ButtonRouter(InMemoryPosts(), maker=None, publisher=None, sessions=sessions)  # type: ignore[arg-type]
+    return ButtonRouter(PostLifecycle(), maker=None, publisher=None, sessions=sessions)  # type: ignore[arg-type]
 
 
 async def test_brand_ok_activates_the_business_once(
