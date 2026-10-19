@@ -208,4 +208,37 @@ UPDATE_BRAND: Tool = {
     },
 }
 
+# Registered only when VIDEO_GEN_ENABLED is on (`ChatHandler`): with the flag off the model
+# never sees it, and the guards (flag, daily limit) are enforced in code, not by the prompt.
+CREATE_VIDEO: Tool = {
+    "type": "function",
+    "name": "create_video",
+    "description": (
+        "Make a short video (a Reel) from the product photo of a post the Owner already got, "
+        "as a new post next to it: the original stays as it is. Call it only when the Owner "
+        'asked for a video or a Reel of a post ("hacelo video", "armame un reel con esto"); '
+        "never for greetings, questions or comments. It costs money: ask first only if the "
+        "Owner's request is unclear about which post. It returns at once and the video reaches "
+        "the Owner a few minutes later."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "post_id": {
+                "type": "string",
+                "description": "Id of the post to animate, from its [post ... sent] note.",
+            },
+            "direction": {
+                "type": "string",
+                "description": (
+                    "Only when the Owner said how it should look or move ('que gire despacio', "
+                    "'más elegante'), in their words. Empty otherwise."
+                ),
+            },
+        },
+        "required": ["post_id"],
+        "additionalProperties": False,
+    },
+}
+
 TOOLS = [CREATE_POST, REVISE_POST, APPROVE_POST, LIST_POSTS, REMEMBER, FORGET, UPDATE_BRAND]

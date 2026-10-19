@@ -158,7 +158,7 @@ Onboarding starts in WhatsApp, moves to a web wizard for the details, and ends b
 3. For each photo or logo, `POST /onboarding/uploads` returns a signed Supabase Storage URL, and the browser uploads the file straight to Supabase. `POST /onboarding/assets/{id}/complete` then queues an `analyze_asset` job.
 4. `POST /onboarding/complete` queues a `generate_brand` job and sends the Owner "armando tu marca" on WhatsApp.
 
-**The job runner** (`jobs/runner.py`) checks the `jobs` table in Postgres every second and runs up to 4 jobs at once. Jobs are database rows, not an external queue, so they survive restarts, but the backend must run as a single instance ([ADR 0005](../decisions/0005-single-instance-in-process-jobs.md)).
+**The job runner** (`jobs/runner.py`) checks the `jobs` table in Postgres every second and runs up to 4 jobs at once. Jobs are database rows, not an external queue, so they survive restarts, but the backend must run as a single instance ([ADR 0005](../decisions/0005-single-instance-in-process-jobs.md)). It only claims job kinds it has a function for: during a deploy the old instance keeps polling for a few seconds, and without that check it took the first `generate_niche_report` job and failed it with `no function for job kind`.
 
 | Job | What it does | Ends with |
 |---|---|---|

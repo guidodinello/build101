@@ -22,6 +22,15 @@ async def test_publish_accepts_and_ignores_an_idempotency_key() -> None:
     assert result.status == "published"
 
 
+async def test_publish_accepts_a_reel() -> None:
+    reel = PublishMedia(format="reel", url="https://video.test/1.mp4", cover_offset_ms=1000)
+
+    result = await MockPublisher(delay_s=0).publish("acc", "hola", reel)
+
+    assert result.status == "published"
+    assert result.permalink is not None
+
+
 async def test_each_publish_gets_its_own_id() -> None:
     publisher = MockPublisher(delay_s=0)
 

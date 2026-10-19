@@ -129,7 +129,9 @@ class JobRunner:
             jobs = (
                 await db.scalars(
                     select(Job)
-                    .where(Job.status == "queued")
+                    # Only kinds this process can run: during a deploy the old instance keeps
+                    # polling for a few seconds and must leave a new kind to the new one.
+                    .where(Job.status == "queued", Job.kind.in_(self._jobs))
                     .order_by(Job.created_at)
                     .limit(free)
                     .with_for_update(skip_locked=True)

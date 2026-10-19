@@ -187,6 +187,8 @@ type SimMessage = {
 
 Free-text approvals ("subilo", "publicalo") reach the same handlers through the orchestrator's `approve_post` tool ([agents.md](agents.md#conversation-rules)). Format: `<action>:<entity_id>`, or `<action>:<entity_id>:<n>` for `variation_pick` (≤ 256 chars). Parsed by `conversation/button_router.py`. Unknown or stale IDs (entity in a state that doesn't allow the action) → send `stale_button` and do nothing else.
 
+**Video Posts** (`create_video`, [agents.md](agents.md#when-video-generation-runs)) reuse the `post_*` IDs below with no new button: the video message carries `post_approve`, `post_change` and `post_discard` with the video Post's id and the clip as the header (`send_buttons(header_video_url=...)`). `post_publish` publishes it as a Reel (`PublishMedia.format = "reel"`, `ai_generated = true`). `post_replace` after discarding a video makes another video from the same photo (it counts against the daily video limit) and is one-shot: the discarded video becomes `replaced`, so a second tap is stale and cannot bill another clip. The original image Post is untouched. `post_change` on a video has no revise: the Owner asks for another take by writing.
+
 | ID | Allowed when | Handler |
 |---|---|---|
 | `brand_ok` | `awaiting_brand_confirmation` | state → `active`, send `ready_open_chat` ("¿En qué te puedo ayudar hoy?", F1.10). No plan is proposed |
@@ -297,7 +299,13 @@ class PublishMedia(BaseModel):
     format: Literal["image", "reel", "carousel"]
     url: str | None                    # image/reel: public or long-lived signed URL of the picked variation or the Owner's video
     urls: list[str] = []               # carousel, in slide order, ≤ 10 JPEGs (ADR 0022)
-    cover_offset_ms: int | None = None # reel only
+    cover_offset_ms: int | None = None # reel only: ms into the video for the cover; Zernio `thumbOffset`, ≥ 0
+    ai_generated: bool = False         # any format: Zernio `isAiGenerated`, Instagram's "AI-generated" label; sent only when true
+
+# ZernioPublisher mapping: image/carousel → image mediaItems; reel → one {"type": "video", "url"} item,
+# no contentType (a single video publishes as a Reel). A reel without `url`, or with a negative
+# `cover_offset_ms`, raises ValueError before any request. Reels can take a minute or more to
+# process, so the result may come back `pending` (same poll as images).
 
 # app/imagegen/base.py  (ADR 0018, 0019; IMAGE_GEN = gemini | openai | mock)
 class GeneratedImage(BaseModel):
@@ -313,6 +321,37 @@ class ImageGenPort(Protocol):
                        style_image: bytes | None = None, *, aspect_ratio: str | None = None,
                        image_size: str | None = None) -> GeneratedImage: ...   # one image per call; style_image = carousel anchor; ratio/size override 4:5 (panorama)
 # errors: ImageGenError (base), ImageGenBlocked(reason), ImageGenNoImage, ImageGenUnavailable
+
+# app/videogen/base.py  (ADR 0033; VIDEO_GEN = gemini | mock, only built when VIDEO_GEN_ENABLED=true)
+class GeneratedVideo(BaseModel):
+    data: bytes                        # an MP4
+    mime: str                          # video/mp4
+    provider: str                      # gemini | mock
+    model: str | None
+    duration_seconds: int              # Veo bills per second
+
+class VideoGenPort(Protocol):
+    async def generate(self, prompt: str, reference_images: list[bytes], *,
+                       aspect_ratio: str = "9:16", duration_seconds: int = 8) -> GeneratedVideo: ...
+    # one clip per call; ratio 9:16 | 16:9, duration 4 | 6 | 8 (anything else: ValueError, no call made).
+    # Lite (default model): reference_images[0] is the first frame, the rest are dropped.
+    # Fast/Standard: up to 3 ASSET references, which force 8 s.
+# errors: VideoGenError (base), VideoGenBlocked(reason), VideoGenNoVideo, VideoGenRejected (4xx
+#         except 408/429: the request was refused), VideoGenUnavailable (5xx, 408, 429, network,
+#         failed operation), VideoGenTimeout (a VideoGenUnavailable)
+# Never auto-retry generate(): a timeout abandons an operation Google may still finish and bill,
+# so a retry can bill a second clip. Only VideoGenBlocked is known not to bill. Surface the error.
+# person_generation: "allow_adult" is sent only with a first frame or references; text-only calls
+# leave it unset (Veo accepts only "allow_all" there, the default).
+# app/videogen/factory.py: build_video_gen(settings) -> VideoGenPort | None   # None while the flag is off
+
+# app/media/public.py  (MP4s next to the JPEGs; in memory, lost on restart)
+class PublicVideos:
+    def add(self, data: bytes) -> str: ...            # "/media/{token}.mp4", relative to the public URL
+    def keep(self, path: str, data: bytes) -> None: ... # serve again as the newest; cap 20 clips
+    def serve_from(self, lookup: Callable[[str], bytes | None]) -> None: ...  # wired with InMemoryPosts.video
+    def get(self, token: str) -> bytes | None: ...    # cache, else the clip of a Post still in the store
+# GET | HEAD /media/{token}.mp4 -> video/mp4 (no Range support yet)
 
 # app/media/images.py
 def to_post_image(data: bytes) -> bytes: ...       # center-crop to 4:5 and resize to 1080x1350 JPEG
