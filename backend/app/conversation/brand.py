@@ -3,10 +3,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import Business
 from app.jobs.queue import enqueue
-
-AWAITING_CORRECTION = "brand_correction"
-REVISABLE_STATES = ("awaiting_brand_confirmation", "active")
-RESUME_STATE = "resume_state"
+from app.onboarding.state import (
+    REVISABLE,
+    OnboardingState,
+    ask_for_brand_correction,
+    confirm_brand,
+    start_brand_revision,
+)
 
 
 class BrandFlow:
@@ -21,8 +24,7 @@ class BrandFlow:
             business = await self._awaiting_confirmation(db, sender)
             if business is None:
                 return False
-            business.onboarding_state = "active"
-            business.conversation_state = {}
+            confirm_brand(business)
             await db.commit()
         return True
 
@@ -32,7 +34,7 @@ class BrandFlow:
             business = await self._awaiting_confirmation(db, sender)
             if business is None:
                 return False
-            business.conversation_state = {"awaiting": AWAITING_CORRECTION}
+            ask_for_brand_correction(business)
             await db.commit()
         return True
 
@@ -46,16 +48,13 @@ class BrandFlow:
                 select(Business)
                 .where(
                     Business.owner_phone == sender,
-                    Business.onboarding_state.in_(REVISABLE_STATES),
+                    Business.onboarding_state.in_(REVISABLE),
                 )
                 .with_for_update()
             )
             if business is None:
                 return False
-            # Where a failed revision puts the Business back (`generate_brand`).
-            business.conversation_state = {RESUME_STATE: business.onboarding_state}
-            # Back to generating: the old summary's buttons go stale until the new one arrives.
-            business.onboarding_state = "generating_brand"
+            start_brand_revision(business)
             enqueue(db, "generate_brand", business.id, {"correction": change})
             await db.commit()
         return True
@@ -65,7 +64,7 @@ class BrandFlow:
             select(Business)
             .where(
                 Business.owner_phone == sender,
-                Business.onboarding_state == "awaiting_brand_confirmation",
+                Business.onboarding_state == OnboardingState.AWAITING_BRAND_CONFIRMATION,
             )
             .with_for_update()
         )

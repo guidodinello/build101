@@ -25,6 +25,7 @@ from app.db.session import get_session
 from app.jobs.queue import enqueue
 from app.onboarding import schemas
 from app.onboarding.links import hash_token
+from app.onboarding.state import form_submitted
 from app.onboarding.uploads import (
     EXTENSIONS,
     UnreadableImage,
@@ -348,7 +349,7 @@ async def complete_onboarding(
 
     await _check_complete(session, business)
     link.completed_at = datetime.now(UTC)
-    business.onboarding_state = "generating_brand"
+    form_submitted(business)
     enqueue(session, "generate_brand", business.id, {})
     await session.commit()
     if business.channel == "whatsapp":

@@ -12,6 +12,13 @@ from app.channels.inbound import InboundHandler, mask
 from app.copy import messages_es
 from app.db.models import Business
 from app.onboarding.links import add_onboarding_link, onboarding_url
+from app.onboarding.state import (
+    BEFORE_THE_FORM,
+    OnboardingState,
+    name_received,
+    state_of,
+    welcome,
+)
 
 from .chat import mark_read
 
@@ -67,26 +74,26 @@ class OnboardingGate:
             if business is None:
                 business = Business(owner_phone=message.sender)
                 db.add(business)
-            state = business.onboarding_state or "new"
-            if state not in {"new", "awaiting_name", "awaiting_web_form"}:
+            state = state_of(business)
+            if state not in BEFORE_THE_FORM:
                 return None
             if message.kind == "album":
                 return ""
 
             name = business_name(message)
-            if state == "new":
-                business.onboarding_state = "awaiting_name"
+            if state == OnboardingState.NEW:
+                welcome(business)
                 self._welcomed_at[message.sender] = time.time()
                 reply = self._welcome(message.sender)
-            elif state == "awaiting_name" and self._written_before_welcome(message):
+            elif state == OnboardingState.AWAITING_NAME and self._written_before_welcome(message):
                 return ""
-            elif state == "awaiting_name" and name is not None:
+            elif state == OnboardingState.AWAITING_NAME and name is not None:
                 business.name = name
-                business.onboarding_state = "awaiting_web_form"
+                name_received(business)
                 reply = messages_es.name_ack_link(name, self._new_link(db, business))
             elif self._prompted_recently(message.sender):
                 return ""
-            elif state == "awaiting_name":
+            elif state == OnboardingState.AWAITING_NAME:
                 reply = self._welcome(message.sender)
             else:
                 reply = messages_es.link_reminder(self._new_link(db, business))
