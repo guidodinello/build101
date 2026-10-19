@@ -33,7 +33,7 @@ from app.jobs.runner import JobContext, JobRunner, PeriodicCheck
 from app.knowledge.db import DbKnowledge, latest_niche_report
 from app.llm.client import Content, Grounded, Tool
 from tests.conftest import requires_db
-from tests.fakes import FakeChannel, FakeStorage, SequenceModel
+from tests.fakes import EventLog, FakeChannel, FakeStorage, SequenceModel
 
 NICHE = CURATED_WOOD_FURNITURE_UY
 MONTEVIDEO = "America/Montevideo"
@@ -221,7 +221,13 @@ async def test_the_job_writes_the_niches_report_and_a_retry_replaces_it(
 ) -> None:
     def context() -> JobContext:
         return JobContext(
-            uuid.uuid4(), None, sessions, FakeStorage(), FakeChannel(), SequenceModel([])
+            uuid.uuid4(),
+            None,
+            sessions,
+            FakeStorage(),
+            FakeChannel(),
+            SequenceModel([]),
+            EventLog(),
         )
 
     payload = {"niche_id": NICHE.id, "week_start": MONDAY.isoformat()}
@@ -289,6 +295,7 @@ async def test_the_runner_runs_its_checks_when_it_starts_and_survives_a_failing_
         FakeStorage(),
         FakeChannel(),
         SequenceModel([]),
+        EventLog(),
         poll_interval_s=0.01,
         checks=checks,
     )

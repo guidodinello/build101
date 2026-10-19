@@ -4,10 +4,11 @@ Code never writes the Owner's message: it emits one of these, the orchestrator r
 in the conversation history and answers. Primitives only, so `posts/` can import this module.
 """
 
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from app.channels.base import Button, ChannelPort
+from app.channels.base import ChannelPort
 from app.copy import messages_es
 
 
@@ -239,6 +240,41 @@ class PublishStarted:
 
 
 @dataclass(frozen=True, slots=True)
+class BrandSummaryReady:
+    """The Brand Brain's summary, as the Brand Strategist wrote it, for the Owner to confirm."""
+
+    business_name: str
+    summary: str
+
+    def note(self) -> str:
+        return (
+            "[brand summary sent] The Owner got the summary of their brand (<brand_summary_sent>) "
+            "with the buttons Sí, es mi marca and Corregir algo."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class JobFailed:
+    job_id: uuid.UUID
+    kind: str
+
+    def note(self) -> str:
+        return (
+            f"[job {self.kind} failed] It could not be finished. The Owner can try again with "
+            "the Reintentar button under the message they got."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class BrandGenerating:
+    def note(self) -> str:
+        return (
+            "[brand generating] The Owner submitted the form; the summary of their brand "
+            "arrives in about a minute."
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ActionFailed:
     def note(self) -> str:
         return "[action failed] Something broke handling the Owner's tap; nothing changed."
@@ -267,38 +303,24 @@ Event = (
     | PostStarted
     | PostNotStarted
     | PublishStarted
+    | BrandSummaryReady
+    | JobFailed
+    | BrandGenerating
     | ActionFailed
 )
 
-# Called as (sender, event, channel). Whoever answers it owns the sender's history lock.
+# Called as (sender, event, channel). Whoever answers it owns the sender's history lock. A verbatim
+# event's `ChannelError` reaches the caller; any other failure is logged by the notifier.
 Notify = Callable[[str, Event, ChannelPort], Awaitable[None]]
 
-
-def buttons(event: Event) -> list[Button]:
-    """The buttons that go under the model's message about `event` (T18)."""
-    match event:
-        case PostSent(post_id=post_id) | VideoSent(post_id=post_id):
-            return [
-                Button(id=f"post_approve:{post_id}", title=messages_es.BUTTON_APPROVE),
-                Button(id=f"post_change:{post_id}", title=messages_es.BUTTON_CHANGE),
-                Button(id=f"post_discard:{post_id}", title=messages_es.BUTTON_DISCARD),
-            ]
-        case PostApproved(post_id=post_id):
-            return [Button(id=f"post_publish:{post_id}", title=messages_es.BUTTON_PUBLISH_NOW)]
-        case PostDiscarded(post_id=post_id):
-            return [
-                Button(id=f"post_replace:{post_id}", title=messages_es.BUTTON_ANOTHER),
-                Button(id="noop", title=messages_es.BUTTON_NO_THANKS),
-            ]
-        case PublishFailed(post_id=post_id):
-            return [Button(id=f"post_retry:{post_id}", title=messages_es.BUTTON_RETRY)]
-        case _:
-            return []
+# The events whose fixed text is the message itself: the model never writes them, it only reads
+# their note. The summary is the Brand Strategist's own text and what `<brand_summary_sent>` says
+# the Owner saw; the other two are what jobs and the onboarding API have always sent.
+VERBATIM = (BrandSummaryReady, JobFailed, BrandGenerating)
 
 
-def header_video_url(event: Event) -> str | None:
-    """The video that goes as the header of the buttons message about `event`."""
-    return event.video_url if isinstance(event, VideoSent) else None
+def verbatim(event: Event) -> bool:
+    return isinstance(event, VERBATIM)
 
 
 POST_NOT_STARTED = {
@@ -365,3 +387,9 @@ def fallback(event: Event) -> str | None:
             return messages_es.PUBLISHING
         case ActionFailed():
             return messages_es.REPLY_FAILED
+        case BrandSummaryReady(business_name=name, summary=summary):
+            return messages_es.brand_summary(name, summary)
+        case JobFailed():
+            return messages_es.JOB_FAILED
+        case BrandGenerating():
+            return messages_es.BRAND_GENERATING

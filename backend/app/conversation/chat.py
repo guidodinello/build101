@@ -9,7 +9,7 @@ from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.channels.base import Button, ChannelError, ChannelPort, InboundMedia, InboundMessage
+from app.channels.base import ChannelError, ChannelPort, InboundMedia, InboundMessage
 from app.channels.inbound import mask
 from app.copy import messages_es
 from app.knowledge.base import Knowledge
@@ -49,13 +49,13 @@ from .events import (
     StaleButton,
     UnsupportedMedia,
     VideoSent,
-    buttons,
     fallback,
-    header_video_url,
+    verbatim,
 )
 from .history import Compactor, History
 from .library import BrandLibrary
 from .notes import InMemoryNotes, OwnerNotes
+from .outbound import send
 from .photo_keeper import PhotoKeeper
 from .photos import InMemoryPhotos, Photo, local_now
 from .tools import CREATE_VIDEO, TOOLS
@@ -71,7 +71,6 @@ BYTES_PER_MB = 1024 * 1024
 PHOTO_DEBOUNCE_S = 5.0
 # WhatsApp hides the typing indicator after about 25 s, and as soon as we send a message.
 KEEP_ALIVE_S = 20.0
-WHATSAPP_BODY_MAX = 1024
 # The Owner's turns resolve references and decide on paid generations; events are one-liners.
 OWNER_THINKING: ThinkingLevel = "medium"
 EVENT_THINKING: ThinkingLevel = "low"
@@ -327,11 +326,16 @@ class ChatHandler:
         """The model's own message about `event` (ADR 0026), under the sender's history lock.
 
         Runs after any Owner turn in progress, never interleaved with it. Failures are logged:
-        nobody awaits the producers that call this.
+        nobody awaits the producers that call this. The exception is a verbatim event's
+        `ChannelError`: its caller (a job) must know the Owner never got it.
         """
         try:
             async with self._history.lock(sender):
                 await self._event_turn(sender, event, channel)
+        except ChannelError:
+            if verbatim(event):
+                raise
+            logger.exception("%s event failed for %s", type(event).__name__, mask(sender))
         except Exception:
             # The task's boundary, like the photo batches.
             logger.exception("%s event failed for %s", type(event).__name__, mask(sender))
@@ -349,6 +353,14 @@ class ChatHandler:
         note = event.note()
         step = user_step(note)
         past = await self._history.get(sender)
+        if verbatim(event):
+            # Its text is fixed (the Owner reads it as written), so no model turn. The note goes
+            # in after the send: a message that never reached the Owner leaves no note.
+            text = fallback(event)
+            if text is not None:
+                await send(channel, sender, text, event)
+            await self._remember_turn(sender, past, [step])
+            return
         if isinstance(event, PostSent | VideoSent):
             post = self._lifecycle.get(sender, event.post_id)
             if post is None or not self._lifecycle.awaiting_approval(post):
@@ -398,7 +410,7 @@ class ChatHandler:
         await self._remember_turn(sender, past, [step, *turn])
         self._lifecycle.note_reply(sender, text, offered_post(event))
         log_reply(sender, text)
-        await send_with_buttons(sender, text, buttons(event), channel, header_video_url(event))
+        await send(channel, sender, text, event)
 
     async def _send_fallback(
         self, sender: str, past: list[Step], event: Event, step: Step, channel: ChannelPort
@@ -413,7 +425,7 @@ class ChatHandler:
         told = user_step(f'{event.note()}\nThe Owner was told: "{text}"')
         await self._remember_turn(sender, past, [told])
         self._lifecycle.note_reply(sender, text, offered_post(event))
-        await send_with_buttons(sender, text, buttons(event), channel, header_video_url(event))
+        await send(channel, sender, text, event)
 
     async def _converse(
         self,
@@ -604,25 +616,6 @@ def request(photos: list[Photo], text: str) -> str:
         return text
     label = "foto" if len(photos) == 1 else "fotos"
     return f"[{label} {' '.join(photo.id for photo in photos)}] {text}"
-
-
-async def send_with_buttons(
-    sender: str,
-    text: str,
-    attached: list[Button],
-    channel: ChannelPort,
-    video_url: str | None = None,
-) -> None:
-    """`text`, with the event's buttons under it when it has some (T18), and `video_url` as the
-    header of the buttons message when there is one."""
-    if not attached:
-        await channel.send_text(sender, text)
-        return
-    if len(text) > WHATSAPP_BODY_MAX:
-        # Over the limit of a buttons message's body: the text first, then the buttons.
-        await channel.send_text(sender, text)
-        text = "👆"
-    await channel.send_buttons(sender, text, attached, header_video_url=video_url)
 
 
 def step_with_photos(

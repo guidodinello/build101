@@ -11,6 +11,7 @@ from app.channels.inbound import InMemoryDedupeStore
 from app.channels.router import (
     MAX_BODY_BYTES,
     get_channel,
+    get_conversation,
     get_dedupe_store,
     get_inbound_handler,
 )
@@ -151,7 +152,7 @@ def test_health_boots_without_any_kapso_config() -> None:
 
 
 def test_the_app_does_not_boot_without_a_gemini_key() -> None:
-    get_inbound_handler.cache_clear()
+    get_conversation.cache_clear()
 
     with pytest.raises(ValueError, match="GEMINI_API_KEY"), TestClient(app):
         pass

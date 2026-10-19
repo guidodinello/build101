@@ -15,8 +15,8 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.channels.base import Button, ChannelError, ChannelPort
-from app.copy import messages_es
+from app.channels.base import ChannelError, ChannelPort
+from app.conversation.events import JobFailed, Notify
 from app.db.models import Business, Job
 from app.llm.client import ChatModel
 from app.storage import StoragePort
@@ -39,6 +39,7 @@ class JobContext:
     storage: StoragePort
     channel: ChannelPort
     model: ChatModel
+    notify: Notify
 
 
 JobFunction = Callable[[JobContext, dict[str, Any]], Awaitable[dict[str, Any] | None]]
@@ -57,8 +58,8 @@ class PeriodicCheck:
 class JobRunner:
     """Runs `jobs` rows with their function from `jobs`, at most `max_concurrent` at a time.
 
-    A failed job of a kind in `notify_on_failure` sends `job_failed` with a `retry:{job_id}`
-    button to the Business's Owner; other failures are only logged.
+    A failed job of a kind in `notify_on_failure` raises `JobFailed` (its `retry:{job_id}` button
+    goes with it) for the Business's Owner through `notify`; other failures are only logged.
     """
 
     def __init__(
@@ -68,6 +69,7 @@ class JobRunner:
         storage: StoragePort,
         channel: ChannelPort,
         model: ChatModel,
+        notify: Notify,
         notify_on_failure: frozenset[str] = frozenset(),
         max_concurrent: int = MAX_CONCURRENT_JOBS,
         poll_interval_s: float = POLL_INTERVAL_S,
@@ -78,6 +80,7 @@ class JobRunner:
         self._storage = storage
         self._channel = channel
         self._model = model
+        self._notify = notify
         self._notify_on_failure = notify_on_failure
         self._max_concurrent = max_concurrent
         self._poll_interval_s = poll_interval_s
@@ -183,7 +186,13 @@ class JobRunner:
         self, job_id: uuid.UUID, kind: str, business_id: uuid.UUID | None, payload: dict[str, Any]
     ) -> None:
         context = JobContext(
-            job_id, business_id, self._sessions, self._storage, self._channel, self._model
+            job_id,
+            business_id,
+            self._sessions,
+            self._storage,
+            self._channel,
+            self._model,
+            self._notify,
         )
         result: dict[str, Any] | None = None
         error: str | None = None
@@ -212,18 +221,14 @@ class JobRunner:
         self._running_ids.discard(job_id)
         logger.info("job %s (%s): %s", job_id, kind, "failed" if error else "succeeded")
         if error and kind in self._notify_on_failure and business_id:
-            await self._tell_owner(job_id, business_id)
+            await self._tell_owner(job_id, kind, business_id)
 
-    async def _tell_owner(self, job_id: uuid.UUID, business_id: uuid.UUID) -> None:
+    async def _tell_owner(self, job_id: uuid.UUID, kind: str, business_id: uuid.UUID) -> None:
         async with self._sessions() as db:
             business = await db.get_one(Business, business_id)
         if business.channel != "whatsapp":
             return
         try:
-            await self._channel.send_buttons(
-                business.owner_phone,
-                messages_es.JOB_FAILED,
-                [Button(id=f"retry:{job_id}", title=messages_es.BUTTON_RETRY)],
-            )
+            await self._notify(business.owner_phone, JobFailed(job_id, kind), self._channel)
         except ChannelError:
             logger.warning("could not tell the Owner that job %s failed", job_id, exc_info=True)
