@@ -10,9 +10,10 @@ from app.conversation.photos import InMemoryPhotos
 from app.copy import messages_es
 from app.media.public import PublicImages
 from app.posts.drafts import PostDrafter
+from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import PostMaker
 from app.posts.publish import MAX_RETRY_AFTER_S, PostPublisher
-from app.posts.store import InMemoryPosts, Post, PostImage, PostVideo
+from app.posts.store import Post, PostImage, PostVideo
 from app.publishing.base import (
     PublisherError,
     PublishInProgress,
@@ -59,7 +60,7 @@ class Rig:
         self.sleeps: list[float] = []
         self.channel = FakeChannel()
         self.photos, self.history = InMemoryPhotos(), InMemoryHistory()
-        self.store, self.images = InMemoryPosts(), PublicImages(max_images)
+        self.store, self.images = PostLifecycle(), PublicImages(max_images)
 
         async def sleep(seconds: float) -> None:
             self.sleeps.append(seconds)
@@ -466,7 +467,7 @@ async def test_a_number_picks_the_post_that_was_listed_even_if_the_list_changed(
     rig.add_post("p3")
 
     await rig.say("subilo")
-    first.status = "replaced"  # a remake retired p1 after the Owner saw the numbered list
+    rig.store.replace(first)  # a remake retired p1 after the Owner saw the numbered list
     await rig.say("la segunda")  # "2" was p2 in that list
     await rig.finish()
 
@@ -481,7 +482,7 @@ async def test_a_listed_post_that_is_no_longer_pending_is_not_approved_by_its_nu
     rig.add_post("p3")
 
     await rig.say("subilo")
-    chosen.status = "replaced"
+    rig.store.replace(chosen)
     await rig.say("la segunda")  # p2 is gone; the model must not slide to another post
     await rig.finish()
 

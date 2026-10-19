@@ -14,9 +14,10 @@ from app.conversation.events import (
 from app.conversation.photos import InMemoryPhotos
 from app.media.public import PublicImages
 from app.posts.drafts import PostCopy, PostDrafter
+from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
-from app.posts.store import InMemoryPosts, Post, PostImage, PostStatus
+from app.posts.store import Post, PostImage, PostStatus
 from app.publishing.base import PublishResult
 from app.rendering.mock import MockRenderer
 from tests.conftest import make_image
@@ -40,7 +41,7 @@ class RecordingPublisher:
 class Rig:
     def __init__(self) -> None:
         self.model = ScriptedModel(drafts={PostCopy: PostCopy(caption="Mesa", hashtags=[])})
-        self.photos, self.store = InMemoryPhotos(), InMemoryPosts()
+        self.photos, self.store = InMemoryPhotos(), PostLifecycle()
         images = PublicImages()
         self.maker = PostMaker(
             PostDrafter(self.model),

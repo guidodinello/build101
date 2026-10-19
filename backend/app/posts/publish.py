@@ -19,7 +19,8 @@ from app.publishing.base import (
     PublishRetryable,
 )
 
-from .store import APPROVABLE, InMemoryPosts, Post
+from .lifecycle import ApprovedPost, PostLifecycle
+from .store import Post
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class PostPublisher:
     def __init__(
         self,
         publisher: PublisherPort,
-        posts: InMemoryPosts,
+        posts: PostLifecycle,
         images: PublicImages,
         public_base_url: str,
         account_id: str | None,
@@ -79,37 +80,31 @@ class PostPublisher:
             args = ApprovePostArgs.model_validate(arguments)
         except ValidationError as exc:
             return {"error": "invalid_arguments", "detail": str(exc)}
-        post = self._posts.get(sender, args.post_id)
-        if post is None:
-            return {"error": "unknown_post"}
-        if post.status not in APPROVABLE:
-            return {"error": "post_not_pending", "status": post.status}
-        if approval.post_id != post.id:
-            result: dict[str, Any] = {"error": approval.reason}
-            if approval.pending:
-                result["pending"] = approval.pending
-            return result
-        return self._start(post, channel)
+        approved = self._posts.authorize_text(sender, args.post_id, approval)
+        if isinstance(approved, dict):
+            return approved
+        return self._start(approved, channel)
 
-    def publish_approved(self, post: Post, channel: ChannelPort) -> dict[str, Any]:
+    def publish_approved(self, sender: str, post_id: str, channel: ChannelPort) -> dict[str, Any]:
         """[Publicar ahora]: the tap is the Owner's explicit approval (ADR 0007)."""
-        if post.status != "approved":
-            return {"error": "post_not_approved", "status": post.status}
-        return self._start(post, channel)
+        approved = self._posts.authorize_tap(sender, post_id)
+        if approved is None:
+            return {"error": "post_not_approved"}
+        return self._start(approved, channel)
 
-    def retry(self, post: Post, channel: ChannelPort) -> dict[str, Any]:
+    def retry(self, sender: str, post_id: str, channel: ChannelPort) -> dict[str, Any]:
         """[Reintentar] after a definite failure, under a new idempotency key."""
-        if post.status != "failed":
-            return {"error": "post_not_failed", "status": post.status}
-        return self._start(post, channel)
+        approved = self._posts.authorize_retry(sender, post_id)
+        if approved is None:
+            return {"error": "post_not_failed"}
+        return self._start(approved, channel)
 
-    def _start(self, post: Post, channel: ChannelPort) -> dict[str, Any]:
+    def _start(self, approved: ApprovedPost, channel: ChannelPort) -> dict[str, Any]:
         account_id = self._account_id
         if account_id is None:
-            logger.warning("cannot publish post %s: ZERNIO_ACCOUNT_ID is not set", post.id)
+            logger.warning("cannot publish post %s: ZERNIO_ACCOUNT_ID is not set", approved.post.id)
             return {"error": "need_ig"}
-        post.status = "publishing"  # before the task starts, so a second "subilo" finds it busy
-        post.publish_attempts += 1
+        post = self._posts.begin_publish(approved)
         task = asyncio.create_task(self._publish(post, account_id, channel))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -181,16 +176,13 @@ class PostPublisher:
         event: Event
         match result.status:
             case "published":
-                post.status = "published"
-                post.permalink = result.permalink
-                post.external_post_id = result.external_post_id
+                self._posts.published(post, result.permalink, result.external_post_id)
                 event = Published(post.id, result.permalink)
             case "failed":
-                post.status = "failed"
+                self._posts.failed(post)
                 event = PublishFailed(post.id)
             case _:  # pending (or scheduled): it may be live, so no failure and no re-publish
-                post.status = "publish_pending"
-                post.external_post_id = result.external_post_id
+                self._posts.publish_pending(post, result.external_post_id)
                 event = PublishPending(post.id)
         logger.info("post %s: %s (%s)", post.id, post.status, result.error or "ok")
         if self._notify is None:

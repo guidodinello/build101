@@ -22,7 +22,8 @@ from app.videogen.base import (
     VideoGenUnavailable,
 )
 
-from .store import APPROVABLE, InMemoryPosts, Post, PostVideo
+from .lifecycle import PostLifecycle
+from .store import Post, PostVideo
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class VideoMaker:
     def __init__(
         self,
         video_gen: VideoGenPort,
-        posts: InMemoryPosts,
+        posts: PostLifecycle,
         videos: PublicVideos,
         public_base_url: str,
         max_videos_per_day: int,
@@ -83,11 +84,9 @@ class VideoMaker:
             args = CreateVideoArgs.model_validate(arguments)
         except ValidationError as exc:
             return {"error": "invalid_arguments", "detail": str(exc)}
-        source = self._posts.get(sender, args.post_id)
-        if source is None:
-            return {"error": "unknown_post"}
-        if source.status not in APPROVABLE:
-            return {"error": "post_not_pending", "status": source.status}
+        source = self._posts.approvable_post(sender, args.post_id)
+        if isinstance(source, dict):
+            return source
         if source.video is not None:
             return {"error": "already_video"}
         return self._start(sender, source.source_photos, source.caption, args.direction, channel)

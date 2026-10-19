@@ -43,9 +43,10 @@ from app.copy import messages_es
 from app.llm.client import Step, user_step
 from app.media.public import PublicImages
 from app.posts.drafts import CarouselDraft, PostCopy, PostDrafter, SlideDraft
+from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
-from app.posts.store import InMemoryPosts, Post, PostImage
+from app.posts.store import Post, PostImage
 from app.publishing.mock import MOCK_ACCOUNT_ID, MockPublisher
 from app.rendering.mock import MockRenderer
 from app.storage import StorageError
@@ -131,7 +132,7 @@ def build(
     photos, history, store, images = (
         InMemoryPhotos(),
         InMemoryHistory(),
-        InMemoryPosts(),
+        PostLifecycle(),
         PublicImages(),
     )
     posts = PostMaker(
@@ -652,7 +653,7 @@ async def test_the_model_answers_the_sent_note_with_its_own_words(
     assert step_text(model.calls[2][-1]).startswith(f"[post {POST_ID} sent to the Owner]")
     assert channel.sent[-1] == (SENDER, FOLLOW_UP)
     assert [step_text(step) for step in (await chat._history.get(SENDER))][-1:] == [""]  # the reply
-    assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
+    assert chat._lifecycle.get(SENDER, POST_ID).status == "pending_approval"
 
 
 async def test_the_note_turn_cannot_approve_and_keeps_the_numbered_list(
@@ -661,15 +662,15 @@ async def test_the_note_turn_cannot_approve_and_keeps_the_numbered_list(
     approve = call_reply("approve_post", post_id=POST_ID, next="publish_now")
     model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳"), approve, text_reply("¿Lo subo?")])
     chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
-    chat._store.set_listed(SENDER, ["other"])
+    show_numbered_list(chat, "o1", "o2")
 
     gate.set()
     await posts.join()
 
     result = json.loads(model.calls[3][-1]["result"])
     assert result == {"error": "approval_not_explicit"}
-    assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
-    assert chat._store.listed(SENDER) == ["other"]
+    assert chat._lifecycle.get(SENDER, POST_ID).status == "pending_approval"
+    assert second_listed(chat) == "o2"
     assert channel.sent[-1] == (SENDER, "¿Lo subo?")
 
 
@@ -682,7 +683,7 @@ async def test_the_note_turn_cannot_start_another_post(monkeypatch: pytest.Monke
 
     assert json.loads(model.calls[3][-1]["result"]) == {"error": "not_owner_request"}
     assert len(channel.images) == 1
-    assert len(chat._store.pending(SENDER)) == 1
+    assert len(chat._lifecycle.pending(SENDER)) == 1
 
 
 async def test_the_follow_up_waits_for_an_owner_turn_in_progress(
@@ -717,10 +718,10 @@ async def test_a_post_approved_before_the_follow_up_gets_no_question(
     async with chat._history.lock(SENDER):
         gate.set()
         for _ in range(100):
-            if chat._store.get(SENDER, POST_ID):
+            if chat._lifecycle.get(SENDER, POST_ID):
                 break
             await asyncio.sleep(0.01)
-        chat._store.get(SENDER, POST_ID).status = "publishing"
+        chat._lifecycle.approve(SENDER, POST_ID)
     await posts.join()
 
     assert len(model.calls) == 2
@@ -742,7 +743,7 @@ async def test_a_failing_follow_up_sends_only_the_buttons_and_keeps_the_post(
     # No follow-up and no JOB_FAILED: only the post's buttons, with their fixed line.
     assert channel.sent == [(SENDER, "Dale ⏳"), (SENDER, messages_es.post_actions())]
     assert len(channel.images) == 1
-    assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
+    assert chat._lifecycle.get(SENDER, POST_ID).status == "pending_approval"
     texts = [step_text(step) for step in (await chat._history.get(SENDER))]
     assert any(text.startswith(f"[post {POST_ID} sent") for text in texts)
 
@@ -758,7 +759,22 @@ async def test_text_next_to_tool_calls_on_the_last_step_is_not_a_reply() -> None
 
 
 def pending_post(chat: ChatHandler) -> None:
-    chat._store.add(Post(POST_ID, SENDER, [PostImage("/media/x.jpg", b"jpeg")], "Texto"))
+    chat._lifecycle.add(Post(POST_ID, SENDER, [PostImage("/media/x.jpg", b"jpeg")], "Texto"))
+
+
+def show_numbered_list(chat: ChatHandler, *post_ids: str) -> None:
+    """The Owner said "subilo" with several posts pending and was shown them as a numbered list."""
+    for post_id in post_ids:
+        chat._lifecycle.add(Post(post_id, SENDER, [PostImage("/media/y.jpg", b"jpeg")], "Otro"))
+    approval = chat._lifecycle.approval_for(SENDER, "subilo", attached=False, recent_photos=[])
+    assert approval.reason == "several_pending"
+
+
+def second_listed(chat: ChatHandler) -> str | None:
+    """The post "la segunda" names, so whether the numbered list is still the one the Owner saw."""
+    return chat._lifecycle.approval_for(
+        SENDER, "la segunda", attached=False, recent_photos=[]
+    ).post_id
 
 
 SENT = PostSent(POST_ID, 1, "photos", ("f1",), (), "Texto")
@@ -796,15 +812,15 @@ async def test_every_event_is_one_model_turn_that_cannot_approve(event: Event) -
     model, channel = ScriptedModel(replies=[approve, text_reply("Ok")]), FakeChannel()
     chat, _ = build(model)
     pending_post(chat)
-    chat._store.set_listed(SENDER, ["other"])
+    show_numbered_list(chat, "other")
 
     await chat.notify(SENDER, event, channel)
 
     assert len(model.calls) == 2  # the event, then the tool result
     assert step_text(model.calls[0][-1]) == event.note()
     assert json.loads(model.calls[1][-1]["result"]) == {"error": "approval_not_explicit"}
-    assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
-    assert chat._store.listed(SENDER) == ["other"]
+    assert chat._lifecycle.get(SENDER, POST_ID).status == "pending_approval"
+    assert second_listed(chat) == "other"
     assert channel.sent[0][1].startswith("Ok")
     history = await chat._history.get(SENDER)
     assert step_text(history[0]) == event.note()
@@ -987,7 +1003,7 @@ async def test_a_tap_is_answered_by_the_model_with_the_next_button() -> None:
 
     assert step_text(model.calls[0][-1]) == PostApproved(POST_ID).note()
     assert channel.buttons == [(SENDER, "¡Aprobado! ¿Lo subo ya?", [f"post_publish:{POST_ID}"])]
-    assert chat._store.get(SENDER, POST_ID).status == "approved"
+    assert chat._lifecycle.get(SENDER, POST_ID).status == "approved"
 
 
 async def test_a_noop_tap_gets_no_answer() -> None:

@@ -15,9 +15,10 @@ from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
 from app.media.public import PublicImages, PublicVideos
 from app.posts.drafts import PostDrafter
+from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
-from app.posts.store import InMemoryPosts, Post, PostImage, PostVideo
+from app.posts.store import Post, PostImage, PostVideo
 from app.posts.video_maker import VideoMaker
 from app.publishing.mock import MOCK_ACCOUNT_ID
 from app.rendering.mock import MockRenderer
@@ -77,7 +78,7 @@ class Rig:
     ) -> None:
         self.model, self.video_gen = model, video_gen
         self.channel, self.publisher = FakeChannel(), FakePublisher()
-        photos, store = InMemoryPhotos(), InMemoryPosts()
+        photos, store = InMemoryPhotos(), PostLifecycle()
         images, self.videos = PublicImages(), PublicVideos()
         self.store = store
         publishing = PostPublisher(
@@ -226,9 +227,8 @@ async def test_nothing_publishes_a_video_the_owner_has_not_approved() -> None:
     [video] = rig.videos_of()
     assert video.status == "pending_approval"
     assert rig.publisher.calls == []
-    assert rig.publishing.publish_approved(video, rig.channel) == {
-        "error": "post_not_approved",
-        "status": "pending_approval",
+    assert rig.publishing.publish_approved(SENDER, video.id, rig.channel) == {
+        "error": "post_not_approved"
     }
 
 
@@ -300,7 +300,7 @@ async def test_guards_run_in_code() -> None:
     assert rig.maker is not None
     rig.add_post()
     spent = rig.add_post("p2")
-    spent.status = "published"
+    rig.store.published(spent, None, None)
     bare = Post("p3", SENDER, [PostImage("/media/y.jpg", b"jpeg")], "caption")
     rig.store.add(bare)
 

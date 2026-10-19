@@ -10,6 +10,7 @@ from app.knowledge.local import LocalKnowledge, load_trend_notes
 from app.llm.client import GeminiChat
 from app.media.public import PublicImages, PublicVideos
 from app.posts.drafts import PostDrafter
+from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts
@@ -49,6 +50,7 @@ def build_inbound_handler(
                 )
             model = GeminiChat.from_api_key(settings.gemini_api_key, settings.gemini_chat_model)
             photos, store = InMemoryPhotos(), InMemoryPosts()
+            lifecycle = PostLifecycle(store)
             account_id = settings.zernio_account_id or (
                 MOCK_ACCOUNT_ID if settings.publisher == "mock" else None
             )
@@ -73,7 +75,7 @@ def build_inbound_handler(
                 build_renderer(settings),
                 photos,
                 images,
-                store,
+                lifecycle,
                 settings.public_backend_url,
                 settings.max_posts_per_day,
                 knowledge=knowledge,
@@ -82,7 +84,7 @@ def build_inbound_handler(
             public_videos.serve_from(store.video)
             publishing = PostPublisher(
                 publisher,
-                store,
+                lifecycle,
                 images,
                 settings.public_backend_url,
                 account_id,
@@ -93,7 +95,7 @@ def build_inbound_handler(
             video_maker = (
                 VideoMaker(
                     video_gen,
-                    store,
+                    lifecycle,
                     public_videos,
                     settings.public_backend_url,
                     settings.max_videos_per_day,
@@ -101,7 +103,7 @@ def build_inbound_handler(
                 if video_gen
                 else None
             )
-            buttons = ButtonRouter(store, posts, publishing, sessions, video_maker)
+            buttons = ButtonRouter(lifecycle, posts, publishing, sessions, video_maker)
             storage = (
                 get_storage()
                 if sessions and settings.supabase_url and settings.supabase_service_role_key
@@ -114,7 +116,7 @@ def build_inbound_handler(
                 photos,
                 posts,
                 publishing,
-                store,
+                lifecycle,
                 buttons,
                 library,
                 settings.assistant_name,

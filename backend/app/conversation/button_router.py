@@ -3,7 +3,7 @@
 Each tap does its work in code and returns the event the orchestrator answers (ADR 0026), with
 the next buttons attached by `events.buttons`. An unknown action, or one the entity's state
 doesn't allow, is a `StaleButton`. Posts still live in memory (T56, T57) and the Brand Brain in
-the database; T19 moves the posts.
+the database; `PostLifecycle` owns every state change (T19 moves the posts).
 """
 
 import logging
@@ -16,9 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.channels.base import ChannelPort
 from app.channels.inbound import mask
 from app.jobs.queue import retry_failed
+from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
-from app.posts.store import APPROVABLE, InMemoryPosts, Post
 from app.posts.video_maker import VideoMaker
 
 from .brand import BrandFlow
@@ -46,7 +46,7 @@ Handler = Callable[[str, str, ChannelPort], Awaitable[Event | None]]
 class ButtonRouter:
     def __init__(
         self,
-        posts: InMemoryPosts,
+        posts: PostLifecycle,
         maker: PostMaker,
         publisher: PostPublisher,
         sessions: async_sessionmaker[AsyncSession] | None,
@@ -111,25 +111,19 @@ class ButtonRouter:
         return StaleButton() if job is None else JobRetried(job.kind)
 
     async def _post_approve(self, sender: str, entity: str, channel: ChannelPort) -> Event:
-        post = self._post(sender, entity, {"pending_approval"})
-        if post is None:
-            return StaleButton()
-        post.status = "approved"
-        return PostApproved(post.id)
+        post = self._posts.approve(sender, entity)
+        return StaleButton() if post is None else PostApproved(post.id)
 
     async def _post_change(self, sender: str, entity: str, channel: ChannelPort) -> Event:
-        post = self._post(sender, entity, APPROVABLE)
+        post = self._posts.pending_post(sender, entity)
         return StaleButton() if post is None else PostChangeAsked(post.id)
 
     async def _post_discard(self, sender: str, entity: str, channel: ChannelPort) -> Event:
-        post = self._post(sender, entity, APPROVABLE)
-        if post is None:
-            return StaleButton()
-        post.status = "discarded"
-        return PostDiscarded(post.id)
+        post = self._posts.discard(sender, entity)
+        return StaleButton() if post is None else PostDiscarded(post.id)
 
     async def _post_replace(self, sender: str, entity: str, channel: ChannelPort) -> Event:
-        post = self._post(sender, entity, {"discarded"})
+        post = self._posts.discarded_post(sender, entity)
         if post is None:
             return StaleButton()
         if post.video is None:
@@ -139,20 +133,14 @@ class ButtonRouter:
         result = self._videos.remake(post, channel)
         if not result.get("error"):
             # One tap, one clip: Veo bills per second, so the same button can't start a second.
-            post.status = "replaced"
+            self._posts.replace(post)
         return started(result, "Sí, otro")
 
     async def _post_publish(self, sender: str, entity: str, channel: ChannelPort) -> Event:
-        post = self._post(sender, entity, {"approved"})
-        if post is None:
-            return StaleButton()
-        return publishing(post, self._publisher.publish_approved(post, channel))
+        return publishing(entity, self._publisher.publish_approved(sender, entity, channel))
 
     async def _post_retry(self, sender: str, entity: str, channel: ChannelPort) -> Event:
-        post = self._post(sender, entity, {"failed"})
-        if post is None:
-            return StaleButton()
-        return publishing(post, self._publisher.retry(post, channel))
+        return publishing(entity, self._publisher.retry(sender, entity, channel))
 
     async def _photo_post(self, sender: str, entity: str, channel: ChannelPort) -> Event:
         photo_ids = [photo_id for photo_id in entity.split(",") if photo_id]
@@ -162,15 +150,11 @@ class ButtonRouter:
         arguments = {"brief": brief, "asset_ids": photo_ids, "style": "photos"}
         return started(self._maker.create_post(sender, arguments, channel), "Sí, armalo")
 
-    def _post(self, sender: str, post_id: str, allowed: frozenset[str] | set[str]) -> Post | None:
-        post = self._posts.get(sender, post_id)
-        return post if post is not None and post.status in allowed else None
-
 
 def started(result: dict[str, Any], origin: str) -> Event:
     error = result.get("error")
     return PostNotStarted(error) if error else PostStarted(result["post_id"], origin)
 
 
-def publishing(post: Post, result: dict[str, Any]) -> Event:
-    return StaleButton() if result.get("error") else PublishStarted(post.id)
+def publishing(post_id: str, result: dict[str, Any]) -> Event:
+    return StaleButton() if result.get("error") else PublishStarted(post_id)

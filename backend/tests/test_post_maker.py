@@ -12,6 +12,7 @@ from app.knowledge.base import BusinessKnowledge, Note
 from app.media.images import POST_SIZE, image_size
 from app.media.public import PublicImages
 from app.posts.drafts import SYSTEM_PROMPT, CarouselDraft, PostCopy, PostDrafter, SlideDraft
+from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import WHATSAPP_CAPTION_MAX, PostMaker
 from app.posts.store import InMemoryPosts, Post, PostImage
 from app.rendering.mock import MockRenderer
@@ -66,7 +67,7 @@ def maker(
     photos: InMemoryPhotos,
     images: PublicImages | None = None,
     max_posts_per_day: int = 5,
-    store: InMemoryPosts | None = None,
+    store: PostLifecycle | None = None,
     events: list[Event] | None = None,
     brand: BrandBrain | None = None,
     renderer: MockRenderer | None = None,
@@ -86,7 +87,7 @@ def maker(
         renderer or MockRenderer(),
         photos,
         images or PublicImages(),
-        store or InMemoryPosts(),
+        store or PostLifecycle(),
         "https://backend.test/",
         max_posts_per_day=max_posts_per_day,
         knowledge=knowledge
@@ -354,7 +355,7 @@ async def test_without_a_registered_callback_the_generation_fails_loudly(
         MockRenderer(),
         photos,
         PublicImages(),
-        InMemoryPosts(),
+        PostLifecycle(),
         "https://backend.test/",
         max_posts_per_day=5,
         now=lambda: NOON,
@@ -473,7 +474,7 @@ def photos_model() -> ScriptedModel:
 async def test_a_sent_post_waits_for_approval_with_its_images_in_order(
     photos: InMemoryPhotos,
 ) -> None:
-    store, channel = InMemoryPosts(), FakeChannel()
+    store, channel = PostLifecycle(), FakeChannel()
     posts = maker(photos_model(), CountingImageGen(), photos, store=store)
 
     result = posts.create_post(
@@ -490,7 +491,7 @@ async def test_a_sent_post_waits_for_approval_with_its_images_in_order(
 
 
 async def test_a_single_photo_is_stored_as_an_image_post(photos: InMemoryPhotos) -> None:
-    store = InMemoryPosts()
+    store = PostLifecycle()
     posts = maker(photos_model(), CountingImageGen(), photos, store=store)
 
     posts.create_post(
@@ -502,7 +503,7 @@ async def test_a_single_photo_is_stored_as_an_image_post(photos: InMemoryPhotos)
 
 
 async def test_a_failed_generation_stores_nothing(photos: InMemoryPhotos) -> None:
-    store = InMemoryPosts()
+    store = PostLifecycle()
     posts = maker(photos_model(), CountingImageGen(fail=True), photos, store=store)
 
     posts.create_post(
@@ -516,7 +517,7 @@ async def test_a_failed_generation_stores_nothing(photos: InMemoryPhotos) -> Non
 async def test_the_remade_post_replaces_the_old_one_only_once_it_is_sent(
     photos: InMemoryPhotos,
 ) -> None:
-    store = InMemoryPosts()
+    store = PostLifecycle()
     old = Post("old", SENDER, [PostImage("/media/x.jpg", b"x")], "caption")
     store.add(old)
     posts = maker(photos_model(), CountingImageGen(), photos, store=store)
@@ -537,7 +538,7 @@ async def test_the_remade_post_replaces_the_old_one_only_once_it_is_sent(
 async def test_replacing_something_unknown_or_not_pending_is_ignored(
     photos: InMemoryPhotos,
 ) -> None:
-    store = InMemoryPosts()
+    store = PostLifecycle()
     published = Post("done", SENDER, [PostImage("/media/x.jpg", b"x")], "caption", "published")
     store.add(published)
     posts = maker(photos_model(), CountingImageGen(), photos, store=store)
@@ -555,7 +556,7 @@ async def test_replacing_something_unknown_or_not_pending_is_ignored(
 
 
 def test_a_publishing_post_is_never_dropped_to_make_room() -> None:
-    store = InMemoryPosts(max_per_sender=2)
+    store = PostLifecycle(InMemoryPosts(max_per_sender=2))
     busy = Post("busy", SENDER, [], "c", "publishing")
     for post in (busy, Post("a", SENDER, [], "c"), Post("b", SENDER, [], "c")):
         store.add(post)
@@ -577,7 +578,7 @@ def bottom_right_pixel(data: bytes) -> tuple[int, int, int]:
 async def test_a_post_with_the_logo_stamps_it_on_every_image(photos: InMemoryPhotos) -> None:
     photos.set_logo(SENDER, make_image((300, 120), color="#dc0000", format="PNG"))
     model = ScriptedModel(drafts={PostCopy: PostCopy(caption="Mesa", hashtags=["#muebles"])})
-    store = InMemoryPosts()
+    store = PostLifecycle()
     posts = maker(model, CountingImageGen(), photos, store=store)
 
     result = posts.create_post(
@@ -599,7 +600,7 @@ async def test_a_design_hands_the_logo_to_the_template_instead_of_stamping_it(
 ) -> None:
     photos.set_logo(SENDER, make_image((300, 120), color="#dc0000", format="PNG"))
     model = ScriptedModel(drafts={CarouselDraft: carousel_draft(2)})
-    renderer, store = MockRenderer(), InMemoryPosts()
+    renderer, store = MockRenderer(), PostLifecycle()
     posts = maker(model, CountingImageGen(), photos, store=store, renderer=renderer)
 
     result = posts.create_post(
@@ -671,7 +672,7 @@ async def test_a_post_with_the_logo_without_one_is_refused(photos: InMemoryPhoto
     assert model.structured_calls == []
 
 
-def sent_design(store: InMemoryPosts, photos: InMemoryPhotos) -> Post:
+def sent_design(store: PostLifecycle, photos: InMemoryPhotos) -> Post:
     found, _ = photos.find(SENDER, ["f1", "f2"])
     post = Post(
         "old",
@@ -691,7 +692,7 @@ def sent_design(store: InMemoryPosts, photos: InMemoryPhotos) -> Post:
 async def test_a_caption_change_keeps_the_images_and_generates_nothing(
     photos: InMemoryPhotos,
 ) -> None:
-    store, image_gen, channel = InMemoryPosts(), CountingImageGen(), FakeChannel()
+    store, image_gen, channel = PostLifecycle(), CountingImageGen(), FakeChannel()
     events: list[Event] = []
     old = sent_design(store, photos)
     posts = maker(
@@ -716,7 +717,7 @@ async def test_a_caption_change_keeps_the_images_and_generates_nothing(
 async def test_an_image_change_regenerates_the_design_from_the_previous_one(
     photos: InMemoryPhotos,
 ) -> None:
-    store, image_gen = InMemoryPosts(), CountingImageGen()
+    store, image_gen = PostLifecycle(), CountingImageGen()
     sent_design(store, photos)
     model = ScriptedModel(drafts={CarouselDraft: carousel_draft(2)})
     posts = maker(model, image_gen, photos, store=store)
@@ -745,7 +746,7 @@ async def test_an_image_change_regenerates_the_design_from_the_previous_one(
 async def test_bad_revisions_start_nothing(
     photos: InMemoryPhotos, arguments: dict[str, str], error: str
 ) -> None:
-    store, image_gen = InMemoryPosts(), CountingImageGen()
+    store, image_gen = PostLifecycle(), CountingImageGen()
     store.add(Post("mine", SENDER, [PostImage("/media/x.jpg", b"x")], "caption"))
     store.add(Post("done", SENDER, [PostImage("/media/y.jpg", b"y")], "caption", "published"))
     posts = maker(photos_model(), image_gen, photos, store=store)
@@ -754,7 +755,7 @@ async def test_bad_revisions_start_nothing(
 
 
 async def test_a_remake_by_create_post_shows_the_old_version(photos: InMemoryPhotos) -> None:
-    store, model = InMemoryPosts(), photos_model()
+    store, model = PostLifecycle(), photos_model()
     store.add(Post("old", SENDER, [PostImage("/media/x.jpg", b"x")], "Texto viejo", brief="mesa"))
     posts = maker(model, CountingImageGen(), photos, store=store)
 
