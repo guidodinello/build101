@@ -525,3 +525,31 @@ async def test_a_duplicate_content_409_is_final() -> None:
         await publisher.publish(ACCOUNT_ID, "x", IMAGE)
 
     assert not isinstance(raised.value, PublishInProgress | PublishRetryable)
+
+
+async def test_a_profile_without_an_id_is_an_error() -> None:
+    publisher, _ = publisher_with(respond(200, {"profiles": [{"name": "x"}]}))
+
+    with pytest.raises(PublisherError, match="no _id"):
+        await publisher.ensure_profile("Katei", "biz-1")
+
+
+async def test_odd_shaped_optional_fields_still_map_to_pending() -> None:
+    """The POST answer arrives after the post may exist: only a missing `post` is final."""
+    for platforms in (None, ["x", 3], "instagram"):
+        body = {"post": {"_id": "post-1", "status": "publishing", "platforms": platforms}}
+        publisher, _ = publisher_with(
+            scripted(reply(201, body), reply(200, body)), poll_timeout_s=0
+        )
+
+        result = await publisher.publish(ACCOUNT_ID, "x", IMAGE)
+
+        assert (result.status, result.external_post_id) == ("pending", "post-1")
+
+
+async def test_a_non_string_post_id_is_treated_as_missing() -> None:
+    body = {"post": {"_id": 7, "status": "publishing"}}
+    publisher, _ = publisher_with(respond(201, body))
+
+    with pytest.raises(PublishRetryable, match="no post id"):
+        await publisher.publish(ACCOUNT_ID, "x", IMAGE)
