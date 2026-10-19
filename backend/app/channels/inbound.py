@@ -1,22 +1,30 @@
 import asyncio
 import logging
+import time
 from collections import OrderedDict
+from datetime import timedelta
 from typing import Protocol, runtime_checkable
+
+from sqlalchemy import delete, func
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.db.models import InboundDelivery
 
 from .base import ChannelError, ChannelPort, InboundMessage
 
 logger = logging.getLogger(__name__)
 
 DEDUPE_MAX_KEYS = 10_000
+# Kept longer than the replay window (an hour): a body can't come back as "new" while it is fresh.
+DEDUPE_RETENTION = timedelta(hours=48)
+DEDUPE_PRUNE_EVERY_S = 3600.0
 
 
 @runtime_checkable
 class DedupeStore(Protocol):
     async def first_seen(self, key: str) -> bool:
-        """Atomically record `key`; True if it was not seen before.
-
-        T02 can back this with `INSERT ... ON CONFLICT DO NOTHING` on `messages.external_id`.
-        """
+        """Atomically record `key`; True if it was not seen before."""
         ...
 
 
@@ -26,7 +34,7 @@ class InboundHandler(Protocol):
 
 
 class InMemoryDedupeStore:
-    """Remembers the last `max_keys` keys; enough for provider retries, replaced by T02."""
+    """Remembers the last `max_keys` keys: the no-database mode, where a restart forgets them."""
 
     def __init__(self, max_keys: int = DEDUPE_MAX_KEYS) -> None:
         self._max_keys = max_keys
@@ -41,6 +49,50 @@ class InMemoryDedupeStore:
             if len(self._keys) > self._max_keys:
                 self._keys.popitem(last=False)
             return True
+
+
+class DbDedupeStore:
+    """`INSERT ... ON CONFLICT DO NOTHING` on `inbound_deliveries`: survives a restart (#105).
+
+    Rows older than `DEDUPE_RETENTION` are deleted, at most once per `DEDUPE_PRUNE_EVERY_S`, so
+    the table stays small without a job.
+    """
+
+    def __init__(
+        self,
+        sessions: async_sessionmaker[AsyncSession],
+        retention: timedelta = DEDUPE_RETENTION,
+        prune_every_s: float = DEDUPE_PRUNE_EVERY_S,
+    ) -> None:
+        self._sessions = sessions
+        self._retention = retention
+        self._prune_every_s = prune_every_s
+        self._last_prune: float | None = None
+
+    async def first_seen(self, key: str) -> bool:
+        async with self._sessions() as db:
+            inserted = await db.scalar(
+                insert(InboundDelivery)
+                .values(external_id=key)
+                .on_conflict_do_nothing()
+                .returning(InboundDelivery.external_id)
+            )
+            await db.commit()
+        await self._prune_if_due()
+        return inserted is not None
+
+    async def _prune_if_due(self) -> None:
+        now = time.monotonic()
+        if self._last_prune is not None and now - self._last_prune < self._prune_every_s:
+            return
+        self._last_prune = now
+        async with self._sessions() as db:
+            await db.execute(
+                delete(InboundDelivery).where(
+                    InboundDelivery.received_at < func.now() - self._retention
+                )
+            )
+            await db.commit()
 
 
 class EchoHandler:

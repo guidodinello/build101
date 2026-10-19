@@ -8,6 +8,10 @@ from .base import Button, InboundAudio, InboundMedia, InboundMessage
 # `phone_number_id`. `message` has Meta-style fields plus a `kapso` block.
 MESSAGE_RECEIVED_EVENT = "whatsapp.message.received"
 
+# The HMAC covers the body only, so a captured body stays valid forever; one older than this is
+# acknowledged and dropped (#105). Kapso delivers within seconds and retries about twice.
+REPLAY_WINDOW_S = 3600
+
 
 def verify_signature(raw_body: bytes, signature: str | None, secret: str) -> bool:
     """X-Webhook-Signature is the hex HMAC-SHA256 of the raw body with the webhook secret."""
@@ -15,6 +19,11 @@ def verify_signature(raw_body: bytes, signature: str | None, secret: str) -> boo
         return False
     expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
+
+
+def is_stale(message: InboundMessage, now: float) -> bool:
+    """Older than the replay window. No timestamp counts as fresh: dedupe still applies."""
+    return message.timestamp is not None and message.timestamp < now - REPLAY_WINDOW_S
 
 
 def parse_message(payload: dict[str, Any], fallback_id: str | None = None) -> InboundMessage:

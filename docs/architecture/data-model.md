@@ -359,6 +359,17 @@ create table owner_notes (
 );
 create index ix_owner_notes_business_id on owner_notes (business_id) where archived_at is null;
 
+-- Webhook dedupe (#105, migration 0006): one row per WhatsApp message id the webhook accepted, pruned
+-- after 48 h. messages.external_id can't serve: the webhook has no business_id when it dedupes (the
+-- onboarding gate creates the Business later) and nothing writes messages until T02.
+create table inbound_deliveries (
+  external_id  text not null,
+  received_at  timestamptz not null default now(),
+  constraint inbound_deliveries_pkey primary key (external_id)
+);
+create index ix_inbound_deliveries_received_at on inbound_deliveries (received_at);
+alter table inbound_deliveries enable row level security;
+
 create table jobs (
   id           uuid primary key default gen_random_uuid(),
   business_id  uuid constraint jobs_business_id_fkey references businesses(id) on delete cascade,
@@ -425,3 +436,4 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 | `0003` | The orchestrator's memory ([ADR 0030](../decisions/0030-orchestrator-memory-and-context.md)): `conversation_steps`, `owner_notes`, `businesses.conversation_summary` |
 | `0004` | Weekly Niche Reports ([ADR 0025](../decisions/0025-weekly-niche-report.md)): `niche_reports`, one per niche and week (the first design had one per Business and was never migrated); job kind `generate_niche_report` |
 | `0005` | Instagram tokens are not kept (security audit M-5, [ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)): sets `social_accounts.access_token` to null for every row; `import_instagram` now claims it (reads and nulls it in one transaction) when it starts. The downgrade is a no-op, since the tokens can't be restored |
+| `0006` | Durable webhook dedupe (security audit L-3): `inbound_deliveries(external_id pk, received_at)`, RLS on, rows pruned after 48 h by the webhook itself |

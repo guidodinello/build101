@@ -7,10 +7,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.channels.base import ChannelError, ChannelPort, InboundMessage
-from app.channels.inbound import InMemoryDedupeStore
+from app.channels.inbound import DbDedupeStore, InMemoryDedupeStore
+from app.channels.kapso_webhook import REPLAY_WINDOW_S
 from app.channels.router import (
     MAX_BODY_BYTES,
     get_channel,
+    get_clock,
     get_dedupe_store,
     get_inbound_handler,
 )
@@ -20,6 +22,8 @@ from tests.conftest import FIXTURES, sign
 
 SECRET = "test-secret"
 EVENT = "whatsapp.message.received"
+# The fixtures' message timestamp: the tests stand at that moment, so nothing is stale.
+FIXTURE_TIME = 1792270000
 
 
 @dataclass
@@ -41,6 +45,7 @@ def client(handler: RecordingHandler) -> Iterator[TestClient]:
     # One fresh store per test: all fixtures share the same message id.
     store = InMemoryDedupeStore()
     app.dependency_overrides[get_dedupe_store] = lambda: store
+    app.dependency_overrides[get_clock] = lambda: float(FIXTURE_TIME)
     app.dependency_overrides[get_inbound_handler] = lambda: handler
     app.dependency_overrides[get_channel] = lambda: object()
     with TestClient(app) as test_client:
@@ -103,6 +108,40 @@ def test_duplicate_delivery_is_handled_once(client: TestClient, handler: Recordi
 
     assert first.json() == {"status": "ok"}
     assert second.json() == {"status": "duplicate"}
+    assert len(handler.handled) == 1
+
+
+def test_a_message_older_than_the_window_is_acknowledged_but_not_processed(
+    client: TestClient, handler: RecordingHandler
+) -> None:
+    raw = raw_fixture("text")
+    app.dependency_overrides[get_clock] = lambda: float(FIXTURE_TIME + REPLAY_WINDOW_S + 1)
+
+    response = post(client, raw, signature=sign(raw, SECRET))
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "stale"}
+    assert handler.handled == []
+
+
+def test_a_message_inside_the_window_is_processed(
+    client: TestClient, handler: RecordingHandler
+) -> None:
+    raw = raw_fixture("text")
+    app.dependency_overrides[get_clock] = lambda: float(FIXTURE_TIME + REPLAY_WINDOW_S)
+
+    assert post(client, raw, signature=sign(raw, SECRET)).json() == {"status": "ok"}
+    assert len(handler.handled) == 1
+
+
+def test_a_message_without_a_timestamp_is_processed(
+    client: TestClient, handler: RecordingHandler
+) -> None:
+    body = json.loads(raw_fixture("text"))
+    del body["message"]["timestamp"]
+    raw = json.dumps(body).encode()
+
+    assert post(client, raw, signature=sign(raw, SECRET)).json() == {"status": "ok"}
     assert len(handler.handled) == 1
 
 
@@ -210,3 +249,20 @@ def test_a_failing_handler_is_logged_with_the_message_id_and_no_payload(
         "inbound handling failed: text id=wamid.FAKE0000000000000000000001"
     )
     assert "hola bot" not in caplog.text
+
+
+def test_the_dedupe_store_follows_the_database_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    get_dedupe_store.cache_clear()
+    monkeypatch.setattr("app.channels.router.get_settings", lambda: Settings(database_url=None))
+    monkeypatch.setattr("app.channels.router.get_sessionmaker", lambda: object())
+    try:
+        assert isinstance(get_dedupe_store(), InMemoryDedupeStore)
+
+        get_dedupe_store.cache_clear()
+        monkeypatch.setattr(
+            "app.channels.router.get_settings",
+            lambda: Settings(database_url="postgresql+asyncpg://u:p@localhost/db"),
+        )
+        assert isinstance(get_dedupe_store(), DbDedupeStore)
+    finally:
+        get_dedupe_store.cache_clear()
