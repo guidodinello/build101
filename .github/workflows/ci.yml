@@ -3,7 +3,7 @@
 # `changes` job, least-privilege token, and one aggregate `CI` gate that a
 # branch ruleset can require instead of every job name.
 #
-# Jobs check docs, workflows, the backend (ruff + pytest) and the frontend
+# Jobs check docs, workflows, the backend (ruff + pyright + pytest) and the frontend
 # (typecheck + lint; the Vercel preview build covers `next build`).
 name: CI
 
@@ -136,6 +136,9 @@ jobs:
         run: |
           uv run ruff check .
           uv run ruff format --check .
+
+      - name: pyright
+        run: uv run pyright
 
       - name: pytest
         env:

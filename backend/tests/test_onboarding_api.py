@@ -552,7 +552,7 @@ async def test_complete_checks_the_required_steps(
 
 
 async def add_instagram_photo(
-    sessions: async_sessionmaker[AsyncSession], kind: str = "photo"
+    sessions: async_sessionmaker[AsyncSession], kind: str = "photo", source: str = "instagram"
 ) -> uuid.UUID:
     async with sessions() as db:
         business = await db.scalar(select(Business))
@@ -560,7 +560,7 @@ async def add_instagram_photo(
         asset = BrandAsset(
             business_id=business.id,
             kind=kind,
-            source="instagram",
+            source=source,
             status="ready",
             storage_path=f"{business.id}/{uuid.uuid4()}.jpg",
             mime_type="image/jpeg",
@@ -588,6 +588,26 @@ async def test_state_lists_the_photos_imported_from_instagram(
     ]
     assert archived.status_code == 204
     assert [asset["id"] for asset in after] == [uploaded["id"]]
+
+
+async def test_complete_is_404_for_an_asset_not_uploaded_from_the_web(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    web = await upload(client, storage, token)
+    whatsapp = await add_instagram_photo(sessions, source="whatsapp")
+    instagram = await add_instagram_photo(sessions)
+
+    whatsapp_response = await client.post(f"/api/o/{token}/assets/{whatsapp}/complete")
+    instagram_response = await client.post(f"/api/o/{token}/assets/{instagram}/complete")
+    web_response = await client.post(f"/api/o/{token}/assets/{web['id']}/complete")
+
+    assert whatsapp_response.status_code == 404
+    assert error_code(whatsapp_response) == "asset_not_found"
+    assert instagram_response.status_code == 404
+    assert error_code(instagram_response) == "asset_not_found"
+    assert web_response.status_code == 200
+    assert web_response.json()["source"] == "web"
 
 
 async def test_photos_from_instagram_count_toward_the_minimum(

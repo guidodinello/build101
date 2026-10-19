@@ -400,11 +400,19 @@ async def _fail(asset: BrandAsset, session: AsyncSession) -> None:
 async def _active_asset(
     session: AsyncSession, business_id: uuid.UUID, asset_id: uuid.UUID
 ) -> BrandAsset:
-    """The asset, locked: a second /complete of it waits and then finds it ready."""
+    """The asset, locked: a second /complete of it waits and then finds it ready.
+
+    Only assets uploaded from the web form are ever "uploading", so any other source (Instagram
+    import, WhatsApp photo) is 404 like an unknown asset."""
     asset = await session.scalar(
         select(BrandAsset).where(BrandAsset.id == asset_id).with_for_update()
     )
-    if asset is None or asset.business_id != business_id or asset.archived_at is not None:
+    if (
+        asset is None
+        or asset.business_id != business_id
+        or asset.archived_at is not None
+        or asset.source != "web"
+    ):
         raise ApiError(404, "asset_not_found", ASSET_NOT_FOUND)
     return asset
 
@@ -552,15 +560,17 @@ async def _instagram(session: AsyncSession, business: Business) -> schemas.Insta
     )
     if account is None:
         return schemas.Instagram(status="not_connected", handle=business.instagram_handle)
-    return schemas.Instagram(status=account.status, handle=account.handle)
+    # str column, Literal field: typed in #89
+    return schemas.Instagram(status=account.status, handle=account.handle)  # pyright: ignore[reportArgumentType]
 
 
 def _to_asset(asset: BrandAsset, url: str, product_ids: list[str]) -> schemas.Asset:
+    # str columns, Literal fields: typed in #89; `source` can also be "whatsapp" (#85)
     return schemas.Asset(
         id=str(asset.id),
-        kind=asset.kind,
-        source=asset.source,
-        status=asset.status,
+        kind=asset.kind,  # pyright: ignore[reportArgumentType]
+        source=asset.source,  # pyright: ignore[reportArgumentType]
+        status=asset.status,  # pyright: ignore[reportArgumentType]
         url=url,
         thumbnail_url=None,
         width=asset.width,
