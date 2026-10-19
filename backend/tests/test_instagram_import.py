@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -14,7 +15,7 @@ from app.api.instagram import BINDING_COOKIE, DEV_STATE_SECRET
 from app.config import Settings, get_settings
 from app.db.models import BrandAsset, Business, Job, MagicLink, SocialAccount
 from app.db.session import get_session
-from app.instagram.base import InstagramError, InstagramImage, InstagramMedia
+from app.instagram.base import InstagramError, InstagramImage, InstagramMedia, InstagramProfile
 from app.instagram.factory import get_instagram
 from app.instagram.mock import MockInstagram
 from app.instagram.oauth_state import sign_ticket
@@ -408,12 +409,174 @@ async def test_the_import_feeds_the_brand_inputs_and_queues_the_analyses(
     assert [post["likes"] for post in imported["posts"]] == [40, 30, 20]
 
 
-async def test_a_second_import_only_adds_what_is_new(
+async def stored_token(sessions: async_sessionmaker[AsyncSession]) -> str | None:
+    async with sessions() as db:
+        account = await db.scalar(select(SocialAccount))
+        assert account is not None
+        return account.access_token
+
+
+async def test_the_import_claims_the_token_before_calling_instagram(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
+) -> None:
+    in_the_database: list[str | None] = []
+
+    class Peeks(MockInstagram):
+        async def profile(self, access_token: str) -> InstagramProfile:
+            in_the_database.append(await stored_token(sessions))
+            return await super().profile(access_token)
+
+    token = await new_link(client)
+    await connect(client, token)
+    assert await stored_token(sessions)
+
+    result = await run_import(sessions, storage, Peeks())
+
+    assert result["posts"] == 3
+    assert in_the_database == [None]  # already gone when the first call to Instagram is made
+    async with sessions() as db:
+        account = await db.scalar(select(SocialAccount))
+    assert account is not None
+    assert account.status == "connected" and account.token_expires_at
+
+
+async def test_a_failed_import_leaves_no_token(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
+) -> None:
+    class Unauthorized(MockInstagram):
+        async def profile(self, access_token: str) -> InstagramProfile:
+            raise InstagramError("401 from Instagram", status=401)
+
+    token = await new_link(client)
+    await connect(client, token)
+
+    with pytest.raises(InstagramError):
+        await run_import(sessions, storage, Unauthorized())
+
+    assert await stored_token(sessions) is None
+
+
+async def test_while_the_import_is_in_flight_the_database_holds_no_token(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
+) -> None:
+    """What a killed process (SIGKILL, OOM) or a deploy's cancellation leaves behind: the state
+    in the middle of the import, with nothing to clean up."""
+    started = asyncio.Event()
+
+    class Hangs(MockInstagram):
+        async def profile(self, access_token: str) -> InstagramProfile:
+            started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    token = await new_link(client)
+    await connect(client, token)
+    business = await business_of(sessions)
+    job = import_instagram_job(Hangs(), max_posts=100, max_images=24)
+    task = asyncio.create_task(job(job_context(sessions, storage, business.id), {}))
+    await started.wait()
+
+    assert await stored_token(sessions) is None
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert await stored_token(sessions) is None
+
+
+async def test_the_import_does_not_run_twice_on_one_token(
     client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
 ) -> None:
     token = await new_link(client)
     await connect(client, token)
     await run_import(sessions, storage, MockInstagram())
+
+    assert await run_import(sessions, storage, MockInstagram()) == {
+        "skipped": "no connected instagram"
+    }
+
+
+async def test_a_claim_waits_for_one_in_progress_and_then_finds_no_token(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
+) -> None:
+    """Two imports that claim at the same instant: the second is held on the row lock until the
+    first commits, then sees no token, instead of reading the same one."""
+    token = await new_link(client)
+    await connect(client, token)
+    business = await business_of(sessions)
+    job = import_instagram_job(MockInstagram(), max_posts=100, max_images=24)
+
+    async with sessions() as first_claim:
+        account = await first_claim.scalar(select(SocialAccount).with_for_update())
+        assert account is not None and account.access_token
+        second = asyncio.create_task(job(job_context(sessions, storage, business.id), {}))
+        finished, _ = await asyncio.wait({second}, timeout=0.5)
+        assert not finished  # waiting on the row lock
+        account.access_token = None
+        await first_claim.commit()
+
+    assert await second == {"skipped": "no connected instagram"}
+
+
+async def test_an_import_started_while_another_is_reading_instagram_is_skipped(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
+) -> None:
+    started, release = asyncio.Event(), asyncio.Event()
+
+    class Waits(MockInstagram):
+        async def profile(self, access_token: str) -> InstagramProfile:
+            started.set()
+            await release.wait()
+            return await super().profile(access_token)
+
+    token = await new_link(client)
+    await connect(client, token)
+    business = await business_of(sessions)
+    job = import_instagram_job(Waits(), max_posts=100, max_images=24)
+    first = asyncio.create_task(job(job_context(sessions, storage, business.id), {}))
+    await started.wait()
+
+    second = await run_import(sessions, storage, MockInstagram())
+    release.set()
+    imported = await first
+
+    assert second == {"skipped": "no connected instagram"}
+    assert imported["posts"] == 3
+
+
+async def test_a_reconnect_during_an_import_keeps_its_token_for_the_next_one(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
+) -> None:
+    class ReconnectsMidImport(MockInstagram):
+        """The Owner reconnects while this job is reading Instagram: the callback stores a fresh
+        token on the same row and queues a second import."""
+
+        async def profile(self, access_token: str) -> InstagramProfile:
+            async with sessions() as db:
+                account = await db.scalar(select(SocialAccount))
+                assert account is not None
+                account.access_token = "fresh-token"
+                await db.commit()
+            return await super().profile(access_token)
+
+    token = await new_link(client)
+    await connect(client, token)
+
+    await run_import(sessions, storage, ReconnectsMidImport())
+
+    assert await stored_token(sessions) == "fresh-token"
+    second = await run_import(sessions, storage, MockInstagram())
+    assert second["posts"] == 3  # the second import ran; it was not skipped for want of a token
+    assert await stored_token(sessions) is None
+
+
+async def test_a_reconnect_stores_a_fresh_token_and_only_adds_what_is_new(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    await connect(client, token)
+    await run_import(sessions, storage, MockInstagram())
+    await connect(client, token)
+    assert await stored_token(sessions)
 
     result = await run_import(sessions, storage, MockInstagram())
 
