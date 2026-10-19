@@ -288,6 +288,14 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 - Build: the read-only Inicio page: business header, this week's Posts with status badges and Instagram links, the Brand Brain summary. The Catálogo, Contenido and Promos tabs are Could (T35b).
 - Done when: on a real phone, the link from WhatsApp shows the demo business's posts with the right statuses.
 
+### T60: Reels through Zernio · A · S
+
+Part of story #64 (AI-generated Reels); the video itself comes from T59 and the WhatsApp flow is the story's third task.
+
+- Read: [integrations.md § Zernio](../architecture/integrations.md#publishing-provider-zernio), [api.md § PublishMedia](../architecture/api.md), `app/publishing/zernio.py`, `app/posts/publish.py`
+- Build: `ZernioPublisher` publishes `PublishMedia(format="reel")` as one `video` media item with `platformSpecificData.thumbOffset` for the cover; `PublishMedia.ai_generated` adds `isAiGenerated` (any format; nothing sets it yet). `Post.video` (`PostVideo`, like `PostImage`) and `video_cover_offset_ms` make `PostPublisher` build the Reel media from `public base URL + video.path`. Same Approval and guards as images ([ADR 0007](../decisions/0007-approve-every-post.md)); the mock publisher already accepts reels.
+- Done when: unit tests with a faked HTTP client cover the Reel request, its errors and polling; a `@pytest.mark.live` Reel test exists (not run in CI); nothing publishes a video Post that was not approved.
+
 ## Could (only if everything above is solid)
 
 ### T53: Instagram feed import (F2.8) · B · C

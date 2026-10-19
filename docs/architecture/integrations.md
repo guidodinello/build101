@@ -189,16 +189,19 @@ POST /v1/posts
 Zernio's Instagram page says carousels take up to 10 items and are cropped to the first item's ratio ([Zernio Instagram](https://docs.zernio.com/platforms/instagram), [research](../research/media-uploads.md#publishing-video-and-carousels-zernio-instagram)); every slide is 1080×1350, so nothing is cropped. **Not verified:** that several `mediaItems` without any other field publish as a carousel, and that it works with our public `renders` URLs. Test one carousel publish on the demo IG before relying on it (T55).
 
 ```python
-# 4. Reel (Could): one video, no contentType (Zernio publishes a single video as a Reel)
+# 4. Reel (T60): one video, no contentType (Zernio publishes a single video as a Reel)
 POST /v1/posts
 {
   "content": "<caption + hashtags>",
-  "mediaItems": [{"type": "video", "url": "<signed Supabase URL of the Owner's video, valid 24 h>"}],
+  "mediaItems": [{"type": "video", "url": "<public HTTPS URL of the video, or a signed Supabase URL valid 24 h>"}],
   "platforms": [{"platform": "instagram", "accountId": "<provider_account_id>",
-                 "platformSpecificData": {"thumbOffset": 4200}}],   # posts.cover_offset_ms
+                 "platformSpecificData": {"thumbOffset": 4200,      # PublishMedia.cover_offset_ms, omitted when null
+                                          "isAiGenerated": true}}],  # PublishMedia.ai_generated, omitted when false
   "publishNow": true
 }
 ```
+
+Sources, read 2026-10-19: "A single video publishes as a Reel with no `contentType`" ([Zernio: Instagram posts](https://docs.zernio.com/platforms/instagram/posts)); `thumbOffset` (integer ms ≥ 0, default 0, ignored when `instagramThumbnail` is set) and `isAiGenerated` ("the post is labeled by Instagram as containing AI-generated media", Reels included) in [Platform Fields](https://docs.zernio.com/platforms/instagram/fields) and the [OpenAPI spec](https://zernio.com/openapi.yaml) v1.297.1; video limits in [Media Requirements](https://docs.zernio.com/platforms/instagram/media): MP4/MOV, H.264, 30 fps, 1080×1920 (9:16), 3–90 s, ≤ 300 MB. Code does not check these (it only has a URL). A custom cover image (`instagramThumbnail`) exists but is not used: a generated video has no separate cover. **Not verified live:** a real Reel publish on the demo account (`test_publish_one_reel_to_the_demo_account`, `@pytest.mark.live`, needs `ZERNIO_TEST_VIDEO_URL`).
 
 Gotchas:
 

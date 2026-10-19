@@ -29,6 +29,12 @@ class PostImage:
     data: bytes
 
 
+@dataclass(frozen=True, slots=True)
+class PostVideo:
+    path: str  # where the video is served, relative to the public URL
+    data: bytes
+
+
 @dataclass(slots=True)
 class Post:
     id: str
@@ -49,6 +55,8 @@ class Post:
     # What a revision keeps unless the Owner asks otherwise.
     headlines: list[str] = field(default_factory=list)
     style_prompt: str | None = None
+    video: PostVideo | None = None  # set: the Post publishes as a Reel
+    video_cover_offset_ms: int | None = None
 
     @property
     def idempotency_key(self) -> str:
