@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -10,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.instagram import DEV_STATE_SECRET
 from app.config import Settings, get_settings
-from app.db.models import BrandAsset, Business, Job, SocialAccount
+from app.db.models import BrandAsset, Business, Job, MagicLink, SocialAccount
 from app.db.session import get_session
 from app.instagram.base import InstagramError, InstagramImage, InstagramMedia
 from app.instagram.factory import get_instagram
@@ -138,6 +139,27 @@ async def test_a_refused_consent_returns_to_the_wizard_without_connecting(
     assert response.headers["location"].endswith("?step=instagram&connected=0")
     async with sessions() as db:
         assert await db.scalar(select(SocialAccount)) is None
+
+
+async def test_a_callback_after_the_onboarding_was_completed_changes_nothing(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    response = await client.post(f"/api/o/{token}/instagram/connect")
+    auth_url = urlsplit(response.json()["auth_url"])
+    async with sessions() as db:
+        link = await db.scalar(select(MagicLink))
+        assert link is not None
+        link.completed_at = datetime.now(UTC)
+        await db.commit()
+
+    response = await client.get(f"{auth_url.path}?{auth_url.query}")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"{FRONTEND}/o/{token}"
+    async with sessions() as db:
+        assert await db.scalar(select(SocialAccount)) is None
+        assert (await db.scalars(select(Job.kind))).all() == []
 
 
 async def test_a_forged_state_is_rejected(client: httpx.AsyncClient) -> None:

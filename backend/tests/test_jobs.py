@@ -280,7 +280,7 @@ async def test_analyze_asset_saves_the_analysis_of_the_agents_copy(
         saved = await db.get_one(BrandAsset, asset.id)
     assert saved.analysis and saved.analysis["description"] == "Mesa de roble en un living."
     assert again == {"skipped": "already analyzed"}
-    assert "<owner_hint>la nueva</owner_hint>" in model.contents[0][0]["text"]
+    assert '<owner_hint>\n"la nueva"\n</owner_hint>' in model.contents[0][0]["text"]
 
 
 async def test_analyze_asset_fails_without_the_agents_copy(
@@ -336,7 +336,7 @@ async def test_a_correction_makes_a_new_version_from_the_previous_one(
             await db.scalars(select(BrandBrainVersion).order_by(BrandBrainVersion.version))
         ).all()
     assert [(v.version, v.reason) for v in versions] == [(1, "onboarding"), (2, "correction")]
-    assert "<correction>más formales</correction>" in model.contents[1][0]["text"]
+    assert '<correction>\n"más formales"\n</correction>' in model.contents[1][0]["text"]
 
 
 def router(sessions: async_sessionmaker[AsyncSession]) -> ButtonRouter:

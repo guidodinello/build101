@@ -1,4 +1,3 @@
-import json
 import logging
 import re
 from collections import Counter
@@ -7,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.llm.client import ChatModel, text_content
-from app.prompts import load_prompt
+from app.prompts import load_prompt, tagged
 
 from .asset_analyst import HEX_COLOR
 from .schemas import BrandBrain, FeaturedProduct, VisualIdentity
@@ -72,27 +71,24 @@ async def write_brand_brain(model: ChatModel, inputs: BrandInputs) -> BrandBrain
 
 
 def _prompt_input(inputs: BrandInputs) -> str:
-    def block(tag: str, value: Any) -> str:
-        return f"<{tag}>\n{json.dumps(value, ensure_ascii=False, indent=1)}\n</{tag}>"
-
     colors = (
         {"owner_colors": inputs.colors, "logo_palette": inputs.logo_palette}
         if inputs.colors
         else {"owner_colors": "none yet", "logo_palette": inputs.logo_palette}
     )
     blocks = [
-        block("business", inputs.business),
-        block("catalog", inputs.catalog),
-        block("questionnaire", inputs.questionnaire),
-        block("brand_words", inputs.brand_words),
-        block("colors", colors),
-        block("photos", inputs.photo_descriptions),
+        tagged("business", inputs.business),
+        tagged("catalog", inputs.catalog),
+        tagged("questionnaire", inputs.questionnaire),
+        tagged("brand_words", inputs.brand_words),
+        tagged("colors", colors),
+        tagged("photos", inputs.photo_descriptions),
     ]
     if inputs.instagram:
-        blocks.append(block("instagram", _instagram_input(inputs.instagram)))
+        blocks.append(tagged("instagram", _instagram_input(inputs.instagram)))
     if inputs.previous is not None and inputs.correction:
-        blocks.append(block("previous_brand_brain", inputs.previous.model_dump()))
-        blocks.append(f"<correction>{inputs.correction}</correction>")
+        blocks.append(tagged("previous_brand_brain", inputs.previous.model_dump()))
+        blocks.append(tagged("correction", inputs.correction))
     return "\n".join(blocks)
 
 

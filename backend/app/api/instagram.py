@@ -71,7 +71,13 @@ async def instagram_callback(
         raise ApiError(400, "invalid_state", CONNECT_EXPIRED) from None
     onboarding = await get_onboarding(token, session)
     business = onboarding.business
-    back = f"{onboarding_url(settings.frontend_url, token)}?step=instagram&connected="
+    wizard = onboarding_url(settings.frontend_url, token)
+    if onboarding.link.completed_at is not None:
+        # Same rule as the connect endpoint: a submitted form takes no more answers, and the
+        # Brand Brain it started would never see this import (ADR 0032).
+        logger.info("instagram callback for %s after the onboarding was completed", business.id)
+        return RedirectResponse(wizard, status_code=303)
+    back = f"{wizard}?step=instagram&connected="
 
     if error or not code:
         logger.info("instagram connect for %s not authorized: %s", business.id, error)
