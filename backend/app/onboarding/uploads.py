@@ -7,6 +7,9 @@ from app.media.images import prepare_reference
 
 HEIC = "image/heic"
 EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", HEIC: "heic"}
+# What Pillow must find in the bytes for each accepted type: a file that is really another format
+# (TIFF, PSD, ...) never reaches those parsers.
+PIL_FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP", HEIC: "HEIF"}
 PALETTE_SIZE = 5
 PALETTE_SAMPLE_SIDE = 128
 OPAQUE_ALPHA = 128
@@ -40,7 +43,7 @@ def llm_copy_path(business_id: object, asset_id: object) -> str:
 def process_upload(data: bytes, content_type: str, kind: str) -> ProcessedUpload:
     """Read an uploaded photo or logo once it is in Storage. CPU-bound: run it in a thread."""
     try:
-        with Image.open(BytesIO(data)) as source:
+        with Image.open(BytesIO(data), formats=[PIL_FORMATS[content_type]]) as source:
             if source.width * source.height > MAX_PIXELS:
                 raise UnreadableImage(f"{source.width}x{source.height} is over {MAX_PIXELS} px")
             image = ImageOps.exif_transpose(source)

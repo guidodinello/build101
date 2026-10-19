@@ -825,3 +825,62 @@ async def test_a_sibling_link_shows_the_form_as_completed(
 
     assert state.status_code == 200
     assert state.json()["completed"] is True
+
+
+async def ticket_with_object(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    token: str,
+    data: bytes,
+    kind: str = "photo",
+    content_type: str = "image/png",
+) -> str:
+    """A ticket whose object the browser already put in Storage; returns the asset id."""
+    ticket = (
+        await client.post(
+            f"/api/o/{token}/uploads",
+            json={
+                "kind": kind,
+                "filename": "x.png",
+                "content_type": content_type,
+                "size_bytes": len(data),
+            },
+        )
+    ).json()
+    storage.put("assets", ticket["upload_url"].split("/upload/assets/")[1].split("?")[0], data)
+    return ticket["asset_id"]
+
+
+async def test_a_tiff_declared_as_png_is_unsupported(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    asset_id = await ticket_with_object(client, storage, token, make_image((60, 40), format="TIFF"))
+
+    response = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+
+    assert response.status_code == 422
+    assert error_code(response) == "unsupported_file"
+    async with sessions() as db:
+        asset = await db.get(BrandAsset, uuid.UUID(asset_id))
+    assert asset and asset.status == "failed"
+
+
+@pytest.mark.parametrize(
+    ("format", "content_type"),
+    [("JPEG", "image/jpeg"), ("PNG", "image/png"), ("WEBP", "image/webp")],
+)
+async def test_jpeg_png_and_webp_uploads_still_pass(
+    client: httpx.AsyncClient, storage: FakeStorage, format: str, content_type: str
+) -> None:
+    token = await new_link(client)
+
+    asset = await upload(
+        client,
+        storage,
+        token,
+        data=make_image((120, 80), format=format),
+        content_type=content_type,
+    )
+
+    assert asset["status"] == "ready"

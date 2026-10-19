@@ -84,3 +84,24 @@ def test_unreadable_file_raises() -> None:
 def test_storage_paths() -> None:
     assert asset_path("b1", "a1", "image/heic") == "b1/a1.heic"
     assert llm_copy_path("b1", "a1") == "b1/a1-llm.jpg"
+
+
+@pytest.mark.parametrize(
+    ("format", "content_type"),
+    [("JPEG", "image/jpeg"), ("PNG", "image/png"), ("WEBP", "image/webp"), ("HEIF", "image/heic")],
+)
+def test_every_accepted_format_passes(format: str, content_type: str) -> None:
+    processed = process_upload(make_image((120, 80), format=format), content_type, "photo")
+
+    assert (processed.width, processed.height) == (120, 80)
+
+
+@pytest.mark.parametrize("format", ["TIFF", "BMP", "GIF"])
+def test_a_file_of_another_format_is_unreadable_whatever_it_declares(format: str) -> None:
+    with pytest.raises(UnreadableImage):
+        process_upload(make_image((50, 50), format=format), "image/png", "photo")
+
+
+def test_a_file_must_match_its_declared_type() -> None:
+    with pytest.raises(UnreadableImage):
+        process_upload(make_image((50, 50), format="PNG"), "image/jpeg", "photo")

@@ -130,7 +130,7 @@ Accepted files:
 | `photo`, `logo` | `image/jpeg`, `image/png`, `image/webp`, `image/heic` | 10 MB |
 | `video` (Could: dashboard only, not the wizard) | `video/mp4`, `video/quicktime` (MOV) | 300 MB |
 
-Anything else → `422 unsupported_file` with a Spanish `message` the UI shows as is. Video duration and size in pixels are read with `ffprobe` during `analyze_asset`, not at upload.
+Anything else → `422 unsupported_file` with a Spanish `message` the UI shows as is. The bytes must be the declared type: `/complete` opens the file with only that format enabled, so a TIFF declared as `image/png` is `422 unsupported_file` and the asset `failed`. Video duration and size in pixels are read with `ffprobe` during `analyze_asset`, not at upload.
 
 ```ts
 type UploadRequest = { kind: "logo" | "photo" | "video"; filename: string; content_type: string;

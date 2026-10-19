@@ -7,6 +7,8 @@ from pillow_heif import register_heif_opener
 
 register_heif_opener()
 
+# What an Owner can send us (HEIC reads as HEIF); anything else is not decoded.
+ACCEPTED_FORMATS = ["JPEG", "PNG", "WEBP", "HEIF"]
 POST_SIZE = (1080, 1350)
 REFERENCE_MAX_SIDE = 1536
 JPEG_QUALITY = 90
@@ -27,7 +29,7 @@ Tone = Literal["light", "dark"]
 
 
 def prepare_reference(data: bytes) -> bytes:
-    with Image.open(BytesIO(data)) as source:
+    with Image.open(BytesIO(data), formats=ACCEPTED_FORMATS) as source:
         image = ImageOps.exif_transpose(source).convert("RGB")
     image.thumbnail((REFERENCE_MAX_SIDE, REFERENCE_MAX_SIDE), Image.Resampling.LANCZOS)
     return _to_jpeg(image)
