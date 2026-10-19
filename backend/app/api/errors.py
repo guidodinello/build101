@@ -43,6 +43,10 @@ async def _storage_error(_: Request, exc: StorageError) -> JSONResponse:
 
 
 def install_error_handlers(app: FastAPI) -> None:
-    app.add_exception_handler(ApiError, _api_error)
-    app.add_exception_handler(RequestValidationError, _validation_error)
-    app.add_exception_handler(StorageError, _storage_error)
+    # Starlette types handlers as taking `Exception`; it calls each with its registered class.
+    app.add_exception_handler(ApiError, _api_error)  # pyright: ignore[reportArgumentType]
+    app.add_exception_handler(
+        RequestValidationError,
+        _validation_error,  # pyright: ignore[reportArgumentType]
+    )
+    app.add_exception_handler(StorageError, _storage_error)  # pyright: ignore[reportArgumentType]
