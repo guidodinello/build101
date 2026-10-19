@@ -108,25 +108,26 @@ export function saveProducts(token: string, products: ProductInput[]) {
     throw new MockError(422, "too_many_product_photos", "Hasta 5 fotos por producto.");
   }
   const found = business(token);
-  const kept = products.map((input, position) => ({
-    id: input.id ?? newId("prod"),
-    name: input.name,
-    description: input.description,
-    price: input.price ?? null,
-    category: input.category ?? null,
-    position,
-    asset_count: 0,
-    archived: false,
-  }));
+  const linkedTo = new Map<string, string>();
+  const kept = products.map((input, position) => {
+    const id = input.id ?? newId("prod");
+    for (const assetId of input.asset_ids ?? []) linkedTo.set(assetId, id);
+    return {
+      id,
+      name: input.name,
+      description: input.description,
+      price: input.price ?? null,
+      category: input.category ?? null,
+      position,
+      asset_count: 0,
+      archived: false,
+    };
+  });
   const keptIds = new Set(kept.map((product) => product.id));
   const archived = found.products
     .filter((product) => !keptIds.has(product.id))
     .map((product) => ({ ...product, archived: true }));
   found.products = [...kept, ...archived];
-  const linkedTo = new Map<string, string>();
-  products.forEach((input, index) => {
-    for (const assetId of input.asset_ids ?? []) linkedTo.set(assetId, kept[index].id);
-  });
   found.assets = found.assets.map((asset) => {
     const productId = linkedTo.get(asset.id);
     return { ...asset, product_ids: productId ? [productId] : [] };

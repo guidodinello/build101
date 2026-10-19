@@ -15,7 +15,7 @@ import { MAX_PHOTOS, MAX_PRODUCTS, ownPhotos, readyPhotos } from "@/lib/onboardi
 
 type ProductDraft = {
   key: number;
-  id?: string;
+  id?: string | undefined;
   name: string;
   description: string;
   price: string;

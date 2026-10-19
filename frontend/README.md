@@ -14,6 +14,7 @@ Stack: Next.js (App Router, TypeScript), Tailwind CSS, shadcn/ui, lucide-react, 
 cp .env.example .env.local
 npm install
 npm run dev
+npm run typecheck   # next typegen, then tsc (strict flags in tsconfig.json); CI runs it with npm run lint
 ```
 
 Until the backend serves the onboarding endpoints (T24), set `ENABLE_MOCK_API=true` and `NEXT_PUBLIC_API_URL=http://localhost:3000/mock-api` in `.env.local`: `lib/mock-backend.ts` implements the [onboarding contract](../docs/architecture/api.md#onboarding-web-wizard) in memory. Any token works (`/o/demo`); `/o/vencido` shows the expired-link screen.

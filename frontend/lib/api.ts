@@ -76,14 +76,14 @@ export type BusinessInput = {
   name: string;
   category: string;
   one_liner: string;
-  location?: string;
+  location?: string | undefined;
 };
 
 export type ProductInput = {
-  id?: string;
+  id?: string | undefined;
   name: string;
   description: string;
-  price?: string;
+  price?: string | undefined;
   category?: string;
   asset_ids?: string[];
 };
