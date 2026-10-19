@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     # Post images are served from here until Supabase Storage (T17); in local dev, the tunnel URL
     public_backend_url: str | None = None
     max_posts_per_day: int = 5
+    # Videos are billed per second (ADR 0033), so they have their own cap, apart from designs
+    max_videos_per_day: int = 2
     max_photo_mb: int = 10
     # A Niche Report saved by `python -m app.agents.niche_cli` (ADR 0025): its insights are the
     # trend notes of post generation, until the weekly job saves them in niche_reports (T19)

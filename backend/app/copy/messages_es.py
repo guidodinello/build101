@@ -42,6 +42,12 @@ PUBLISH_NOW_ASK = "¡Aprobado! ¿Lo publico ya?"
 GENERATION_BUSY = "Estoy terminando otro post 🙌 Apenas te lo mande, armamos este."
 DAILY_LIMIT = "Por hoy ya armamos todos los diseños que puedo hacer 🙈 Mañana seguimos."
 PHOTOS_GONE = "Ya no tengo esas fotos 🙈 ¿Me las mandás de nuevo?"
+VIDEO_ACTIONS = "👆 ¿Te gusta el video? ¿Lo subo o le cambio algo?"
+VIDEO_FAILED = (
+    "Uy, no me salió el video 🙈 El post sigue como estaba. ¿Probamos de nuevo más tarde?"
+)
+VIDEO_BLOCKED = "No pude hacer un video con esa foto 🙈 El post sigue como estaba."
+VIDEO_DAILY_LIMIT = "Por hoy ya hicimos todos los videos que puedo 🙈 Mañana seguimos."
 
 BUTTON_BRAND_OK = "Sí, es mi marca"
 BUTTON_BRAND_FIX = "Corregir algo"

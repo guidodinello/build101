@@ -19,6 +19,7 @@ from app.jobs.queue import retry_failed
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
 from app.posts.store import APPROVABLE, InMemoryPosts, Post
+from app.posts.video_maker import VideoMaker
 
 from .brand import BrandFlow
 from .events import (
@@ -49,11 +50,13 @@ class ButtonRouter:
         maker: PostMaker,
         publisher: PostPublisher,
         sessions: async_sessionmaker[AsyncSession] | None,
+        videos: VideoMaker | None = None,
     ) -> None:
         self._posts = posts
         self._maker = maker
         self._publisher = publisher
         self._sessions = sessions
+        self._videos = videos
         self._brand = BrandFlow(sessions) if sessions else None
         self._handlers: dict[str, Handler] = {
             "noop": self._noop,
@@ -129,7 +132,11 @@ class ButtonRouter:
         post = self._post(sender, entity, {"discarded"})
         if post is None:
             return StaleButton()
-        return started(self._maker.remake(post, channel), "Sí, otro")
+        if post.video is None:
+            return started(self._maker.remake(post, channel), "Sí, otro")
+        if self._videos is None:  # the flag was turned off since
+            return StaleButton()
+        return started(self._videos.remake(post, channel), "Sí, otro")
 
     async def _post_publish(self, sender: str, entity: str, channel: ChannelPort) -> Event:
         post = self._post(sender, entity, {"approved"})

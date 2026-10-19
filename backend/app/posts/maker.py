@@ -142,6 +142,9 @@ class PostMaker:
             return {"error": "unknown_post"}
         if old.status not in APPROVABLE:
             return {"error": "post_not_pending", "status": old.status}
+        if old.video is not None:
+            # A caption-only remake would drop the clip; another take is a new `create_video`.
+            return {"error": "video_post"}
         if args.part == "images" and old.style == "photos":
             return {"error": "photos_as_they_are"}
         create = CreatePostArgs(
