@@ -265,6 +265,12 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 - Build: the `niche_reports` migration and model, a `generate_niche_report` job kind in T16's runner, a weekly trigger (the runner has no schedule yet: every Monday per onboarded Business, retried later on `503`), the `niche_report` tool once the orchestrator runs on the database (T19), and trend notes read from the latest row instead of the file once post generation knows its Business.
 - Done when: a Monday run saves one report per Business; "¿qué está funcionando en mi rubro?" answers with the report's `summary`, or starts the job when there is none this week.
 
+### T59: Video generation port (Veo + mock, flag) · A · S
+
+- Read: [ADR 0033](../decisions/0033-ai-generated-reels-veo.md), [integrations.md § Video generation](../architecture/integrations.md#video-generation-veo-adr-0033), [api.md § VideoGenPort](../architecture/api.md#internal-module-interfaces)
+- Build: `app/videogen/` (`VideoGenPort`, `GeminiVideoGen`, `MockVideoGen` with a bundled MP4, `build_video_gen`), the `VIDEO_GEN_*` and `GEMINI_VIDEO_*` settings, `PublicVideos` and `GET | HEAD /media/{token}.mp4`. Nothing calls it yet: T67 wires the WhatsApp flow, T60 publishes the Reel.
+- Done when: with `VIDEO_GEN_ENABLED=false` (default) no adapter is built; the factory refuses `gemini` without `GEMINI_VIDEO_API_KEY`; unit tests cover the adapter with a faked client; the live test exists and is not run in CI.
+
 ### T29: Zernio webhook · B · S
 
 - Build: `POST /webhooks/zernio` with signature verification; `post.published` / `post.failed` / `account.connected`.

@@ -320,6 +320,36 @@ class ImageGenPort(Protocol):
                        image_size: str | None = None) -> GeneratedImage: ...   # one image per call; style_image = carousel anchor; ratio/size override 4:5 (panorama)
 # errors: ImageGenError (base), ImageGenBlocked(reason), ImageGenNoImage, ImageGenUnavailable
 
+# app/videogen/base.py  (ADR 0033; VIDEO_GEN = gemini | mock, only built when VIDEO_GEN_ENABLED=true)
+class GeneratedVideo(BaseModel):
+    data: bytes                        # an MP4
+    mime: str                          # video/mp4
+    provider: str                      # gemini | mock
+    model: str | None
+    duration_seconds: int              # Veo bills per second
+
+class VideoGenPort(Protocol):
+    async def generate(self, prompt: str, reference_images: list[bytes], *,
+                       aspect_ratio: str = "9:16", duration_seconds: int = 8) -> GeneratedVideo: ...
+    # one clip per call; ratio 9:16 | 16:9, duration 4 | 6 | 8 (anything else: ValueError, no call made).
+    # Lite (default model): reference_images[0] is the first frame, the rest are dropped.
+    # Fast/Standard: up to 3 ASSET references, which force 8 s.
+# errors: VideoGenError (base), VideoGenBlocked(reason), VideoGenNoVideo, VideoGenRejected (4xx
+#         except 408/429: the request was refused), VideoGenUnavailable (5xx, 408, 429, network,
+#         failed operation), VideoGenTimeout (a VideoGenUnavailable)
+# Never auto-retry generate(): a timeout abandons an operation Google may still finish and bill,
+# so a retry can bill a second clip. Only VideoGenBlocked is known not to bill. Surface the error.
+# person_generation: "allow_adult" is sent only with a first frame or references; text-only calls
+# leave it unset (Veo accepts only "allow_all" there, the default).
+# app/videogen/factory.py: build_video_gen(settings) -> VideoGenPort | None   # None while the flag is off
+
+# app/media/public.py  (MP4s next to the JPEGs; in memory, lost on restart)
+class PublicVideos:
+    def add(self, data: bytes) -> str: ...            # "/media/{token}.mp4", relative to the public URL
+    def keep(self, path: str, data: bytes) -> None: ... # serve again as the newest; cap 20 clips
+    def get(self, token: str) -> bytes | None: ...
+# GET | HEAD /media/{token}.mp4 -> video/mp4 (no Range support yet)
+
 # app/media/images.py
 def to_post_image(data: bytes) -> bytes: ...       # center-crop to 4:5 and resize to 1080x1350 JPEG
 def prepare_reference(data: bytes) -> bytes: ...   # reference photo for the image service: HEIC ok, ≤ 1536 px long side, JPEG

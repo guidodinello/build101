@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 MAX_IMAGES = 200  # about 40 MB of post JPEGs
+MAX_VIDEOS = 20  # clips run to several MB each
 
 
 class PublicImages:
@@ -43,6 +44,42 @@ def get_public_images() -> PublicImages:
     return PublicImages()
 
 
+class PublicVideos:
+    """Generated MP4s served at unguessable paths so Zernio and WhatsApp can fetch them by link.
+
+    Same shape as `PublicImages`, with a small cap because a clip is several MB. In memory;
+    lost on restart. No `Range` support yet (ADR 0033): check it when the flag is first turned on.
+    """
+
+    def __init__(self, max_videos: int = MAX_VIDEOS) -> None:
+        self._max_videos = max_videos
+        self._videos: OrderedDict[str, bytes] = OrderedDict()
+
+    def add(self, data: bytes) -> str:
+        """Store an MP4 and return its path, relative to the backend's public URL."""
+        token = secrets.token_urlsafe(24)
+        self._videos[token] = data
+        if len(self._videos) > self._max_videos:
+            self._videos.popitem(last=False)
+        return f"/media/{token}.mp4"
+
+    def keep(self, path: str, data: bytes) -> None:
+        """Serve `data` at `path` again as the newest video, so a pending post is not evicted."""
+        token = path.removeprefix("/media/").removesuffix(".mp4")
+        self._videos[token] = data
+        self._videos.move_to_end(token)
+        if len(self._videos) > self._max_videos:
+            self._videos.popitem(last=False)
+
+    def get(self, token: str) -> bytes | None:
+        return self._videos.get(token)
+
+
+@cache
+def get_public_videos() -> PublicVideos:
+    return PublicVideos()
+
+
 router = APIRouter()
 
 
@@ -58,3 +95,15 @@ async def public_image(
     if request.method == "HEAD":
         return Response(headers={"content-length": str(len(data))}, media_type="image/jpeg")
     return Response(content=data, media_type="image/jpeg")
+
+
+@router.api_route("/media/{token}.mp4", methods=["GET", "HEAD"])
+async def public_video(
+    request: Request, token: str, videos: Annotated[PublicVideos, Depends(get_public_videos)]
+) -> Response:
+    data = videos.get(token)
+    if data is None:
+        raise HTTPException(status_code=404)
+    if request.method == "HEAD":
+        return Response(headers={"content-length": str(len(data))}, media_type="video/mp4")
+    return Response(content=data, media_type="video/mp4")
