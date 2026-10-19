@@ -531,13 +531,23 @@ class ChatHandler:
         approval: Approval,
         owner_request: bool,
     ) -> dict[str, Any]:
-        logger.info("tool %s for %s: %s", call.name, mask(sender), call.arguments)
+        # Arguments, results and replies hold the Owner's business content: INFO names the
+        # tool and the keys, DEBUG has the content.
+        logger.info("tool %s for %s: args %s", call.name, mask(sender), sorted(call.arguments))
+        logger.debug("tool %s arguments: %s", call.name, call.arguments)
         try:
             result = await self._tool_result(call, sender, channel, approval, owner_request)
         except SQLAlchemyError:
             logger.warning("tool %s failed for %s", call.name, mask(sender), exc_info=True)
             result = {"error": "action_failed"}
-        logger.info("tool %s result: %s", call.name, result)
+        error = result.get("error")
+        logger.info(
+            "tool %s result keys %s%s",
+            call.name,
+            sorted(result),
+            f", error {error}" if isinstance(error, str) else "",
+        )
+        logger.debug("tool %s result: %s", call.name, result)
         return result
 
     async def _tool_result(
@@ -610,7 +620,8 @@ async def keep_photo(keeper: PhotoKeeper, sender: str, photo: Photo) -> None:
 
 
 def log_reply(sender: str, text: str) -> None:
-    logger.info("%s replied to %s: %s", AGENT, mask(sender), text[:LOGGED_REPLY_CHARS])
+    logger.info("%s replied to %s (%d chars)", AGENT, mask(sender), len(text))
+    logger.debug("%s reply: %s", AGENT, text[:LOGGED_REPLY_CHARS])
 
 
 def offered_post(event: Event) -> str | None:
