@@ -57,7 +57,7 @@ async def test_without_a_database_the_catalog_is_empty_and_unknown_products_are_
 
 
 @requires_db
-async def test_the_catalog_is_the_businesss_active_products_in_order(
+async def test_the_catalog_is_the_business_active_products_in_order(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     business_id, products = await add_catalog(sessions)
