@@ -4,23 +4,26 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol, Self, runtime_checkable
+from typing import Any, Literal, Protocol, Self, TypedDict, Unpack, cast, runtime_checkable
 
 import httpx
 from google import genai
-from google.genai import errors, types
+from google.genai import errors, interactions, types
 
 # The Interactions API raises its own error family (timeouts, connection and HTTP status
 # errors), not `errors.APIError`, and google-genai 2.31 exports it only from this module.
 from google.genai._gaos.lib.compat_errors import GeminiNextGenAPIClientError
+from google.genai._gaos.types.basemodel import UnrecognizedStr
 from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
 ThinkingLevel = Literal["low", "medium", "high"]
-Step = dict[str, Any]  # an Interactions API step, as sent and as stored in the history
-Content = dict[str, Any]  # a content block of a user_input step (text or image)
-Tool = dict[str, Any]  # a function declaration, or a built-in tool: {"type": "google_search"}
+# The SDK's request TypedDicts, discriminated by `type`. They are plain dicts at runtime, so the
+# steps stored as JSONB in the history replay as they are.
+Step = interactions.StepParam  # an Interactions API step, as sent and as stored in the history
+Content = interactions.ContentParam  # a content block of a user_input step (text or image)
+Tool = interactions.ToolParam  # a function declaration, or a built-in tool
 
 # Free-tier gemini-3.8-flash took 5–26 s per chat turn on 2026-10-17, and some turns over 30 s.
 REQUEST_TIMEOUT_S = 60.0
@@ -107,7 +110,7 @@ def text_content(text: str) -> Content:
     return {"type": "text", "text": text}
 
 
-def image_content(data: bytes, mime_type: str) -> Content:
+def image_content(data: bytes, mime_type: interactions.ImageContentMimeType) -> Content:
     return {"type": "image", "data": base64.b64encode(data).decode(), "mime_type": mime_type}
 
 
@@ -124,6 +127,11 @@ def function_result_step(call: FunctionCall, result: dict[str, Any]) -> Step:
     }
 
 
+class _Options(TypedDict, total=False):
+    tools: list[Tool]
+    response_format: interactions.CreateModelInteractionResponseFormatParam
+
+
 class GeminiChat:
     """Text turns on Gemini's Interactions API, stateless: we keep and resend the history.
 
@@ -133,7 +141,9 @@ class GeminiChat:
 
     def __init__(self, client: genai.client.AsyncClient, model: str) -> None:
         self._client = client
-        self._model = model
+        # The SDK's `Model` is a union of known ids and `UnrecognizedStr`; a union-typed argument
+        # keeps pyright off the non-stream `create` overload, a single member selects it.
+        self._model = cast(UnrecognizedStr, model)
 
     @classmethod
     def from_api_key(cls, api_key: str, model: str) -> Self:
@@ -147,15 +157,11 @@ class GeminiChat:
         thinking_level: ThinkingLevel,
         tools: list[Tool] | None = None,
     ) -> Reply:
-        options: dict[str, Any] = {"tools": tools} if tools else {}
+        options: _Options = {"tools": tools} if tools else {}
         interaction = await self._create(
             agent, system, history, thinking_level, REQUEST_TIMEOUT_S, **options
         )
-        steps = [
-            step.model_dump(mode="json", exclude_none=True)
-            for step in interaction.steps or []
-            if step.type != "user_input"
-        ]
+        steps = [_as_step(step) for step in interaction.steps or [] if step.type != "user_input"]
         calls = [
             FunctionCall(step["id"], step["name"], step.get("arguments") or {})
             for step in steps
@@ -208,10 +214,7 @@ class GeminiChat:
             response_format=response_format(schema),
         )
         output = parse_output(agent, interaction, schema)
-        steps = [
-            step.model_dump(mode="json", exclude_none=True) for step in interaction.steps or []
-        ]
-        return Grounded(output, web_sources(steps))
+        return Grounded(output, web_sources([_as_step(step) for step in interaction.steps or []]))
 
     async def _create(
         self,
@@ -220,8 +223,8 @@ class GeminiChat:
         steps: list[Step],
         thinking_level: ThinkingLevel,
         timeout_s: float,
-        **options: Any,
-    ) -> Any:
+        **options: Unpack[_Options],
+    ) -> interactions.Interaction:
         started = time.monotonic()
         try:
             # `timeout` bounds each HTTP attempt; `wait_for` bounds the call, retries included.
@@ -242,13 +245,12 @@ class GeminiChat:
         except (GeminiNextGenAPIClientError, errors.APIError, httpx.HTTPError) as exc:
             raise LLMError(f"{agent}: {exc}") from exc
 
-        # `**options: Any` hides the non-stream overload from pyright: typed in #95
-        usage = interaction.usage  # pyright: ignore[reportAttributeAccessIssue]
+        usage = interaction.usage
         logger.info(
             "llm agent=%s model=%s status=%s in=%s out=%s thought=%s latency_ms=%d",
             agent,
             self._model,
-            interaction.status,  # pyright: ignore[reportAttributeAccessIssue]
+            interaction.status,
             usage.total_input_tokens if usage else None,
             usage.total_output_tokens if usage else None,
             usage.total_thought_tokens if usage else None,
@@ -257,11 +259,18 @@ class GeminiChat:
         return interaction
 
 
-def response_format(schema: type[BaseModel]) -> dict[str, Any]:
-    return {"type": "text", "mime_type": "application/json", "schema": schema.model_json_schema()}
+def response_format(schema: type[BaseModel]) -> interactions.TextResponseFormatParam:
+    return {"type": "text", "mime_type": "application/json", "schema_": schema.model_json_schema()}
 
 
-def parse_output[T: BaseModel](agent: str, interaction: Any, schema: type[T]) -> T:
+def _as_step(step: interactions.Step) -> Step:
+    """The SDK's response model dumped to its own request shape, to store and replay as is."""
+    return cast(Step, step.model_dump(mode="json", exclude_none=True))
+
+
+def parse_output[T: BaseModel](
+    agent: str, interaction: interactions.Interaction, schema: type[T]
+) -> T:
     if interaction.status != "completed" or not interaction.output_text:
         raise LLMError(f"{agent}: status={interaction.status} errors={interaction.errors}")
     try:
@@ -276,14 +285,20 @@ def web_sources(steps: list[Step]) -> list[WebSource]:
     for step in steps:
         if step["type"] == "url_context_result":
             for result in step.get("result", []):
-                if result.get("url") and result.get("status", "success") == "success":
-                    found.setdefault(result["url"], WebSource(result["url"]))
+                url = result.get("url")
+                if url and result.get("status", "success") == "success":
+                    found.setdefault(url, WebSource(url))
         elif step["type"] == "model_output":
             for block in step.get("content", []):
+                if block["type"] != "text":  # only text blocks carry annotations
+                    continue
                 for note in block.get("annotations", []):
-                    if note.get("type") != "url_citation" or not note.get("url"):
+                    if note["type"] != "url_citation":
                         continue
-                    known = found.get(note["url"])
+                    url = note.get("url")
+                    if not url:
+                        continue
+                    known = found.get(url)
                     if known is None or known.title is None:  # a citation adds the title
-                        found[note["url"]] = WebSource(note["url"], note.get("title"))
+                        found[url] = WebSource(url, note.get("title"))
     return list(found.values())

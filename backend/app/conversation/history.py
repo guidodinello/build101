@@ -5,7 +5,7 @@ import uuid
 from collections import defaultdict
 from functools import cache
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from pydantic import BaseModel
 from sqlalchemy import delete, select
@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.channels.inbound import mask
 from app.db.models import Business, ConversationStep
-from app.llm.client import ChatModel, LLMError, Step, text_content, user_step
+from app.llm.client import ChatModel, Content, LLMError, Step, text_content, user_step
 from app.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
@@ -98,7 +98,8 @@ class DbHistory:
                 .where(ConversationStep.business_id == business_id)
                 .order_by(ConversationStep.id)
             )
-            return list(steps)
+            # The rows were written from `Step` values by this module.
+            return cast(list[Step], list(steps))
 
     async def extend(self, sender: str, steps: list[Step]) -> None:
         async with self._sessions() as db:
@@ -237,24 +238,24 @@ def transcript(steps: list[Step]) -> str:
     """The steps as plain lines for the summarizer; thought steps carry nothing it needs."""
     lines: list[str] = []
     for step in steps:
-        match step.get("type"):
-            case "user_input":
-                text = " ".join(
-                    block.get("text", "")
-                    for block in step.get("content", [])
-                    if block.get("type") == "text"
-                )
-                lines.append(f"Owner or system: {text}")
-            case "model_output":
-                text = " ".join(
-                    block.get("text", "")
-                    for block in step.get("content", [])
-                    if block.get("type") == "text"
-                )
-                lines.append(f"Assistant: {text}")
-            case "function_call":
+        match step:
+            case {"type": "user_input"}:
+                lines.append(f"Owner or system: {text_of(step.get('content', []))}")
+            case {"type": "model_output"}:
+                lines.append(f"Assistant: {text_of(step.get('content', []))}")
+            case {"type": "function_call"}:
                 arguments = json.dumps(step.get("arguments") or {}, ensure_ascii=False)
                 lines.append(f"Assistant called {step.get('name')}: {arguments}")
-            case "function_result":
+            case {"type": "function_result"}:
                 lines.append(f"{step.get('name')} returned: {step.get('result')}")
     return "\n".join(lines)
+
+
+def text_of(blocks: list[Content]) -> str:
+    """The text blocks joined by spaces; a block without a type or text is skipped."""
+    texts: list[str] = []
+    for block in blocks:
+        match block:
+            case {"type": "text", "text": str() as text}:
+                texts.append(text)
+    return " ".join(texts)
