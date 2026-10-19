@@ -98,7 +98,7 @@ Timeouts are 60 s for chat and 90 s for structured calls. Server errors are retr
 |---|---|---|---|
 | orchestrator | `conversation/chat.py` | `reply` with tools | Talks with the Owner; decides when to call `create_post` or `approve_post` |
 | post_drafter | `posts/drafts.py` | `structured` | Brief, photos and Brand Brain become caption, hashtags and, for a design, each slide's headline and scene prompt |
-| asset_analyst | `agents/asset_analyst.py` | `structured` | Analyzes each photo uploaded in the wizard (background job) |
+| asset_analyst | `agents/asset_analyst.py` | `structured` | Analyzes each photo uploaded in the wizard (background job) and each photo the Owner sends in the chat (`PhotoKeeper`), both through `assets/analysis.py` |
 | brand_strategist | `agents/brand_strategist.py` | `structured`, high thinking | Writes the Brand Brain: voice, audience, pillars, visual identity (background job) |
 | niche_analyst | `agents/niche_analyst.py` | `grounded` (URL context and Google Search) | Writes the weekly Niche Report of a niche: what its stores and articles show this week, each point with a checked source (background job) |
 | image generation | `imagegen/gemini.py`, `carousel/generator.py` | `generate_content` | Makes 4:5 slide images from scene prompts and the product photos |

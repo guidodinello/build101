@@ -6,9 +6,9 @@ from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.asset_analyst import CatalogProduct, analyze_photo
 from app.agents.schemas import AssetAnalysis
-from app.db.models import AssetProduct, BrandAsset, Business, Product
+from app.assets.analysis import analyze_brand_photo
+from app.db.models import AssetProduct, BrandAsset, Business
 from app.llm.client import ChatModel
 from app.onboarding.uploads import asset_path, llm_copy_path
 from app.storage import ASSETS_BUCKET, StoragePort
@@ -34,29 +34,25 @@ class PhotoKeeper:
         self._storage = storage
 
     async def keep(self, sender: str, photo: Photo) -> None:
-        business_id, catalog = await self._business(sender)
-        analysis = await analyze_photo(self._model, photo.data, catalog, photo.caption, None)
+        business_id = await self._business_id(sender)
+        analysis = await analyze_brand_photo(
+            self._model,
+            photo.data,
+            photo.caption,
+            sessions=self._sessions,
+            business_id=business_id,
+        )
         photo.description = analysis.description
         if business_id is not None and self._sessions and self._storage:
             photo.asset_id = await store_photo(
                 self._sessions, self._storage, business_id, photo, analysis
             )
 
-    async def _business(self, sender: str) -> tuple[uuid.UUID | None, list[CatalogProduct]]:
+    async def _business_id(self, sender: str) -> uuid.UUID | None:
         if self._sessions is None or self._storage is None:
-            return None, []
+            return None
         async with self._sessions() as db:
-            business_id = await db.scalar(select(Business.id).where(Business.owner_phone == sender))
-            if business_id is None:
-                return None, []
-            products = (
-                await db.scalars(
-                    select(Product)
-                    .where(Product.business_id == business_id, Product.archived_at.is_(None))
-                    .order_by(Product.position)
-                )
-            ).all()
-        return business_id, [CatalogProduct(str(p.id), p.name, p.description) for p in products]
+            return await db.scalar(select(Business.id).where(Business.owner_phone == sender))
 
 
 async def store_photo(

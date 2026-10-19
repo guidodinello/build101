@@ -3,8 +3,8 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.agents.asset_analyst import CatalogProduct, analyze_photo
-from app.db.models import AssetProduct, BrandAsset, Product
+from app.assets.analysis import analyze_brand_photo
+from app.db.models import AssetProduct, BrandAsset
 from app.onboarding.uploads import llm_copy_path
 from app.storage import ASSETS_BUCKET
 
@@ -20,13 +20,6 @@ async def analyze_asset(context: JobContext, payload: dict[str, Any]) -> dict[st
             return {"skipped": "not a ready asset"}
         if asset.analysis is not None:
             return {"skipped": "already analyzed"}
-        products = (
-            await db.scalars(
-                select(Product)
-                .where(Product.business_id == asset.business_id, Product.archived_at.is_(None))
-                .order_by(Product.position)
-            )
-        ).all()
         linked = await db.scalar(
             select(AssetProduct.product_id).where(
                 AssetProduct.asset_id == asset.id, AssetProduct.source == "owner"
@@ -37,9 +30,13 @@ async def analyze_asset(context: JobContext, payload: dict[str, Any]) -> dict[st
     image = await context.storage.download(ASSETS_BUCKET, llm_copy_path(business_id, asset_id))
     if image is None:
         raise FileNotFoundError(f"the agents' copy of asset {asset_id} is missing")
-    catalog = [CatalogProduct(str(p.id), p.name, p.description) for p in products]
-    analysis = await analyze_photo(
-        context.model, image, catalog, owner_hint, str(linked) if linked else None
+    analysis = await analyze_brand_photo(
+        context.model,
+        image,
+        owner_hint,
+        sessions=context.sessions,
+        business_id=business_id,
+        linked_product_id=linked,
     )
 
     async with context.sessions() as db:
