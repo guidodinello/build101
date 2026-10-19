@@ -12,7 +12,7 @@ from app.conversation.factory import build_inbound_handler
 from app.media.public import get_public_images
 from app.publishing.factory import get_publisher
 
-from .base import ChannelPort, InboundMessage
+from .base import ChannelError, ChannelPort, InboundMessage
 from .factory import build_channel
 from .inbound import DedupeStore, InboundHandler, InMemoryDedupeStore, mask
 from .kapso_webhook import MESSAGE_RECEIVED_EVENT, parse_message, verify_signature
@@ -101,7 +101,7 @@ async def whatsapp_webhook(
 
     try:
         message = parse_message(json.loads(raw_body), fallback_id=x_idempotency_key)
-    except (ValueError, KeyError, TypeError):
+    except (ChannelError, ValueError, KeyError, TypeError):
         logger.warning("unparseable %s payload", x_webhook_event, exc_info=True)
         return {"status": "ignored"}
 

@@ -151,3 +151,41 @@ async def test_a_body_that_is_not_json_is_an_error() -> None:
 
     with pytest.raises(InstagramError):
         await client.profile("token")
+
+
+async def test_a_media_item_without_an_id_is_an_instagram_error() -> None:
+    client, _ = instagram(
+        lambda request: httpx.Response(200, json={"data": [{"media_type": "IMAGE"}]})
+    )
+
+    with pytest.raises(InstagramError, match="data.0.id"):
+        await client.recent_media("token", limit=3)
+
+
+async def test_a_token_answer_without_an_access_token_is_an_instagram_error() -> None:
+    client, _ = instagram(lambda request: httpx.Response(200, json={"user_id": "1"}))
+
+    with pytest.raises(InstagramError, match="no access_token"):
+        await client.exchange_code("code", REDIRECT_URI)
+
+
+async def test_null_and_odd_optional_fields_degrade_instead_of_failing() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/access_token"):
+            return httpx.Response(200, json={"access_token": "long", "expires_in": "soon"})
+        if request.url.path.endswith("/me/media"):
+            item = {"id": "5", "media_type": "IMAGE", "children": None, "media_url": "https://x/5"}
+            return httpx.Response(200, json={"data": ["junk", item], "paging": None})
+        if request.url.host == "api.instagram.com":
+            return httpx.Response(200, json={"access_token": "short", "user_id": None})
+        return httpx.Response(200, json={"user_id": None, "id": 99, "username": "katei"})
+
+    client, _ = instagram(handler)
+
+    token = await client.exchange_code("code", REDIRECT_URI)
+    profile = await client.profile("token")
+    media = await client.recent_media("token", limit=3)
+
+    assert (token.user_id, token.expires_at) == ("", None)
+    assert profile.user_id == "99"
+    assert [(m.id, [i.id for i in m.images]) for m in media] == [("5", ["5"])]
