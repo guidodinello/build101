@@ -20,6 +20,7 @@ from app.instagram.oauth_state import sign_state
 from app.jobs.instagram import import_instagram_job
 from app.jobs.runner import JobContext
 from app.main import app
+from app.onboarding.links import hash_token
 from app.storage import get_storage
 from tests.conftest import requires_db
 from tests.fakes import FakeChannel, FakeStorage, SequenceModel
@@ -283,3 +284,25 @@ async def test_imported_photos_show_in_the_wizard_without_taking_upload_slots(
     sources = [asset["source"] for asset in state["assets"]]
     assert sorted(sources) == ["instagram"] * 5 + ["web"]
     assert {asset["kind"] for asset in state["assets"]} == {"photo"}
+
+
+async def test_a_callback_through_a_sibling_link_after_submitting_changes_nothing(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    first = await new_link(client)
+    second = await new_link(client)
+    response = await client.post(f"/api/o/{second}/instagram/connect")
+    auth_url = urlsplit(response.json()["auth_url"])
+    async with sessions() as db:
+        link = await db.scalar(select(MagicLink).where(MagicLink.token_hash == hash_token(first)))
+        assert link is not None
+        link.completed_at = datetime.now(UTC)
+        await db.commit()
+
+    response = await client.get(f"{auth_url.path}?{auth_url.query}")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"{FRONTEND}/o/{second}"
+    async with sessions() as db:
+        assert await db.scalar(select(SocialAccount)) is None
+        assert (await db.scalars(select(Job.kind))).all() == []

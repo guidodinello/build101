@@ -93,11 +93,26 @@ async def get_onboarding(token: str, session: SessionDep) -> Onboarding:
     return Onboarding(link, business)
 
 
+async def is_submitted(session: AsyncSession, business_id: uuid.UUID) -> bool:
+    """Whether any onboarding link of the Business was submitted: an Owner holds several links
+    (one per reminder), and a submitted form takes no more answers through any of them."""
+    completed = await session.scalar(
+        select(MagicLink.id)
+        .where(
+            MagicLink.business_id == business_id,
+            MagicLink.purpose == "onboarding",
+            MagicLink.completed_at.is_not(None),
+        )
+        .limit(1)
+    )
+    return completed is not None
+
+
 async def get_open_onboarding(
-    onboarding: Annotated[Onboarding, Depends(get_onboarding)],
+    onboarding: Annotated[Onboarding, Depends(get_onboarding)], session: SessionDep
 ) -> Onboarding:
     """The link is reusable until the form is submitted (user-flows.md, Flow 1)."""
-    if onboarding.link.completed_at is not None:
+    if await is_submitted(session, onboarding.business.id):
         raise ApiError(409, "onboarding_completed", ALREADY_COMPLETED)
     return onboarding
 
@@ -331,16 +346,7 @@ async def complete_onboarding(
     # The lock serializes a double submit; any completed link of the Business counts, so a
     # second open link can't start the brand again.
     await session.refresh(business, with_for_update=True)
-    already_completed = await session.scalar(
-        select(MagicLink.id)
-        .where(
-            MagicLink.business_id == business.id,
-            MagicLink.purpose == "onboarding",
-            MagicLink.completed_at.is_not(None),
-        )
-        .limit(1)
-    )
-    if already_completed is not None:
+    if await is_submitted(session, business.id):
         if link.completed_at is None:
             link.completed_at = datetime.now(UTC)
             await session.commit()
@@ -536,7 +542,7 @@ async def _state(
         ],
         preferences=schemas.Questionnaire.model_validate(preferences) if preferences else None,
         instagram=await _instagram(session, business),
-        completed=onboarding.link.completed_at is not None,
+        completed=await is_submitted(session, business.id),
         whatsapp_url=settings.whatsapp_url,
     )
 

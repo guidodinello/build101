@@ -22,7 +22,7 @@ from app.jobs.queue import enqueue
 from app.onboarding.links import onboarding_url
 
 from .errors import ApiError
-from .onboarding import OpenOnboardingDep, SessionDep, SettingsDep, get_onboarding
+from .onboarding import OpenOnboardingDep, SessionDep, SettingsDep, get_onboarding, is_submitted
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ async def instagram_callback(
     onboarding = await get_onboarding(token, session)
     business = onboarding.business
     wizard = onboarding_url(settings.frontend_url, token)
-    if onboarding.link.completed_at is not None:
+    if await is_submitted(session, business.id):
         # Same rule as the connect endpoint: a submitted form takes no more answers, and the
         # Brand Brain it started would never see this import (ADR 0032).
         logger.info("instagram callback for %s after the onboarding was completed", business.id)

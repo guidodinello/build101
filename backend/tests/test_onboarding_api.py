@@ -765,3 +765,63 @@ async def test_a_second_link_cannot_start_the_brand_again(
     async with sessions() as db:
         kinds = (await db.scalars(select(Job.kind))).all()
     assert kinds.count("generate_brand") == 1
+
+
+async def submitted_business_with_a_sibling_link(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> tuple[str, str, str]:
+    """Link A submits the form; returns A, an untouched link B and a photo's asset id."""
+    first = await new_link(client)
+    second = await new_link(client)
+    await client.put(f"/api/o/{first}/business", json=BUSINESS)
+    await client.put(
+        f"/api/o/{first}/products", json={"products": [{"name": "Mesa", "description": ""}]}
+    )
+    assets = [await upload(client, storage, first) for _ in range(3)]
+    assert (await client.post(f"/api/o/{first}/complete")).status_code == 202
+    return first, second, assets[0]["id"]
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("PUT", "/business", BUSINESS),
+        ("PUT", "/products", {"products": [{"name": "Silla", "description": ""}]}),
+        ("PUT", "/brand", {"three_words": ["cálido"], "colors": ["#112233"]}),
+        ("PUT", "/preferences", PREFERENCES),
+        (
+            "POST",
+            "/uploads",
+            {"kind": "photo", "filename": "a.jpg", "content_type": "image/jpeg", "size_bytes": 1},
+        ),
+        ("POST", "/assets/{asset_id}/complete", None),
+        ("DELETE", "/assets/{asset_id}", None),
+        ("POST", "/instagram/connect", {}),
+    ],
+)
+async def test_a_sibling_link_takes_no_edits_once_the_form_is_submitted(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    method: str,
+    path: str,
+    body: dict[str, Any] | None,
+) -> None:
+    _, sibling, asset_id = await submitted_business_with_a_sibling_link(client, storage)
+
+    response = await client.request(
+        method, f"/api/o/{sibling}{path.format(asset_id=asset_id)}", json=body
+    )
+
+    assert response.status_code == 409
+    assert error_code(response) == "onboarding_completed"
+
+
+async def test_a_sibling_link_shows_the_form_as_completed(
+    client: httpx.AsyncClient, storage: FakeStorage
+) -> None:
+    _, sibling, _ = await submitted_business_with_a_sibling_link(client, storage)
+
+    state = await client.get(f"/api/o/{sibling}")
+
+    assert state.status_code == 200
+    assert state.json()["completed"] is True

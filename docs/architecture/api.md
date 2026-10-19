@@ -59,7 +59,7 @@ The Instagram callback is not under `/api/o/{token}`: Meta redirects the browser
 
 The wizard's `assets` list the Owner's uploads (`source = 'web'`) and the photos imported from Instagram (`source = 'instagram'`, photos only). Imported photos show in the wizard's photo step, where the Owner can drop any of them (`DELETE …/assets/{id}`), and count toward the minimum of 3; the cap of 15 applies to web uploads only. `instagram` in `OnboardingState` is the Business's latest `social_accounts` row for Instagram (`not_connected` when there is none).
 
-Link errors: an unknown token is `404 link_not_found`, an expired one `410 link_expired`, and every write after `/complete` succeeded is `409 onboarding_completed` (`GET` still works and shows `completed: true`). A body that doesn't validate is `422 invalid_request`; a Supabase Storage failure is `502 storage_unavailable`.
+Link errors: an unknown token is `404 link_not_found`, an expired one `410 link_expired`, and every write after `/complete` succeeded is `409 onboarding_completed`, through any onboarding link of the Business, including ones never used (`GET` still works and shows `completed: true`). A body that doesn't validate is `422 invalid_request`; a Supabase Storage failure is `502 storage_unavailable`.
 
 ```ts
 type OnboardingState = {
