@@ -3,7 +3,7 @@
 # `changes` job, least-privilege token, and one aggregate `CI` gate that a
 # branch ruleset can require instead of every job name.
 #
-# Jobs check docs, workflows and the backend (ruff + pytest). Add the frontend
+# Jobs check docs, workflows and the backend (ruff + pyright + pytest). Add the frontend
 # job in its own PR and list it in the `CI` gate's `needs:`.
 name: CI
 
@@ -132,6 +132,9 @@ jobs:
         run: |
           uv run ruff check .
           uv run ruff format --check .
+
+      - name: pyright
+        run: uv run pyright
 
       - name: pytest
         env:
