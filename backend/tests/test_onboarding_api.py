@@ -1106,3 +1106,51 @@ async def test_an_edit_waiting_on_the_submit_is_refused_once_it_commits(
     assert error_code(response) == "onboarding_completed"
     async with sessions() as db:
         assert (await db.scalar(select(Business.name))) != BUSINESS["name"]
+
+
+async def test_a_photo_being_read_does_not_hold_the_business(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    """`/assets/{id}/complete` releases the Business lock before the download and decode, so the
+    submit and the other open routes don't wait on a slow photo."""
+    token = await new_link(client)
+    data = make_image((1200, 900))
+    ticket = await client.post(
+        f"/api/o/{token}/uploads",
+        json={
+            "kind": "photo",
+            "filename": "foto.jpg",
+            "content_type": "image/jpeg",
+            "size_bytes": len(data),
+        },
+    )
+    asset_id = ticket.json()["asset_id"]
+    storage.put(
+        "assets", ticket.json()["upload_url"].split("/upload/assets/")[1].split("?")[0], data
+    )
+    downloading, release = asyncio.Event(), asyncio.Event()
+    download = storage.download
+
+    async def slow_download(
+        bucket: str, path: str, *, max_bytes: int | None = None
+    ) -> bytes | None:
+        downloading.set()
+        await release.wait()
+        return await download(bucket, path, max_bytes=max_bytes)
+
+    storage.download = slow_download  # type: ignore[method-assign]
+    completing = asyncio.create_task(client.post(f"/api/o/{token}/assets/{asset_id}/complete"))
+    try:
+        await asyncio.wait_for(downloading.wait(), timeout=5)
+        async with sessions() as db:
+            # NOWAIT fails at once if the photo's request still holds the Business row.
+            business = await db.scalar(select(Business).with_for_update(nowait=True))
+            assert business is not None
+            await db.rollback()
+    finally:
+        release.set()
+
+    response = await asyncio.wait_for(completing, timeout=5)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "ready"

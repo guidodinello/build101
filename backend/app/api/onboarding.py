@@ -355,6 +355,13 @@ async def complete_upload(
     settings: SettingsDep,
 ) -> schemas.Asset:
     business = onboarding.business
+    # Release the Business lock OpenOnboardingDep took: the download and decode below are slow,
+    # and holding it would stall every other route of the Business (the submit, the Instagram
+    # callback). So a photo can still end `ready` after the form was submitted; that is harmless,
+    # since `generate_brand` only reads the assets present when it runs.
+    await session.commit()
+    # The asset row stays locked across the download and decode, so a second /complete of the
+    # same asset waits and then finds it ready instead of reading it again.
     asset = await _active_asset(session, business.id, asset_id)
     if asset.status == "failed":
         # Already read and refused once: don't download and decode it again.
