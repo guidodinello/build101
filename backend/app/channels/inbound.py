@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import InboundDelivery
+from app.ratelimit import MAX_TRACKED_KEYS, RateLimiter
 
 from .base import ChannelError, ChannelPort, InboundMessage
 
@@ -93,6 +94,43 @@ class DbDedupeStore:
                 )
             )
             await db.commit()
+
+
+class RateLimitedHandler:
+    """A token bucket per sender in front of the handler (#106): no turn over the limit reaches
+    the LLM. The Owner is told once per throttled stretch, so a flood doesn't earn a flood of
+    replies. An album announcement is free: each photo arrives as a message of its own."""
+
+    def __init__(
+        self,
+        inner: InboundHandler,
+        limiter: RateLimiter,
+        notice: str,
+        max_keys: int = MAX_TRACKED_KEYS,
+    ) -> None:
+        self._inner = inner
+        self._limiter = limiter
+        self._notice = notice
+        self._max_keys = max_keys
+        self._notified: OrderedDict[str, None] = OrderedDict()
+
+    async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
+        if message.kind == "album" or self._limiter.take(message.sender):
+            self._notified.pop(message.sender, None)
+            await self._inner.handle(message, channel)
+            return
+        logger.warning(
+            "rate limit hit by %s, dropping %s", mask(message.sender), message.message_id
+        )
+        if message.sender in self._notified:
+            return
+        self._notified[message.sender] = None
+        if len(self._notified) > self._max_keys:
+            self._notified.popitem(last=False)
+        try:
+            await channel.send_text(message.sender, self._notice)
+        except ChannelError:
+            logger.warning("rate limit notice failed for %s", mask(message.sender), exc_info=True)
 
 
 class EchoHandler:

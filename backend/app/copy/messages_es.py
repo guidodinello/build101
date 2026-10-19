@@ -18,6 +18,7 @@ UNSUPPORTED_MEDIA = (
 AUDIO_UNCLEAR = "No te llegué a entender el audio 🙈 ¿Me lo mandás de nuevo o me lo escribís?"
 REPLY_FAILED = "Uy, se me trabó algo. ¿Me lo mandás de nuevo en un ratito?"
 STILL_WORKING = "Un segundo, ya te respondo ⏳"
+RATE_LIMITED = "Me llegaron muchos mensajes juntos 🙈 Dame un minuto y seguimos."
 LOOKING_AT_PHOTOS = "Estoy mirando las fotos, ya te digo 👀"
 JOB_FAILED = "Uy, se me trabó algo armando esto. ¿Lo intento de nuevo?"
 # `photo_saved` without its buttons (T18) and without "la guardo para próximos posts": until

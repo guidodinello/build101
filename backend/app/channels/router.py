@@ -10,13 +10,22 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 
 from app.config import Settings, get_settings
 from app.conversation.factory import build_inbound_handler
+from app.copy import messages_es
 from app.db.session import get_sessionmaker
 from app.media.public import get_public_images, get_public_videos
 from app.publishing.factory import get_publisher
+from app.ratelimit import TURNS_BURST, TURNS_PER_MINUTE, RateLimiter
 
 from .base import ChannelPort, InboundMessage
 from .factory import build_channel
-from .inbound import DbDedupeStore, DedupeStore, InboundHandler, InMemoryDedupeStore, mask
+from .inbound import (
+    DbDedupeStore,
+    DedupeStore,
+    InboundHandler,
+    InMemoryDedupeStore,
+    RateLimitedHandler,
+    mask,
+)
 from .kapso_webhook import MESSAGE_RECEIVED_EVENT, is_stale, parse_message, verify_signature
 
 logger = logging.getLogger(__name__)
@@ -42,8 +51,12 @@ def get_clock() -> float:
 
 @cache
 def get_inbound_handler() -> InboundHandler:
-    return build_inbound_handler(
+    handler = build_inbound_handler(
         get_settings(), get_public_images(), get_publisher(), get_public_videos()
+    )
+    # In front of everything the factory builds, the no-database chat handler included (#106).
+    return RateLimitedHandler(
+        handler, RateLimiter(TURNS_BURST, TURNS_PER_MINUTE), messages_es.RATE_LIMITED
     )
 
 

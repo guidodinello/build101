@@ -28,6 +28,7 @@ from app.instagram.oauth_state import (
 )
 from app.jobs.queue import enqueue
 from app.onboarding.links import onboarding_url
+from app.ratelimit import limit_onboarding_token
 
 from .errors import ApiError, error_response
 from .onboarding import (
@@ -58,7 +59,7 @@ class ConnectResponse(BaseModel):
     auth_url: str
 
 
-@router.post("/api/o/{token}/instagram/connect")
+@router.post("/api/o/{token}/instagram/connect", dependencies=[Depends(limit_onboarding_token)])
 async def connect_instagram(
     token: str,
     _: OpenOnboardingDep,
@@ -71,7 +72,7 @@ async def connect_instagram(
     return ConnectResponse(auth_url=start)
 
 
-@router.get("/api/o/{token}/instagram/start")
+@router.get("/api/o/{token}/instagram/start", dependencies=[Depends(limit_onboarding_token)])
 async def start_instagram(
     token: str,
     ticket: str,

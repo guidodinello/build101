@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app import ratelimit
 from app.api import onboarding
 from app.channels.router import get_channel
 from app.config import Settings, get_settings
@@ -1154,3 +1155,51 @@ async def test_a_photo_being_read_does_not_hold_the_business(
 
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "ready"
+
+
+@pytest.fixture
+def tight_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two calls per token and no refill, so the third one is over the limit."""
+    monkeypatch.setattr(ratelimit, "onboarding_limiter", ratelimit.RateLimiter(2, 0))
+
+
+async def test_calls_over_the_token_limit_get_429(
+    client: httpx.AsyncClient, tight_limit: None
+) -> None:
+    token = await new_link(client)
+
+    assert (await client.get(f"/api/o/{token}")).status_code == 200
+    assert (await client.get(f"/api/o/{token}")).status_code == 200
+    limited = await client.get(f"/api/o/{token}")
+
+    assert limited.status_code == 429
+    assert limited.json() == {
+        "error": {"code": "rate_limited", "message": ratelimit.TOO_MANY_REQUESTS}
+    }
+    assert "retry-after" not in limited.headers
+
+
+async def test_the_limit_covers_every_wizard_route_and_each_token_has_its_own(
+    client: httpx.AsyncClient, tight_limit: None
+) -> None:
+    token, other = await new_link(client), await new_link(client, phone="59899000002")
+    await client.get(f"/api/o/{token}")
+    await client.get(f"/api/o/{token}")
+
+    assert (await client.put(f"/api/o/{token}/business", json=BUSINESS)).status_code == 429
+    assert (await client.post(f"/api/o/{token}/complete")).status_code == 429
+    assert (await client.post(f"/api/o/{token}/instagram/connect")).status_code == 429
+    assert (await client.get(f"/api/o/{token}/instagram/start?ticket=x")).status_code == 429
+    assert (await client.get(f"/api/o/{other}")).status_code == 200
+
+
+async def test_the_limit_is_keyed_on_the_hash_of_the_token(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    limiter = ratelimit.RateLimiter(5, 0)
+    monkeypatch.setattr(ratelimit, "onboarding_limiter", limiter)
+    token = await new_link(client)
+
+    await client.get(f"/api/o/{token}")
+
+    assert list(limiter._buckets) == [hash_token(token)]

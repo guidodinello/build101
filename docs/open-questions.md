@@ -117,4 +117,8 @@ From [ADR 0012](decisions/0012-catalog-content-dashboard-reels.md), moved to Cou
 - [ ] Measuring results: do we pull Instagram insights to show "this post brought N messages"?
 - [ ] How does this evolve back toward the broader "chief of staff" vision (suppliers, orders, follow-ups)? Which second vertical?
 
+## Abuse and limits (security audit #115)
+
+- [ ] Many new WhatsApp numbers: each one creates a `Business` row at its first message, and the per-sender turn limit does not cap how many numbers there are. Do we need a global cap on new senders per hour in front of the onboarding gate (#106)?
+
 ## Add yours below
