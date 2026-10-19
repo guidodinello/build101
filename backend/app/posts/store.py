@@ -29,6 +29,12 @@ class PostImage:
     data: bytes
 
 
+@dataclass(frozen=True, slots=True)
+class PostVideo:
+    path: str  # where the video is served, relative to the public URL
+    data: bytes
+
+
 @dataclass(slots=True)
 class Post:
     id: str
@@ -49,6 +55,8 @@ class Post:
     # What a revision keeps unless the Owner asks otherwise.
     headlines: list[str] = field(default_factory=list)
     style_prompt: str | None = None
+    video: PostVideo | None = None  # set: the Post publishes as a Reel
+    video_cover_offset_ms: int | None = None
 
     @property
     def idempotency_key(self) -> str:
@@ -56,7 +64,9 @@ class Post:
         return self.id if self.publish_attempts <= 1 else f"{self.id}-r{self.publish_attempts}"
 
     @property
-    def format(self) -> Literal["image", "carousel"]:
+    def format(self) -> Literal["image", "carousel", "reel"]:
+        if self.video is not None:
+            return "reel"
         return "image" if len(self.images) == 1 else "carousel"
 
 
@@ -66,6 +76,8 @@ class InMemoryPosts:
     def __init__(self, max_per_sender: int = MAX_POSTS_PER_SENDER) -> None:
         self._max_per_sender = max_per_sender
         self._posts: defaultdict[str, list[Post]] = defaultdict(list)
+        # Video Posts by clip path, so the public route's cache miss is one lookup, not a scan.
+        self._by_video_path: dict[str, Post] = {}
         # Set when "subilo" met several pending posts: the ids of the numbered list the Owner was
         # shown, which the next turn may name by number.
         self._listed: dict[str, list[str]] = {}
@@ -75,18 +87,27 @@ class InMemoryPosts:
     def add(self, post: Post) -> None:
         posts = self._posts[post.sender]
         posts.append(post)
+        if post.video is not None:
+            self._by_video_path[post.video.path] = post
         while len(posts) > self._max_per_sender:
             # Oldest first, but never one whose publish is still running or unresolved.
             droppable = next((p for p in posts if p.status not in BUSY), None)
             if droppable is None:
                 break
             posts.remove(droppable)
+            if droppable.video is not None:
+                self._by_video_path.pop(droppable.video.path, None)
 
     def all(self, sender: str) -> list[Post]:
         return list(self._posts[sender])
 
     def get(self, sender: str, post_id: str) -> Post | None:
         return next((post for post in self._posts[sender] if post.id == post_id), None)
+
+    def video(self, path: str) -> bytes | None:
+        """The clip served at `path`, if a Post still in the store holds it."""
+        post = self._by_video_path.get(path)
+        return post.video.data if post and post.video else None
 
     def pending(self, sender: str) -> list[Post]:
         """The posts "subilo" can publish, oldest first: the numbering the Owner sees."""

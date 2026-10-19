@@ -3,6 +3,7 @@
 - Date: 2026-10-17
 - Status: proposed
 - Priorities revised by: [0016](0016-demo-scope-one-post.md)
+- Amended by: [0033](0033-ai-generated-reels-veo.md) (a Reel can also be generated)
 
 ## Context
 

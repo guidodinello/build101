@@ -148,15 +148,31 @@ async def test_a_failed_job_tells_the_owner_with_a_retry_button(
 
 async def test_other_failures_are_only_logged(sessions: async_sessionmaker[AsyncSession]) -> None:
     business = await add_business(sessions)
-    job_id = await queue(sessions, "generate_plan", business)
+
+    async def boom(context: JobContext, payload: dict[str, Any]) -> None:
+        raise RuntimeError("kaput")
+
+    job_id = await queue(sessions, "analyze_asset", business)
     channel = FakeChannel()
-    jobs = runner(sessions, {}, channel)
+    jobs = runner(sessions, {"analyze_asset": boom}, channel)
 
     await jobs.run_due()
     await jobs.join()
 
     assert (await job_row(sessions, job_id)).status == "failed"
     assert channel.buttons == []
+
+
+async def test_a_kind_this_process_cant_run_stays_queued(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    # The old instance during a deploy: it must not claim, and fail, a kind only the new one knows
+    business = await add_business(sessions)
+    job_id = await queue(sessions, "generate_niche_report", business)
+    jobs = runner(sessions, {"analyze_asset": analyze_asset}, FakeChannel())
+
+    assert await jobs.run_due() == 0
+    assert (await job_row(sessions, job_id)).status == "queued"
 
 
 async def test_only_free_slots_are_claimed(sessions: async_sessionmaker[AsyncSession]) -> None:

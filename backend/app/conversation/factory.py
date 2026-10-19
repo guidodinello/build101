@@ -8,15 +8,17 @@ from app.knowledge.base import Knowledge
 from app.knowledge.db import DbKnowledge
 from app.knowledge.local import LocalKnowledge, load_trend_notes
 from app.llm.client import GeminiChat
-from app.media.public import PublicImages
+from app.media.public import PublicImages, PublicVideos
 from app.posts.drafts import PostDrafter
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts
+from app.posts.video_maker import VideoMaker
 from app.publishing.base import PublisherPort
 from app.publishing.mock import MOCK_ACCOUNT_ID
 from app.rendering.factory import build_renderer
 from app.storage import get_storage
+from app.videogen.factory import build_video_gen
 
 from .button_router import ButtonRouter
 from .chat import ChatHandler
@@ -31,7 +33,10 @@ logger = logging.getLogger(__name__)
 
 
 def build_inbound_handler(
-    settings: Settings, images: PublicImages, publisher: PublisherPort
+    settings: Settings,
+    images: PublicImages,
+    publisher: PublisherPort,
+    videos: PublicVideos | None = None,
 ) -> InboundHandler:
     match settings.inbound_handler:
         case "chat":
@@ -73,10 +78,30 @@ def build_inbound_handler(
                 settings.max_posts_per_day,
                 knowledge=knowledge,
             )
+            public_videos = videos or PublicVideos()
+            public_videos.serve_from(store.video)
             publishing = PostPublisher(
-                publisher, store, images, settings.public_backend_url, account_id
+                publisher,
+                store,
+                images,
+                settings.public_backend_url,
+                account_id,
+                videos=public_videos,
             )
-            buttons = ButtonRouter(store, posts, publishing, sessions)
+            # None while VIDEO_GEN_ENABLED is off: no maker, so no tool and no Veo call (ADR 0033)
+            video_gen = build_video_gen(settings)
+            video_maker = (
+                VideoMaker(
+                    video_gen,
+                    store,
+                    public_videos,
+                    settings.public_backend_url,
+                    settings.max_videos_per_day,
+                )
+                if video_gen
+                else None
+            )
+            buttons = ButtonRouter(store, posts, publishing, sessions, video_maker)
             storage = (
                 get_storage()
                 if sessions and settings.supabase_url and settings.supabase_service_role_key
@@ -96,10 +121,13 @@ def build_inbound_handler(
                 max_photo_mb=settings.max_photo_mb,
                 notes=notes,
                 knowledge=knowledge,
+                videos=video_maker,
                 keeper=PhotoKeeper(model, sessions, storage),
             )
             posts.on_event(chat.notify)
             publishing.on_event(chat.notify)
+            if video_maker:
+                video_maker.on_event(chat.notify)
             if sessions is None:
                 return chat
             return OnboardingGate(chat, sessions, settings.frontend_url, settings.assistant_name)

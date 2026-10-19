@@ -120,10 +120,13 @@ class ZernioPublisher:
     ) -> PublishResult:
         if when is not None:
             raise NotImplementedError("scheduling is T30's Should part")
+        target: dict[str, Any] = {"platform": INSTAGRAM, "accountId": account_id}
+        if instagram_data := _instagram_data(media):
+            target["platformSpecificData"] = instagram_data
         body = {
             "content": caption,
-            "mediaItems": [{"type": "image", "url": url} for url in _image_urls(media)],
-            "platforms": [{"platform": INSTAGRAM, "accountId": account_id}],
+            "mediaItems": _media_items(media),
+            "platforms": [target],
             "publishNow": True,
         }
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
@@ -214,21 +217,42 @@ def _status_error(response: httpx.Response) -> PublisherError:
     return PublisherError(message)
 
 
-def _image_urls(media: PublishMedia) -> list[str]:
+def _media_items(media: PublishMedia) -> list[dict[str, str]]:
     match media.format:
         case "image":
             if not media.url:
                 raise ValueError("an image post needs media.url")
-            return [media.url]
+            return [{"type": "image", "url": media.url}]
         case "carousel":
             if not MIN_CAROUSEL_ITEMS <= len(media.urls) <= MAX_CAROUSEL_ITEMS:
                 raise ValueError(
                     f"a carousel takes {MIN_CAROUSEL_ITEMS} to {MAX_CAROUSEL_ITEMS} images, "
                     f"got {len(media.urls)}"
                 )
-            return media.urls
+            return [{"type": "image", "url": url} for url in media.urls]
         case "reel":
-            raise NotImplementedError("reels are a Could (not built yet)")
+            # A single video item with no contentType publishes as a Reel (Zernio Instagram
+            # posts: https://docs.zernio.com/platforms/instagram/posts). Video limits (MP4/MOV,
+            # H.264, 9:16, 3-90 s, <= 300 MB): https://docs.zernio.com/platforms/instagram/media
+            if not media.url:
+                raise ValueError("a reel needs media.url")
+            if media.cover_offset_ms is not None and media.cover_offset_ms < 0:
+                raise ValueError(f"cover_offset_ms must be >= 0, got {media.cover_offset_ms}")
+            return [{"type": "video", "url": media.url}]
+
+
+def _instagram_data(media: PublishMedia) -> dict[str, Any]:
+    """Instagram `platformSpecificData`, only the fields that differ from Zernio's defaults.
+
+    `thumbOffset` (ms into the video) picks the Reel cover; `isAiGenerated` adds Instagram's
+    AI label (https://docs.zernio.com/platforms/instagram/fields, OpenAPI v1.297.1).
+    """
+    data: dict[str, Any] = {}
+    if media.format == "reel" and media.cover_offset_ms is not None:
+        data["thumbOffset"] = media.cover_offset_ms
+    if media.ai_generated:
+        data["isAiGenerated"] = True
+    return data
 
 
 def _json(response: httpx.Response) -> dict[str, Any]:

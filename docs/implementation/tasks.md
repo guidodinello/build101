@@ -265,6 +265,12 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 - Build: the `niche_report` tool once the orchestrator runs on the database (T19), and a way to record a Business's niche once there is more than one (`niche_of` maps every Business to `curated-wood-furniture-uy`).
 - Done when: a weekly run saves one report per niche (built); "¿qué está funcionando en mi rubro?" answers with the report's `summary`, or starts the job when there is none this week.
 
+### T59: Video generation port (Veo + mock, flag) · A · S
+
+- Read: [ADR 0033](../decisions/0033-ai-generated-reels-veo.md), [integrations.md § Video generation](../architecture/integrations.md#video-generation-veo-adr-0033), [api.md § VideoGenPort](../architecture/api.md#internal-module-interfaces)
+- Build: `app/videogen/` (`VideoGenPort`, `GeminiVideoGen`, `MockVideoGen` with a bundled MP4, `build_video_gen`), the `VIDEO_GEN_*` and `GEMINI_VIDEO_*` settings, `PublicVideos` and `GET | HEAD /media/{token}.mp4`. Nothing calls it yet: T67 wires the WhatsApp flow, T60 publishes the Reel.
+- Done when: with `VIDEO_GEN_ENABLED=false` (default) no adapter is built; the factory refuses `gemini` without `GEMINI_VIDEO_API_KEY`; unit tests cover the adapter with a faked client; the live test exists and is not run in CI.
+
 ### T29: Zernio webhook · B · S
 
 - Build: `POST /webhooks/zernio` with signature verification; `post.published` / `post.failed` / `account.connected`.
@@ -281,6 +287,22 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 - Read: [design/web-app.md § /b/[token]](../design/web-app.md), the Dashboard artboard in [design/mockups/](../design/mockups/README.md)
 - Build: the read-only Inicio page: business header, this week's Posts with status badges and Instagram links, the Brand Brain summary. The Catálogo, Contenido and Promos tabs are Could (T35b).
 - Done when: on a real phone, the link from WhatsApp shows the demo business's posts with the right statuses.
+
+### T60: Reels through Zernio · A · S
+
+Part of story #64 (AI-generated Reels); the video itself comes from T59 and the WhatsApp flow is the story's third task.
+
+- Read: [integrations.md § Zernio](../architecture/integrations.md#publishing-provider-zernio), [api.md § PublishMedia](../architecture/api.md), `app/publishing/zernio.py`, `app/posts/publish.py`
+- Build: `ZernioPublisher` publishes `PublishMedia(format="reel")` as one `video` media item with `platformSpecificData.thumbOffset` for the cover; `PublishMedia.ai_generated` adds `isAiGenerated` (any format; T61 sets it for every generated clip). `Post.video` (`PostVideo`, like `PostImage`) and `video_cover_offset_ms` make `PostPublisher` build the Reel media from `public base URL + video.path`. Same Approval and guards as images ([ADR 0007](../decisions/0007-approve-every-post.md)); the mock publisher already accepts reels.
+- Done when: unit tests with a faked HTTP client cover the Reel request, its errors and polling; a `@pytest.mark.live` Reel test exists (not run in CI); nothing publishes a video Post that was not approved.
+
+### T61: WhatsApp video flow · B · S
+
+Part of story #64 (AI-generated Reels), after T59 (the port) and T60 (publishing the Reel).
+
+- Read: [ADR 0033](../decisions/0033-ai-generated-reels-veo.md), [agents.md § When video generation runs](../architecture/agents.md#when-video-generation-runs), [api.md § Button IDs](../architecture/api.md#button-ids)
+- Build: the `create_video` orchestrator tool, registered only when `VIDEO_GEN_ENABLED` is on (no tool, no prompt section, no `VideoMaker` otherwise); `VideoMaker` (`app/posts/video_maker.py`) with the guards in code (post state, photos, one generation per Owner, `MAX_VIDEOS_PER_DAY`) and a background job that calls `VideoGenPort.generate` once, never retried; a new video Post next to the one it animates (`Post.format == "reel"`, the source is left as it is); `VideoSent` / `VideoFailed` events (ADR 0026) with fallbacks in `messages_es.py`; the video as the header of the Aprobar / Cambiar / Descartar message; `PostPublisher` keeps the clip served and sets `ai_generated`.
+- Done when: with the flag off there is no video option and no Veo call; with the flag on and `VIDEO_GEN=mock` a request reaches the Owner as a video message with buttons and an approved one reaches the mock publisher as a Reel; a failed generation tells the Owner and publishes nothing. Tests: `tests/test_video_flow.py`.
 
 ## Could (only if everything above is solid)
 
