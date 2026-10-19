@@ -6,6 +6,7 @@ import type {
   Asset,
   BrandInput,
   BusinessInput,
+  CompleteResponse,
   OnboardingState,
   ProductInput,
   Questionnaire,
@@ -209,7 +210,7 @@ export function connectInstagram(token: string) {
   return { auth_url: `/o/${encodeURIComponent(token)}?step=instagram&connected=1` };
 }
 
-export function complete(token: string) {
+export function complete(token: string): CompleteResponse {
   const found = business(token);
   const { name, category } = found.business;
   const products = found.products.filter((product) => !product.archived).length;
