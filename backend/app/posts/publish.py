@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from app.background import BackgroundWork
 from app.channels.base import ChannelPort
 from app.channels.inbound import mask
 from app.conversation.approval import Approval
@@ -43,8 +44,8 @@ class PostPublisher:
     """`approve_post` before the database: guards in code, then a background publish.
 
     The Owner's explicit approval is computed from their message (`approval.decide`), never by
-    the model: only the post named by this turn's `Approval` can be published. T30 moves this onto
-    the job runner.
+    the model: only the post named by this turn's `Approval` can be published. The publish runs on
+    `BackgroundWork`; scheduling it durably is T30.
     """
 
     def __init__(
@@ -56,6 +57,7 @@ class PostPublisher:
         account_id: str | None,
         sleep: Sleep = asyncio.sleep,
         *,
+        background: BackgroundWork,
         videos: PublicVideos | None = None,
     ) -> None:
         self._publisher = publisher
@@ -65,7 +67,7 @@ class PostPublisher:
         self._public_base_url = public_base_url.rstrip("/")
         self._account_id = account_id
         self._sleep = sleep
-        self._tasks: set[asyncio.Task[None]] = set()
+        self._background = background
         self._notify: Notify | None = None
 
     def on_event(self, callback: Notify) -> None:
@@ -105,14 +107,10 @@ class PostPublisher:
             logger.warning("cannot publish post %s: ZERNIO_ACCOUNT_ID is not set", approved.post.id)
             return {"error": "need_ig"}
         post = self._posts.begin_publish(approved)
-        task = asyncio.create_task(self._publish(post, account_id, channel))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        self._background.start(
+            self._publish(post, account_id, channel), f"publish {post.id} for {mask(post.sender)}"
+        )
         return {"post_id": post.id, "status": "publishing"}
-
-    async def join(self) -> None:
-        """Wait for the running publishes (tests, shutdown)."""
-        await asyncio.gather(*self._tasks)
 
     async def _publish(self, post: Post, account_id: str, channel: ChannelPort) -> None:
         try:

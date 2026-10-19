@@ -10,6 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.agents.schemas import BrandBrain
+from app.background import BackgroundWork
 from app.carousel.generator import CarouselGenerator
 from app.carousel.schemas import MAX_SLIDES
 from app.channels.base import ChannelPort
@@ -74,8 +75,8 @@ class PostMaker:
 
     The result is an event (`PostSent` / `PostFailed`) for the orchestrator, which writes the
     message and keeps the note in the history, so the model knows what was sent
-    ("cambiale el título"). T19 moves the guards onto `posts` and the generation onto the job
-    runner (T16, T17).
+    ("cambiale el título"). The generation runs on `BackgroundWork`, and the guards stay in memory
+    like the Posts they protect: both move to the database together (T19).
     """
 
     def __init__(
@@ -90,6 +91,8 @@ class PostMaker:
         max_posts_per_day: int,
         knowledge: Knowledge | None = None,
         now: Callable[[], datetime] = local_now,
+        *,
+        background: BackgroundWork,
     ) -> None:
         self._drafter = drafter
         self._image_gen = image_gen
@@ -103,7 +106,7 @@ class PostMaker:
         self._now = now
         self._generating: set[str] = set()
         self._designs_today: dict[str, tuple[date, int]] = {}
-        self._tasks: set[asyncio.Task[None]] = set()
+        self._background = background
         self._notify: Notify | None = None
 
     def on_event(self, callback: Notify) -> None:
@@ -196,16 +199,11 @@ class PostMaker:
         for photo in photos:
             photo.used = True
         post_id = uuid.uuid4().hex[:8]
-        task = asyncio.create_task(
-            self._generate(sender, post_id, args, photos, logo, channel, remake)
+        self._background.start(
+            self._generate(sender, post_id, args, photos, logo, channel, remake),
+            f"post {post_id} for {mask(sender)}",
         )
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
         return {"post_id": post_id, "status": "generating"}
-
-    async def join(self) -> None:
-        """Wait for the running generations (tests, shutdown)."""
-        await asyncio.gather(*self._tasks)
 
     async def _generate(
         self,
@@ -269,10 +267,7 @@ class PostMaker:
     ) -> None:
         if self._notify is None:
             raise RuntimeError("PostMaker.on_event was never called: nobody can tell the Owner")
-        try:
-            await self._notify(sender, event, channel)
-        except Exception:
-            logger.exception("event for post %s failed for %s", post_id, mask(sender))
+        await self._notify(sender, event, channel)
 
     async def _render(
         self,

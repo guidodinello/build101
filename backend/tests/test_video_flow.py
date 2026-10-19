@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from app.background import BackgroundWork
 from app.channels.base import Button
 from app.config import Settings
 from app.conversation.button_router import ButtonRouter
@@ -81,8 +82,15 @@ class Rig:
         photos, store = InMemoryPhotos(), PostLifecycle()
         images, self.videos = PublicImages(), PublicVideos()
         self.store = store
+        self.background = BackgroundWork()
         publishing = PostPublisher(
-            self.publisher, store, images, BASE_URL, MOCK_ACCOUNT_ID, videos=self.videos
+            self.publisher,
+            store,
+            images,
+            BASE_URL,
+            MOCK_ACCOUNT_ID,
+            background=self.background,
+            videos=self.videos,
         )
         maker = PostMaker(
             PostDrafter(model),
@@ -93,9 +101,14 @@ class Rig:
             store,
             BASE_URL,
             max_posts_per_day=5,
+            background=self.background,
         )
         self.maker = (
-            VideoMaker(video_gen, store, self.videos, BASE_URL, max_videos) if video_gen else None
+            VideoMaker(
+                video_gen, store, self.videos, BASE_URL, max_videos, background=self.background
+            )
+            if video_gen
+            else None
         )
         self.chat = ChatHandler(
             model,
@@ -110,6 +123,7 @@ class Rig:
             max_photo_mb=1,
             keep_alive_s=60.0,
             videos=self.maker,
+            background=self.background,
         )
         maker.on_event(self.chat.notify)
         publishing.on_event(self.chat.notify)
@@ -132,16 +146,15 @@ class Rig:
     async def say(self, text: str = "hacelo video") -> None:
         await self.chat.handle(message("text", text=text), self.channel)
         if self.maker:
-            await self.maker.join()
-        await self.chat.join()
+            await self.background.join()
+        await self.background.join()
 
     async def tap(self, button_id: str) -> None:
         tap = message("interactive").model_copy(
             update={"button": Button(id=button_id, title="x"), "kind": "button"}
         )
         await self.chat.handle(tap, self.channel)
-        await self.publishing.join()
-        await self.chat.join()
+        await self.background.join()
 
     def videos_of(self) -> list[Post]:
         return [post for post in self.store.all(SENDER) if post.video is not None]
@@ -284,13 +297,13 @@ async def test_blocked_is_refunded_but_other_failures_count_against_the_daily_li
 
     for _ in range(2):  # each one is blocked, so each one is refunded and allowed
         assert rig.maker.create_video(SENDER, args, rig.channel)["status"] == "generating"  # type: ignore[union-attr]
-        await rig.maker.join()  # type: ignore[union-attr]
+        await rig.background.join()
 
     billed = CountingVideoGen(VideoGenUnavailable("503"))
     rig = Rig(ScriptedModel(replies=[text_reply("ok")]), billed, max_videos=1)
     rig.add_post()
     assert rig.maker.create_video(SENDER, args, rig.channel)["status"] == "generating"  # type: ignore[union-attr]
-    await rig.maker.join()  # type: ignore[union-attr]
+    await rig.background.join()
     assert rig.maker.create_video(SENDER, args, rig.channel) == {"error": "video_daily_limit"}  # type: ignore[union-attr]
     assert len(billed.calls) == 1
 
@@ -316,7 +329,7 @@ async def test_guards_run_in_code() -> None:
     assert rig.maker.create_video(SENDER, {"post_id": "p1"}, rig.channel) == {
         "error": "generation_in_progress"
     }
-    await rig.maker.join()
+    await rig.background.join()
 
 
 async def test_an_event_turn_cannot_start_a_video() -> None:
@@ -356,8 +369,7 @@ async def test_another_after_discarding_a_video_makes_a_new_video_and_leaves_the
 
     await rig.tap(f"post_discard:{first.id}")
     await rig.tap(f"post_replace:{first.id}")
-    await rig.maker.join()  # type: ignore[union-attr]
-    await rig.chat.join()
+    await rig.background.join()
 
     assert len(video_gen.calls) == 2
     assert len(rig.videos_of()) == 2
@@ -376,7 +388,7 @@ async def test_another_is_one_shot_for_a_discarded_video() -> None:
 
     await rig.tap(f"post_replace:{first.id}")
     await rig.tap(f"post_replace:{first.id}")  # a second tap on the same button
-    await rig.maker.join()  # type: ignore[union-attr]
+    await rig.background.join()
 
     assert len(video_gen.calls) == 2  # the request, and one remake
     assert first.status == "replaced"
@@ -407,7 +419,7 @@ async def test_an_unwired_maker_refuses_before_any_generation() -> None:
     video_gen = CountingVideoGen()
     rig = Rig(ScriptedModel(replies=[text_reply("ok")]), video_gen)
     rig.add_post()
-    unwired = VideoMaker(video_gen, rig.store, rig.videos, BASE_URL, 2)
+    unwired = VideoMaker(video_gen, rig.store, rig.videos, BASE_URL, 2, background=rig.background)
 
     with pytest.raises(RuntimeError, match="on_event"):
         unwired.create_video(SENDER, {"post_id": "p1"}, rig.channel)

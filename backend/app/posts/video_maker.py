@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import time
 import uuid
@@ -8,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from app.background import BackgroundWork
 from app.channels.base import ChannelPort
 from app.channels.inbound import mask
 from app.conversation.events import Event, Notify, VideoFailed, VideoSent
@@ -59,6 +59,8 @@ class VideoMaker:
         public_base_url: str,
         max_videos_per_day: int,
         now: Callable[[], datetime] = local_now,
+        *,
+        background: BackgroundWork,
     ) -> None:
         self._video_gen = video_gen
         self._posts = posts
@@ -68,7 +70,7 @@ class VideoMaker:
         self._now = now
         self._generating: set[str] = set()
         self._videos_today: dict[str, tuple[date, int]] = {}
-        self._tasks: set[asyncio.Task[None]] = set()
+        self._background = background
         self._notify: Notify | None = None
 
     def on_event(self, callback: Notify) -> None:
@@ -109,16 +111,11 @@ class VideoMaker:
         self._generating.add(sender)
         self._videos_today[sender] = (today, self._count_today(sender) + 1)
         post_id = uuid.uuid4().hex[:8]
-        task = asyncio.create_task(
-            self._generate(sender, post_id, photos, caption, direction.strip(), channel)
+        self._background.start(
+            self._generate(sender, post_id, photos, caption, direction.strip(), channel),
+            f"video {post_id} for {mask(sender)}",
         )
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
         return {"post_id": post_id, "status": "generating"}
-
-    async def join(self) -> None:
-        """Wait for the running generations (tests, shutdown)."""
-        await asyncio.gather(*self._tasks)
 
     def _require_wired(self) -> None:
         """Refuse before any guard or spend: a clip nobody can announce is billed for nothing."""
@@ -185,14 +182,9 @@ class VideoMaker:
     async def _announce(
         self, sender: str, post_id: str, event: Event, channel: ChannelPort
     ) -> None:
-        try:
-            if (
-                self._notify is None
-            ):  # `_require_wired` makes this unreachable; never escape the task
-                raise RuntimeError("VideoMaker.on_event was never called")
-            await self._notify(sender, event, channel)
-        except Exception:
-            logger.exception("event for video %s failed for %s", post_id, mask(sender))
+        if self._notify is None:  # `_require_wired` makes this unreachable
+            raise RuntimeError("VideoMaker.on_event was never called")
+        await self._notify(sender, event, channel)
 
 
 def failure_reason(error: Exception) -> str:

@@ -105,7 +105,7 @@ Timeouts are 60 s for chat and 90 s for structured calls. Server errors are retr
 | niche_analyst | `agents/niche_analyst.py` | `grounded` (URL context and Google Search) | Writes the weekly Niche Report of a niche: what its stores and articles show this week, each point with a checked source (background job) |
 | image generation | `imagegen/gemini.py`, `carousel/generator.py` | `generate_content` | Makes 4:5 slide images from scene prompts and the product photos |
 
-**The orchestrator's tool loop** (`chat.py`, `_converse`): for up to 5 steps, send the system prompt, the history and the current message with the two tools. If Gemini answers with text, that text goes to WhatsApp. If it asks for a tool, code runs it, appends the result, and loops. Tools are declared in `conversation/tools.py`, and both return at once (`{"post_id": ..., "status": "generating"}`); the slow work runs in the background.
+**The orchestrator's tool loop** (`chat.py`, `_converse`): for up to 5 steps, send the system prompt, the history and the current message with the two tools. If Gemini answers with text, that text goes to WhatsApp. If it asks for a tool, code runs it, appends the result, and loops. Tools are declared in `conversation/tools.py`, and both return at once (`{"post_id": ..., "status": "generating"}`); the slow work runs in the background, on `BackgroundWork` (`app/background.py`).
 
 **Code reports events, the model writes the message** ([ADR 0026](../decisions/0026-owner-messages-from-the-orchestrator.md)). When background work ends, code emits a typed event from `conversation/events.py`, such as `PostSent` or `Published`. `ChatHandler.notify` gives that event's note to the orchestrator as if the Owner had sent it, and the model writes the reply. Buttons are attached in code. If the model fails, a fixed Spanish fallback from `copy/messages_es.py` goes out instead. Every event reaches WhatsApp through `conversation/outbound.py`, which owns the buttons, the 1024-character body limit and the text/buttons split. Jobs and the onboarding API use the same `notify`; their three events (`BrandSummaryReady`, `JobFailed`, `BrandGenerating`) are verbatim: fixed text, no model turn.
 
@@ -117,7 +117,7 @@ Timeouts are 60 s for chat and 90 s for structured calls. Server errors are retr
 
 ## Making a post
 
-A post is made in the background after the orchestrator calls `create_post` with a brief, the photo ids, a style (`photos` or `design`), and optionally `with_logo` or `replaces`. The code is `posts/maker.py`.
+A post is made in the background after the orchestrator calls `create_post` with a brief, the photo ids, a style (`photos` or `design`), and optionally `with_logo` or `replaces`. The code is `posts/maker.py`; it starts the generation on `BackgroundWork` (`app/background.py`), like every other background task.
 
 1. **Guards, in code.** The photos must exist, no other post for this Owner may be generating, the daily design limit (`MAX_POSTS_PER_DAY`, default 5) must not be reached, and a logo must exist if one was asked for.
 2. **What the Agency knows.** One read of `Knowledge` (`knowledge/`, below) gives the latest Brand Brain version, the Owner's notes and the latest Niche Report of the Business's niche (its insights are the drafter's trend notes). If the database fails, the post goes ahead without them.
@@ -138,7 +138,7 @@ A publish starts in one of two ways:
 - The Owner writes "subilo". The orchestrator calls `approve_post`, and code checks the approval described above.
 - The Owner taps Aprobar, then Publicar ahora. The tap itself is the approval.
 
-Then `PostPublisher` (`posts/publish.py`) runs a background task:
+Then `PostPublisher` (`posts/publish.py`) runs a background task on `BackgroundWork`:
 
 1. It builds the image URLs from `PUBLIC_BACKEND_URL`. Zernio and Instagram download the images from our backend.
 2. `ZernioPublisher` (`publishing/zernio.py`) sends `POST /posts` with the caption, the images, the Instagram account and `publishNow: true`, plus an `Idempotency-Key` header. A retry with the same key can never post twice.
@@ -184,7 +184,7 @@ Only onboarding data is stored for good; the conversation and the posts live in 
 | Jobs | Generated JPEGs (`PublicImages`, newest 200) |
 | | Webhook dedupe store |
 
-A redeploy while a post is waiting means it can no longer be approved or published, and its image links return 404. The code comments point to tasks T17 and T19 to move this into the database and Storage.
+A redeploy while a post is waiting means it can no longer be approved or published, and its image links return 404. The code comments point to tasks T17 and T19 to move this into the database and Storage. The guards that stop a second generation (`generation_in_progress`, the daily limits) are in memory for the same reason.
 
 ## Where to read next
 

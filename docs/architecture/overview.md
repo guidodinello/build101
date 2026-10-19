@@ -179,7 +179,9 @@ sequenceDiagram
 
 ## Background jobs
 
-Hackathon implementation (`app/jobs/runner.py`, T16): a small in-process `JobRunner` that polls `jobs` every second, claims `queued` rows with `FOR UPDATE SKIP LOCKED` (so a job starts only after the transaction that queued it commits, and jobs queued before a restart still run), and runs each as an `asyncio` task. It
+**One mechanism for all background work** (`app/background.py`, [ADR 0005](../decisions/0005-single-instance-in-process-jobs.md)): `BackgroundWork` is the one place that starts an `asyncio` task, keeps it alive, waits for it (`join`, tests) and cancels it at shutdown (`stop`, called once from the app's lifespan). A failure that escapes a task is logged there, once, with the task's name. Post generation, publishing, video generation, the photo keeper, the history compaction and the photo debounce run on it, and so do the `jobs` below. They don't use the `jobs` table: they work with in-memory Posts and photos, so they run without a database, and nothing about them survives a restart (T17, T19). Work that turns a failure into something else keeps its own `except`: a `PostFailed` event, a failed `jobs` row.
+
+Hackathon implementation (`app/jobs/runner.py`, T16): a small in-process `JobRunner` that polls `jobs` every second, claims `queued` rows with `FOR UPDATE SKIP LOCKED` (so a job starts only after the transaction that queued it commits, and jobs queued before a restart still run), and runs each as a `BackgroundWork` task. It
 
 - writes a `jobs` row (`queued → running → succeeded | failed`) with `kind`, `payload`, `result`, `error`;
 - catches exceptions, marks the job failed, and raises the `JobFailed` event for the Owner (`notify`, sent as fixed text);

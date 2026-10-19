@@ -9,6 +9,7 @@ from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.background import BackgroundWork
 from app.channels.base import ChannelError, ChannelPort, InboundMedia, InboundMessage
 from app.channels.inbound import mask
 from app.copy import messages_es
@@ -127,6 +128,7 @@ class ChatHandler:
         keeper: PhotoKeeper | None = None,
         compactor: Compactor | None = None,
         now: Callable[[], datetime] = local_now,
+        background: BackgroundWork,
     ) -> None:
         self._model = model
         self._history = history
@@ -148,7 +150,7 @@ class ChatHandler:
         self._knowledge = knowledge or LocalKnowledge(self._notes, history)
         self._now = now
         self._batches: dict[str, _PhotoBatch] = {}
-        self._tasks: set[asyncio.Task[None]] = set()
+        self._background = background
 
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
         match message.kind:
@@ -167,11 +169,6 @@ class ChatHandler:
                 reply = messages_es.REPLY_FAILED
             if reply is not None:
                 await channel.send_text(message.sender, reply)
-
-    async def join(self) -> None:
-        """Wait for the pending photo batches and compactions (tests, shutdown)."""
-        while self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
 
     async def _answer(
         self, message: InboundMessage, photos: list[Photo], channel: ChannelPort
@@ -231,13 +228,19 @@ class ChatHandler:
             return
         photo = self._photos.add(message.sender, reference, message.text)
         if self._keeper:
-            self._start(keep_photo(self._keeper, message.sender, photo))
+            self._start(
+                self._keeper.keep(message.sender, photo),
+                f"keeping photo {photo.id} for {mask(message.sender)}",
+            )
         batch = self._batches.setdefault(message.sender, _PhotoBatch())
         batch.photos.append(photo)
         batch.last_message_id = message.message_id
         if batch.timer:
             batch.timer.cancel()
-        batch.timer = self._start(self._answer_photos_later(message.sender, channel))
+        batch.timer = self._start(
+            self._answer_photos_later(message.sender, channel),
+            f"answering photos for {mask(message.sender)}",
+        )
 
     async def _photo_too_big(self, sender: str, channel: ChannelPort) -> None:
         await self.notify(sender, PhotoTooBig(self._max_photo_mb), channel)
@@ -254,26 +257,22 @@ class ChatHandler:
         await asyncio.sleep(self._photo_debounce_s)
         # Popped right after the wait: a photo arriving from here on starts a new batch.
         batch = self._batches.pop(sender)
-        try:
-            async with self._history.lock(sender):
-                await mark_read(batch.last_message_id, channel)
-                captions = " ".join(photo.caption for photo in batch.photos if photo.caption)
-                if captions:
-                    reply = await self._llm_turn(
-                        sender,
-                        batch.last_message_id,
-                        request(batch.photos, captions),
-                        channel,
-                        words=captions,
-                        attached=True,
-                    )
-                    await channel.send_text(sender, reply)
-                else:
-                    event = PhotosReceived(tuple(photo.id for photo in batch.photos))
-                    await self._event_turn(sender, event, channel, batch.last_message_id)
-        except Exception:
-            # The task's boundary, like the webhook's run_handler: nobody awaits it.
-            logger.exception("answering %d photos failed for %s", len(batch.photos), mask(sender))
+        async with self._history.lock(sender):
+            await mark_read(batch.last_message_id, channel)
+            captions = " ".join(photo.caption for photo in batch.photos if photo.caption)
+            if captions:
+                reply = await self._llm_turn(
+                    sender,
+                    batch.last_message_id,
+                    request(batch.photos, captions),
+                    channel,
+                    words=captions,
+                    attached=True,
+                )
+                await channel.send_text(sender, reply)
+            else:
+                event = PhotosReceived(tuple(photo.id for photo in batch.photos))
+                await self._event_turn(sender, event, channel, batch.last_message_id)
 
     async def _llm_turn(
         self,
@@ -301,7 +300,10 @@ class ChatHandler:
             now=self._now(),
         )
         past = await self._history.get(sender)
-        keep_alive = self._start(self._keep_owner_posted(sender, message_id, bool(unseen), channel))
+        keep_alive = self._start(
+            self._keep_owner_posted(sender, message_id, bool(unseen), channel),
+            f"keep-alive for {mask(sender)}",
+        )
         try:
             text, turn = await self._converse(
                 sender, past, with_context, approval, True, channel, OWNER_THINKING
@@ -384,7 +386,10 @@ class ChatHandler:
         else:
             current = step
         keep_alive = (
-            self._start(self._keep_owner_posted(sender, message_id, bool(unseen), channel))
+            self._start(
+                self._keep_owner_posted(sender, message_id, bool(unseen), channel),
+                f"keep-alive for {mask(sender)}",
+            )
             if with_photos
             else None
         )
@@ -461,15 +466,12 @@ class ChatHandler:
     async def _remember_turn(self, sender: str, past: list[Step], steps: list[Step]) -> None:
         await self._history.extend(sender, steps)
         if self._compactor.needed(past, steps):
-            self._start(self._compact(sender))
+            self._start(self._compact(sender), f"compacting the history of {mask(sender)}")
 
     async def _compact(self, sender: str) -> None:
-        try:
-            async with self._history.lock(sender):
-                await self._compactor.compact(sender)
-        except Exception:
-            # The task's boundary: the next turn tries again.
-            logger.exception("compacting the history failed for %s", mask(sender))
+        # A failure is logged by the background boundary; the next turn tries again.
+        async with self._history.lock(sender):
+            await self._compactor.compact(sender)
 
     async def _refresh_library(self, sender: str) -> None:
         if self._library is None:
@@ -563,11 +565,8 @@ class ChatHandler:
             return {"error": "brand_not_ready"}
         return {"status": "revising"}
 
-    def _start(self, coroutine: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
-        task = asyncio.create_task(coroutine)
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-        return task
+    def _start(self, coroutine: Coroutine[Any, Any, None], name: str) -> asyncio.Task[None]:
+        return self._background.start(coroutine, name)
 
 
 async def mark_read(message_id: str, channel: ChannelPort) -> None:
@@ -575,14 +574,6 @@ async def mark_read(message_id: str, channel: ChannelPort) -> None:
         await channel.mark_read(message_id, typing=True)
     except ChannelError:
         logger.warning("mark_read failed for %s", message_id, exc_info=True)
-
-
-async def keep_photo(keeper: PhotoKeeper, sender: str, photo: Photo) -> None:
-    try:
-        await keeper.keep(sender, photo)
-    except Exception:
-        # The task's boundary: the photo is still usable without its description.
-        logger.exception("keeping photo %s failed for %s", photo.id, mask(sender))
 
 
 def log_reply(sender: str, text: str) -> None:

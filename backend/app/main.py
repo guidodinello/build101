@@ -9,6 +9,7 @@ from app.api.dev import router as dev_router
 from app.api.errors import install_error_handlers
 from app.api.instagram import router as instagram_router
 from app.api.onboarding import router as onboarding_router
+from app.background import get_background_work
 from app.channels.router import get_channel, get_owner_notify
 from app.channels.router import router as whatsapp_router
 from app.config import get_settings
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     if runner:
         await runner.stop()
+    await get_background_work().stop()
 
 
 app = FastAPI(title="Neitor AI", lifespan=lifespan)
