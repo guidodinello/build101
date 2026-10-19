@@ -125,18 +125,25 @@ class PostPublisher:
             result = PublishResult(status="failed", error="unexpected error")
         await self._finish(post, result, channel)
 
+    def _media(self, post: Post) -> PublishMedia:
+        if post.video is not None:
+            return PublishMedia(
+                format="reel",
+                url=self._public_base_url + post.video.path,
+                cover_offset_ms=post.video_cover_offset_ms,
+            )
+        urls = [self._public_base_url + image.path for image in post.images]
+        if post.format == "image":
+            return PublishMedia(format="image", url=urls[0])
+        return PublishMedia(format="carousel", urls=urls)
+
     async def _attempt(self, post: Post, account_id: str) -> PublishResult:
         """Publish with the same idempotency key every time, so a retry can't post twice.
 
         Only a definite failure comes back as `failed`. When the outcome stays unknown (timeouts,
         5xx, a request still in flight) the post may be live, so that is `pending`.
         """
-        urls = [self._public_base_url + image.path for image in post.images]
-        media = (
-            PublishMedia(format="image", url=urls[0])
-            if post.format == "image"
-            else PublishMedia(format="carousel", urls=urls)
-        )
+        media = self._media(post)
         uncertain: PublisherError | None = None
         retried = False
         for attempt in range(1, MAX_PUBLISH_ATTEMPTS + 1):

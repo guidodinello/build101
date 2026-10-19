@@ -297,7 +297,13 @@ class PublishMedia(BaseModel):
     format: Literal["image", "reel", "carousel"]
     url: str | None                    # image/reel: public or long-lived signed URL of the picked variation or the Owner's video
     urls: list[str] = []               # carousel, in slide order, ≤ 10 JPEGs (ADR 0022)
-    cover_offset_ms: int | None = None # reel only
+    cover_offset_ms: int | None = None # reel only: ms into the video for the cover; Zernio `thumbOffset`, ≥ 0
+    ai_generated: bool = False         # any format: Zernio `isAiGenerated`, Instagram's "AI-generated" label; sent only when true
+
+# ZernioPublisher mapping: image/carousel → image mediaItems; reel → one {"type": "video", "url"} item,
+# no contentType (a single video publishes as a Reel). A reel without `url`, or with a negative
+# `cover_offset_ms`, raises ValueError before any request. Reels can take a minute or more to
+# process, so the result may come back `pending` (same poll as images).
 
 # app/imagegen/base.py  (ADR 0018, 0019; IMAGE_GEN = gemini | openai | mock)
 class GeneratedImage(BaseModel):

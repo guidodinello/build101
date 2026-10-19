@@ -77,6 +77,27 @@ async def test_publish_one_image_to_the_demo_account() -> None:
     warnings.warn(f"delete this test post by hand in Instagram: {result.permalink}", stacklevel=1)
 
 
+async def test_publish_one_reel_to_the_demo_account() -> None:
+    settings = get_settings()
+    video_url = os.environ.get("ZERNIO_TEST_VIDEO_URL")
+    if not settings.zernio_account_id or not video_url:
+        pytest.skip("ZERNIO_ACCOUNT_ID and ZERNIO_TEST_VIDEO_URL are not set")
+    stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    caption = f"[test] build101 Zernio live reel {stamp}. Delete me."
+    media = PublishMedia(format="reel", url=video_url, cover_offset_ms=1000)
+    publisher = live_publisher()
+    try:
+        result = await publisher.publish(
+            settings.zernio_account_id, caption, media, idempotency_key=f"live-test-{uuid.uuid4()}"
+        )
+    finally:
+        await publisher.aclose()
+
+    # A Reel can still be processing when the poll window ends: that is `pending`, not a failure
+    assert result.status in {"published", "pending"}, result.error
+    warnings.warn(f"delete this test reel by hand in Instagram: {result.permalink}", stacklevel=1)
+
+
 async def test_connect_url_for_the_demo_profile() -> None:
     settings = get_settings()
     if not settings.zernio_profile_id:
