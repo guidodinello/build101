@@ -15,6 +15,7 @@ from app.carousel.schemas import (
     TemplateFamily,
 )
 from app.llm.client import ChatModel, Content, image_content, text_content
+from app.prompts import tagged
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +63,11 @@ class PostDrafter:
     """Brief + photos + Brand Brain → the post's copy, and for a design the generator's input.
 
     One structured call, a stand-in for the Copywriter and the Art Director (T13, T14).
-    `trend_notes` come from the latest Niche Report (ADR 0025).
+    `trend_notes` come from the latest Niche Report of the Business's niche (ADR 0025).
     """
 
-    def __init__(self, model: ChatModel, trend_notes: str | None = None) -> None:
+    def __init__(self, model: ChatModel) -> None:
         self._model = model
-        self._trend_notes = trend_notes
 
     async def copy(
         self,
@@ -76,11 +76,12 @@ class PostDrafter:
         brand: BrandBrain | None = None,
         notes: list[str] | None = None,
         previous: PreviousPost | None = None,
+        trend_notes: str | None = None,
     ) -> PostCopy:
         request = (
             f"Write the caption for a post of {len(photos)} photo(s), posted as they are, "
             f"without a design.\n\nBrief: {brief}{revision_section(previous)}"
-            f"{self._trend_section()}"
+            f"{trend_section(trend_notes)}"
         )
         return await self._model.structured(
             AGENT,
@@ -119,6 +120,7 @@ class PostDrafter:
         brand: BrandBrain | None = None,
         notes: list[str] | None = None,
         previous: PreviousPost | None = None,
+        trend_notes: str | None = None,
     ) -> tuple[CarouselCopy, CarouselBrief]:
         one_per_photo = (
             " Each slide is built from its own photo, in order."
@@ -127,7 +129,7 @@ class PostDrafter:
         )
         request = (
             f"A design of exactly {slide_count} slide(s) (4:5).{one_per_photo}\n\n"
-            f"Brief: {brief}{revision_section(previous)}{self._trend_section()}"
+            f"Brief: {brief}{revision_section(previous)}{trend_section(trend_notes)}"
         )
         draft = await self._model.structured(
             AGENT,
@@ -166,11 +168,6 @@ class PostDrafter:
         )
         return copy, carousel_brief
 
-    def _trend_section(self) -> str:
-        if not self._trend_notes:
-            return ""
-        return f"\n\nTrend notes (what works in the niche this week):\n{self._trend_notes}"
-
 
 def system_prompt(brand: BrandBrain | None, notes: list[str] | None = None) -> str:
     """The instructions, then the Business's Brand Brain (agents.md § Brand Brain) and the
@@ -187,6 +184,13 @@ def system_prompt(brand: BrandBrain | None, notes: list[str] | None = None) -> s
         listed = "\n".join(f"- {note}" for note in notes)
         prompt += f"\n<owner_notes>\n{listed}\n</owner_notes>\n"
     return prompt
+
+
+def trend_section(trend_notes: str | None) -> str:
+    """The niche's trend notes, one per line, escaped: they come from web pages (ADR 0025)."""
+    if not trend_notes:
+        return ""
+    return f"\n\n{tagged('trend_notes', trend_notes.splitlines())}"
 
 
 def revision_section(previous: PreviousPost | None) -> str:

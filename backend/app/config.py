@@ -54,7 +54,8 @@ class Settings(BaseSettings):
     max_videos_per_day: int = 2
     max_photo_mb: int = 10
     # A Niche Report saved by `python -m app.agents.niche_cli` (ADR 0025): its insights are the
-    # trend notes of post generation, until the weekly job saves them in niche_reports (T19)
+    # trend notes of every sender, only when there is no database. With DATABASE_URL, the weekly
+    # generate_niche_report job saves them in niche_reports, per niche, and this is ignored
     niche_report_path: Path | None = None
 
     whatsapp_channel: Literal["kapso", "simulator"] = "kapso"

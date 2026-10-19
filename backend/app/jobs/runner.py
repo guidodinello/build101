@@ -44,6 +44,16 @@ class JobContext:
 JobFunction = Callable[[JobContext, dict[str, Any]], Awaitable[dict[str, Any] | None]]
 
 
+@dataclass(frozen=True, slots=True)
+class PeriodicCheck:
+    """Work the poller runs on its first round and then every `every`, e.g. queueing the
+    weekly jobs. It only queues: the jobs themselves run in the runner's slots."""
+
+    name: str
+    every: timedelta
+    run: Callable[[async_sessionmaker[AsyncSession]], Awaitable[object]]
+
+
 class JobRunner:
     """Runs `jobs` rows with their function from `jobs`, at most `max_concurrent` at a time.
 
@@ -61,6 +71,7 @@ class JobRunner:
         notify_on_failure: frozenset[str] = frozenset(),
         max_concurrent: int = MAX_CONCURRENT_JOBS,
         poll_interval_s: float = POLL_INTERVAL_S,
+        checks: tuple[PeriodicCheck, ...] = (),
     ) -> None:
         self._sessions = sessions
         self._jobs = jobs
@@ -70,6 +81,7 @@ class JobRunner:
         self._notify_on_failure = notify_on_failure
         self._max_concurrent = max_concurrent
         self._poll_interval_s = poll_interval_s
+        self._checks = checks
         self._running: set[asyncio.Task[None]] = set()
         self._running_ids: set[uuid.UUID] = set()
         self._poller: asyncio.Task[None] | None = None
@@ -141,7 +153,9 @@ class JobRunner:
 
     async def _poll(self) -> None:
         last_stale_check = datetime.now(UTC)
+        last_checked: dict[str, datetime] = {}
         while True:
+            await self._run_checks(last_checked)
             try:
                 if datetime.now(UTC) - last_stale_check >= STALE_CHECK_EVERY:
                     last_stale_check = datetime.now(UTC)
@@ -150,6 +164,18 @@ class JobRunner:
             except Exception:
                 logger.exception("polling for jobs failed")
             await asyncio.sleep(self._poll_interval_s)
+
+    async def _run_checks(self, last_checked: dict[str, datetime]) -> None:
+        """Each periodic check that is due; one failing doesn't stop the others or the jobs."""
+        for check in self._checks:
+            last = last_checked.get(check.name)
+            if last is not None and datetime.now(UTC) - last < check.every:
+                continue
+            last_checked[check.name] = datetime.now(UTC)
+            try:
+                await check.run(self._sessions)
+            except Exception:
+                logger.exception("periodic check %s failed", check.name)
 
     async def _run(
         self, job_id: uuid.UUID, kind: str, business_id: uuid.UUID | None, payload: dict[str, Any]

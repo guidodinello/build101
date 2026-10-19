@@ -24,7 +24,7 @@ from .button_router import ButtonRouter
 from .chat import ChatHandler
 from .context import BusinessContexts
 from .history import DbHistory, History, InMemoryHistory
-from .library import BrandBrains, BrandLibrary
+from .library import BrandBrains, BrandLibrary, NicheTrends
 from .notes import DbNotes, InMemoryNotes, OwnerNotes
 from .onboarding import OnboardingGate
 from .photo_keeper import PhotoKeeper
@@ -61,9 +61,11 @@ def build_inbound_handler(
             # ADR 0030: with the database, the conversation and the notes survive a deploy.
             history: History = DbHistory(sessions) if sessions else InMemoryHistory()
             notes: OwnerNotes = DbNotes(sessions) if sessions else InMemoryNotes()
-            trend_notes = load_trend_notes(settings.niche_report_path)
+            # With the database, each Business reads its niche's latest report (ADR 0025); the
+            # file is only the fallback without it, where every sender shares it.
+            trend_notes = None if sessions else load_trend_notes(settings.niche_report_path)
             posts = PostMaker(
-                PostDrafter(model, trend_notes),
+                PostDrafter(model),
                 build_image_gen(settings),
                 build_renderer(settings),
                 photos,
@@ -73,6 +75,7 @@ def build_inbound_handler(
                 settings.max_posts_per_day,
                 brand_of=BrandBrains(sessions).latest if sessions else None,
                 notes_of=note_texts(notes),
+                trends_of=NicheTrends(sessions).latest if sessions else fixed(trend_notes),
             )
             public_videos = videos or PublicVideos()
             publishing = PostPublisher(
@@ -136,6 +139,17 @@ def note_texts(notes: OwnerNotes) -> Callable[[str], Awaitable[list[str]]]:
         return [note.text for note in await notes.list(sender)]
 
     return texts
+
+
+def fixed(trend_notes: str | None) -> Callable[[str], Awaitable[str | None]] | None:
+    """The same trend notes for every sender (no database), or None without them."""
+    if trend_notes is None:
+        return None
+
+    async def same(sender: str) -> str | None:
+        return trend_notes
+
+    return same
 
 
 def load_trend_notes(path: Path | None) -> str | None:

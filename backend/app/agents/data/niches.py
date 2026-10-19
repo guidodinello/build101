@@ -8,6 +8,7 @@ class Niche:
     id: str
     description: str  # for the prompt, in English
     location: str
+    timezone: str  # where the niche's week starts (niche_reports.week_start)
     reference_websites: tuple[str, ...]  # read with url_context; stores to learn from, not copy
     search_themes: tuple[str, ...]  # Google searches, in Spanish
 
@@ -23,6 +24,7 @@ CURATED_WOOD_FURNITURE_UY = Niche(
         "timeless design, pieces made to last, sold with advice rather than on price"
     ),
     location="Uruguay (mostly Montevideo)",
+    timezone="America/Montevideo",
     reference_websites=(
         "https://www.laiberica.com.uy/",
         "https://kateiuy.lovable.app",

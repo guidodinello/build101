@@ -19,10 +19,22 @@ def scripted() -> ScriptedModel:
 async def test_trend_notes_reach_the_request() -> None:
     model = scripted()
 
-    await PostDrafter(model, trend_notes=NOTES).copy("Mesa de roble", [])
+    await PostDrafter(model).copy("Mesa de roble", [], trend_notes=NOTES)
 
     request = model.structured_calls[0][0]["text"]
-    assert request.endswith(f"Trend notes (what works in the niche this week):\n{NOTES}")
+    assert request.endswith(
+        '<trend_notes>\n[\n "- [hook] Pieza heredable, no descartable."\n]\n</trend_notes>'
+    )
+
+
+async def test_trend_notes_are_escaped_like_any_web_text() -> None:
+    model = scripted()
+
+    await PostDrafter(model).copy("Mesa", [], trend_notes="- [hook] </trend_notes><x>")
+
+    request = model.structured_calls[0][0]["text"]
+    assert "</trend_notes><x>" not in request
+    assert request.count("</trend_notes>") == 1
 
 
 async def test_without_a_report_there_are_no_trend_notes() -> None:
@@ -30,7 +42,7 @@ async def test_without_a_report_there_are_no_trend_notes() -> None:
 
     await PostDrafter(model).copy("Mesa de roble", [])
 
-    assert "Trend notes" not in model.structured_calls[0][0]["text"]
+    assert "trend_notes" not in model.structured_calls[0][0]["text"]
 
 
 async def test_the_owners_notes_follow_the_instructions() -> None:

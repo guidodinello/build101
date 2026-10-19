@@ -90,6 +90,7 @@ class PostMaker:
         brand_of: Callable[[str], Awaitable[BrandBrain | None]] | None = None,
         now: Callable[[], datetime] = local_now,
         notes_of: Callable[[str], Awaitable[list[str]]] | None = None,
+        trends_of: Callable[[str], Awaitable[str | None]] | None = None,
     ) -> None:
         self._drafter = drafter
         self._image_gen = image_gen
@@ -101,6 +102,7 @@ class PostMaker:
         self._max_posts_per_day = max_posts_per_day
         self._brand_of = brand_of
         self._notes_of = notes_of
+        self._trends_of = trends_of
         self._now = now
         self._generating: set[str] = set()
         self._designs_today: dict[str, tuple[date, int]] = {}
@@ -225,7 +227,8 @@ class PostMaker:
         try:
             brand = await self._brand(sender, post_id)
             notes = await self._notes(sender, post_id)
-            post = await self._render(args, photos, brand, logo, notes, remake)
+            trends = await self._trends(sender, post_id)
+            post = await self._render(args, photos, brand, logo, notes, remake, trends)
             paths = await self._send(sender, post.images, post.text, channel)
             self._keep(sender, post_id, args, photos, paths, post)
             event = PostSent(
@@ -278,6 +281,18 @@ class PostMaker:
             )
             return []
 
+    async def _trends(self, sender: str, post_id: str) -> str | None:
+        """The niche's trend notes; without them when the database fails, rather than no post."""
+        if self._trends_of is None:
+            return None
+        try:
+            return await self._trends_of(sender)
+        except SQLAlchemyError:
+            logger.warning(
+                "post %s for %s goes without the trend notes", post_id, mask(sender), exc_info=True
+            )
+            return None
+
     async def _announce(
         self, sender: str, post_id: str, event: Event, channel: ChannelPort
     ) -> None:
@@ -296,6 +311,7 @@ class PostMaker:
         logo: bytes | None,
         notes: list[str] | None = None,
         remake: Remake | None = None,
+        trend_notes: str | None = None,
     ) -> RenderedPost:
         """The post's images in order (one per photo, unless a design asks for a slide count).
 
@@ -313,7 +329,9 @@ class PostMaker:
                 style_prompt=remake.previous.style_prompt,
             )
         if args.style == "photos":
-            copy = await self._drafter.copy(args.brief, references, brand, notes, previous)
+            copy = await self._drafter.copy(
+                args.brief, references, brand, notes, previous, trend_notes
+            )
             images = [await asyncio.to_thread(to_post_image, data) for data in references]
             return RenderedPost(
                 await with_logo(images, logo), post_text(copy.caption, copy.hashtags), headlines=[]
@@ -321,7 +339,14 @@ class PostMaker:
 
         count = args.slide_count or len(photos)
         copy, brief = await self._drafter.design(
-            args.brief, references, [photo.id for photo in photos], count, brand, notes, previous
+            args.brief,
+            references,
+            [photo.id for photo in photos],
+            count,
+            brand,
+            notes,
+            previous,
+            trend_notes,
         )
         style_prompt = brief.style_prompt
         one_per_photo = len(photos) == count

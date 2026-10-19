@@ -16,7 +16,7 @@ flowchart TB
     subgraph backend["FastAPI backend (Railway, one instance)"]
         chat["Webhook and chat<br/>OnboardingGate, ChatHandler (orchestrator)"]
         posts["Posts<br/>PostMaker, PostPublisher, /media images"]
-        jobs["Job runner<br/>analyze_asset, generate_brand"]
+        jobs["Job runner<br/>analyze_asset, generate_brand,<br/>import_instagram, generate_niche_report"]
     end
 
     gemini["Gemini<br/>chat, JSON and images"]
@@ -100,6 +100,7 @@ Timeouts are 60 s for chat and 90 s for structured calls. Server errors are retr
 | post_drafter | `posts/drafts.py` | `structured` | Brief, photos and Brand Brain become caption, hashtags and, for a design, each slide's headline and scene prompt |
 | asset_analyst | `agents/asset_analyst.py` | `structured` | Analyzes each photo uploaded in the wizard (background job) |
 | brand_strategist | `agents/brand_strategist.py` | `structured`, high thinking | Writes the Brand Brain: voice, audience, pillars, visual identity (background job) |
+| niche_analyst | `agents/niche_analyst.py` | `grounded` (URL context and Google Search) | Writes the weekly Niche Report of a niche: what its stores and articles show this week, each point with a checked source (background job) |
 | image generation | `imagegen/gemini.py`, `carousel/generator.py` | `generate_content` | Makes 4:5 slide images from scene prompts and the product photos |
 
 **The orchestrator's tool loop** (`chat.py`, `_converse`): for up to 5 steps, send the system prompt, the history and the current message with the two tools. If Gemini answers with text, that text goes to WhatsApp. If it asks for a tool, code runs it, appends the result, and loops. Tools are declared in `conversation/tools.py`, and both return at once (`{"post_id": ..., "status": "generating"}`); the slow work runs in the background.
@@ -113,7 +114,7 @@ Timeouts are 60 s for chat and 90 s for structured calls. Server errors are retr
 A post is made in the background after the orchestrator calls `create_post` with a brief, the photo ids, a style (`photos` or `design`), and optionally `with_logo` or `replaces`. The code is `posts/maker.py`.
 
 1. **Guards, in code.** The photos must exist, no other post for this Owner may be generating, the daily design limit (`MAX_POSTS_PER_DAY`, default 5) must not be reached, and a logo must exist if one was asked for.
-2. **Brand Brain.** The latest version is loaded from Postgres. If the database fails, the post goes ahead without it.
+2. **Brand Brain, notes and trend notes.** The latest Brand Brain version, the Owner's notes and the latest Niche Report of the Business's niche (its insights are the drafter's trend notes) are loaded from Postgres. If the database fails, the post goes ahead without them.
 3. **Copy and images.**
     - `photos` style: the drafter writes the caption, and the Owner's photos are cropped to 4:5.
     - `design` style: the drafter writes the copy and a carousel brief. `CarouselGenerator` makes the cover first, then the other slides in parallel, each using the cover as its style reference.
@@ -159,6 +160,9 @@ Onboarding starts in WhatsApp, moves to a web wizard for the details, and ends b
 |---|---|---|
 | `analyze_asset` | Runs the asset analyst on one photo | The analysis saved on `brand_assets` |
 | `generate_brand` | Waits up to 60 s for the photo analyses, then runs the brand strategist | A new `brand_brains` version, and a WhatsApp summary with Sí and Corregir algo buttons |
+| `generate_niche_report` | Runs the niche analyst for one niche (`payload.niche_id`, no Business) | This week's `niche_reports` row for that niche, replaced if a retry already wrote it. Nothing is sent to the Owner |
+
+**The weekly Niche Report** (`jobs/niche.py`, [ADR 0025](../decisions/0025-weekly-niche-report.md)) has no cron. The runner's poller runs a check when it starts and then every 15 minutes: for each niche with at least one `active` Business and no report for the current week (Monday, in the niche's timezone), it queues `generate_niche_report`, unless a job for that niche is already queued, running or done this week, or two have already failed this week (each attempt runs billed Google searches). So a deploy produces the week's report at once, and a missed Monday is caught up. Every Business maps to the MVP's niche, `curated-wood-furniture-uy`, for now. The orchestrator's context and the post drafter read the latest report of the Business's niche on every turn and every post, as `<trend_notes>`.
 
 If the Owner taps Corregir algo, their next message is the correction, and `generate_brand` runs again in revise mode. Confirming the summary finishes onboarding. Once the form is submitted, every WhatsApp message already goes to the orchestrator.
 
@@ -170,7 +174,7 @@ Only onboarding data is stored for good; the conversation and the posts live in 
 |---|---|
 | Businesses, onboarding state, magic links | Conversation history (`InMemoryHistory`) |
 | Products and brand assets (wizard photos, logo) | Photos sent on WhatsApp (`InMemoryPhotos`) |
-| Brand Brain versions | Posts and their status (`InMemoryPosts`) |
+| Brand Brain versions, Niche Reports | Posts and their status (`InMemoryPosts`) |
 | Jobs | Generated JPEGs (`PublicImages`, newest 200) |
 | | Webhook dedupe store |
 

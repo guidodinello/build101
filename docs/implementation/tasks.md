@@ -261,9 +261,9 @@ Replaces the HTML templates task: post templates are superseded by [ADR 0018](..
 ### T58: Weekly Niche Report (F3.6, F3.7) · A · S
 
 - Read: [agents.md § Niche Analyst](../architecture/agents.md#niche-analyst), [ADR 0025](../decisions/0025-weekly-niche-report.md)
-- Done already: the Niche Analyst (`app/agents/niche_analyst.py`, grounded Gemini call, source checks, redirect resolution), the first niche's data, a CLI that saves a report, and its insights as trend notes of the `PostDrafter` (`NICHE_REPORT_PATH`).
-- Build: the `niche_reports` migration and model, a `generate_niche_report` job kind in T16's runner, a weekly trigger (the runner has no schedule yet: every Monday per onboarded Business, retried later on `503`), the `niche_report` tool once the orchestrator runs on the database (T19), and trend notes read from the latest row instead of the file once post generation knows its Business.
-- Done when: a Monday run saves one report per Business; "¿qué está funcionando en mi rubro?" answers with the report's `summary`, or starts the job when there is none this week.
+- Done already: the Niche Analyst (`app/agents/niche_analyst.py`, grounded Gemini call, source checks, redirect resolution), the first niche's data, a CLI that saves a report, and its insights as trend notes of the `PostDrafter` (`NICHE_REPORT_PATH`). **Built (2026-10-19):** one report per niche, not per Business ([ADR 0025](../decisions/0025-weekly-niche-report.md) amendment): migration `0004` (`niche_reports`, job kind `generate_niche_report`) and model, the job (`app/jobs/niche.py`, silent, upserts the week's row), a catch-up check in the runner (at start and every 15 min, for each niche with an `active` Business and no report this week, at most 2 attempts per niche per week), and trend notes read per Business from its niche's latest row by the `PostDrafter` and the orchestrator's context (`NICHE_REPORT_PATH` only without a database).
+- Build: the `niche_report` tool once the orchestrator runs on the database (T19), and a way to record a Business's niche once there is more than one (`niche_of` maps every Business to `curated-wood-furniture-uy`).
+- Done when: a weekly run saves one report per niche (built); "¿qué está funcionando en mi rubro?" answers with the report's `summary`, or starts the job when there is none this week.
 
 ### T59: Video generation port (Veo + mock, flag) · A · S
 

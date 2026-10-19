@@ -56,6 +56,7 @@ def maker(
     brand_fails: bool = False,
     renderer: MockRenderer | None = None,
     notes_of: Callable[[str], Awaitable[list[str]]] | None = None,
+    trends_of: Callable[[str], Awaitable[str | None]] | None = None,
 ) -> PostMaker:
     """A maker whose events go to `events` (a throwaway list when the test doesn't look)."""
     recorded = events if events is not None else []
@@ -80,6 +81,7 @@ def maker(
         brand_of=brand_of,
         now=lambda: NOON,
         notes_of=notes_of,
+        trends_of=trends_of,
     )
     posts.on_event(record)
     return posts
@@ -191,6 +193,43 @@ async def test_a_post_goes_without_the_brand_brain_when_the_database_fails(
     await posts.join()
 
     assert model.structured_systems == [SYSTEM_PROMPT]
+    assert [type(event) for event in events] == [PostSent]
+
+
+async def test_the_senders_trend_notes_reach_the_draft(photos: InMemoryPhotos) -> None:
+    model = ScriptedModel(drafts={PostCopy: PostCopy(caption="Mesa", hashtags=[])})
+    asked: list[str] = []
+
+    async def trends_of(sender: str) -> str | None:
+        asked.append(sender)
+        return "- [hook] Pieza heredable."
+
+    posts = maker(model, CountingImageGen(), photos, trends_of=trends_of)
+    posts.create_post(
+        SENDER, {"brief": "mesa", "asset_ids": ["f1"], "style": "photos"}, FakeChannel()
+    )
+    await posts.join()
+
+    assert asked == [SENDER]
+    assert '"- [hook] Pieza heredable."' in model.structured_calls[0][0]["text"]
+
+
+async def test_a_post_goes_without_trend_notes_when_the_database_fails(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(drafts={PostCopy: PostCopy(caption="Mesa", hashtags=[])})
+    events: list[Event] = []
+
+    async def trends_of(sender: str) -> str | None:
+        raise OperationalError("select", {}, ConnectionError("database down"))
+
+    posts = maker(model, CountingImageGen(), photos, events=events, trends_of=trends_of)
+    posts.create_post(
+        SENDER, {"brief": "mesa", "asset_ids": ["f1"], "style": "photos"}, FakeChannel()
+    )
+    await posts.join()
+
+    assert "trend_notes" not in model.structured_calls[0][0]["text"]
     assert [type(event) for event in events] == [PostSent]
 
 

@@ -5,7 +5,7 @@ here when a task starts writing it.
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, func
@@ -164,3 +164,15 @@ class OwnerNote(Base):
     text: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     archived_at: Mapped[datetime | None]
+
+
+class NicheReportRow(Base):
+    """One week's Niche Report of a niche (ADR 0025); `report` is a `NicheReport`."""
+
+    __tablename__ = "niche_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    niche_id: Mapped[str]
+    week_start: Mapped[date]
+    report: Mapped[dict[str, Any]]
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
