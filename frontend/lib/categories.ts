@@ -57,9 +57,9 @@ const FALLBACK_COPY: CategoryCopy = {
 export const CATEGORIES = [...Object.keys(CATEGORY_COPY), OTHER_CATEGORY];
 
 export function copyFor(category: string | null | undefined): CategoryCopy {
-  return (category && CATEGORY_COPY[category]) || FALLBACK_COPY;
+  return category && isListedCategory(category) ? CATEGORY_COPY[category] : FALLBACK_COPY;
 }
 
 export function isListedCategory(category: string) {
-  return category in CATEGORY_COPY;
+  return Object.hasOwn(CATEGORY_COPY, category);
 }
