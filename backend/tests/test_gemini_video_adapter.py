@@ -2,6 +2,7 @@ from io import BytesIO
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 from google.genai import errors, types
 from PIL import Image
@@ -9,6 +10,7 @@ from PIL import Image
 from app.videogen.base import (
     VideoGenBlocked,
     VideoGenNoVideo,
+    VideoGenRejected,
     VideoGenTimeout,
     VideoGenUnavailable,
 )
@@ -156,6 +158,8 @@ async def test_text_only_call_sends_no_image_in_either_mode() -> None:
     call = client.generate_calls[0]
     assert call["source"].image is None
     assert call["config"].reference_images is None
+    # Text-to-video accepts only `allow_all` (the default), never `allow_adult`
+    assert call["config"].person_generation is None
 
 
 async def test_the_submit_call_never_retries() -> None:
@@ -221,3 +225,52 @@ async def test_an_api_error_is_unavailable() -> None:
 
     with pytest.raises(VideoGenUnavailable, match="overloaded"):
         await adapter(client).generate("a clip", [])
+
+
+def failing_submit(client: FakeVideoClient, exc: Exception) -> None:
+    async def refuse(**kwargs: Any) -> None:
+        raise exc
+
+    client.aio.models.generate_videos = refuse
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        httpx.ReadTimeout("slow"),
+        httpx.ConnectError("down"),
+        errors.ServerError(500, {"error": {"message": "oops", "status": "INTERNAL"}}),
+        errors.ClientError(429, {"error": {"message": "quota", "status": "RESOURCE_EXHAUSTED"}}),
+    ],
+    ids=["read-timeout", "connect-error", "5xx", "429"],
+)
+async def test_network_server_and_rate_limit_errors_are_unavailable(exc: Exception) -> None:
+    client = FakeVideoClient(finished())
+    failing_submit(client, exc)
+
+    with pytest.raises(VideoGenUnavailable) as raised:
+        await adapter(client).generate("a clip", [])
+
+    assert not isinstance(raised.value, VideoGenRejected)
+
+
+async def test_a_refused_request_is_rejected_not_unavailable() -> None:
+    client = FakeVideoClient(finished())
+    failing_submit(
+        client, errors.ClientError(400, {"error": {"message": "bad image", "status": "INVALID"}})
+    )
+
+    with pytest.raises(VideoGenRejected, match="bad image") as raised:
+        await adapter(client).generate("a clip", [])
+
+    assert not isinstance(raised.value, VideoGenUnavailable)
+
+
+async def test_image_modes_send_allow_adult() -> None:
+    lite, fast = FakeVideoClient(finished()), FakeVideoClient(finished())
+
+    await adapter(lite, LITE).generate("a clip", [make_image((800, 800))])
+    await adapter(fast, FAST).generate("a clip", [make_image((800, 800))])
+
+    assert lite.generate_calls[0]["config"].person_generation == "allow_adult"
+    assert fast.generate_calls[0]["config"].person_generation == "allow_adult"

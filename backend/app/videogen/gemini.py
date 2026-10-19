@@ -3,6 +3,7 @@ import logging
 from io import BytesIO
 from typing import Self
 
+import httpx
 from google import genai
 from google.genai import errors, types
 from PIL import Image, ImageOps
@@ -11,6 +12,7 @@ from .base import (
     GeneratedVideo,
     VideoGenBlocked,
     VideoGenNoVideo,
+    VideoGenRejected,
     VideoGenTimeout,
     VideoGenUnavailable,
 )
@@ -32,6 +34,8 @@ LITE_MARKER = "lite"
 # Polling and downloading are safe to repeat; the submit call is not (see `generate`).
 RETRY_OPTIONS = types.HttpRetryOptions(attempts=4, initial_delay=2.0, max_delay=30.0)
 NO_RETRY_OPTIONS = types.HttpRetryOptions(attempts=1)
+# The SDK retries these itself, so a 4xx outside this set is a request Google refused
+TRANSIENT_CLIENT_CODES = frozenset({408, 429})
 
 
 class GeminiVideoGen:
@@ -100,8 +104,16 @@ class GeminiVideoGen:
                     data = await self._client.aio.files.download(file=video)
             except TimeoutError as exc:
                 raise VideoGenTimeout(f"veo did not finish in {self._timeout_s}s") from exc
+            except errors.ClientError as exc:
+                detail = f"gemini {exc.code} {exc.status}: {exc.message}"
+                if exc.code in TRANSIENT_CLIENT_CODES:
+                    raise VideoGenUnavailable(detail) from exc
+                raise VideoGenRejected(detail) from exc
             except errors.APIError as exc:
                 raise VideoGenUnavailable(f"gemini {exc.code} {exc.status}: {exc.message}") from exc
+            except httpx.HTTPError as exc:
+                # The SDK re-raises these raw once its retries run out
+                raise VideoGenUnavailable(f"gemini request failed: {exc!r}") from exc
         return GeneratedVideo(
             data=data,
             mime=video.mime_type or "video/mp4",
@@ -121,13 +133,14 @@ class GeminiVideoGen:
             aspect_ratio=aspect_ratio,
             duration_seconds=duration_seconds,
             number_of_videos=1,
-            # Required by Veo 3.1 for image-to-video and reference images
-            person_generation="allow_adult",
             http_options=types.HttpOptions(retry_options=NO_RETRY_OPTIONS),
         )
         source = types.GenerateVideosSource(prompt=prompt)
         if not reference_images:
+            # Text-to-video accepts only `allow_all`, which is the default: leave it unset
             return source, config
+        # Image-to-video and reference images accept only `allow_adult`
+        config.person_generation = "allow_adult"
         if self.uses_references:
             if len(reference_images) > MAX_REFERENCES:
                 logger.warning("veo takes %d references, dropping the rest", MAX_REFERENCES)

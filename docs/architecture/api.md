@@ -334,8 +334,13 @@ class VideoGenPort(Protocol):
     # one clip per call; ratio 9:16 | 16:9, duration 4 | 6 | 8 (anything else: ValueError, no call made).
     # Lite (default model): reference_images[0] is the first frame, the rest are dropped.
     # Fast/Standard: up to 3 ASSET references, which force 8 s.
-# errors: VideoGenError (base), VideoGenBlocked(reason), VideoGenNoVideo, VideoGenUnavailable,
-#         VideoGenTimeout (a VideoGenUnavailable)
+# errors: VideoGenError (base), VideoGenBlocked(reason), VideoGenNoVideo, VideoGenRejected (4xx
+#         except 408/429: the request was refused), VideoGenUnavailable (5xx, 408, 429, network,
+#         failed operation), VideoGenTimeout (a VideoGenUnavailable)
+# Never auto-retry generate(): a timeout abandons an operation Google may still finish and bill,
+# so a retry can bill a second clip. Only VideoGenBlocked is known not to bill. Surface the error.
+# person_generation: "allow_adult" is sent only with a first frame or references; text-only calls
+# leave it unset (Veo accepts only "allow_all" there, the default).
 # app/videogen/factory.py: build_video_gen(settings) -> VideoGenPort | None   # None while the flag is off
 
 # app/media/public.py  (MP4s next to the JPEGs; in memory, lost on restart)

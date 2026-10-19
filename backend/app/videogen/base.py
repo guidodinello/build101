@@ -21,7 +21,12 @@ class VideoGenPort(Protocol):
         aspect_ratio: str = "9:16",
         duration_seconds: int = 8,
     ) -> GeneratedVideo:
-        """One clip per call. The 9:16 default is the Reel format (ADR 0033)."""
+        """One clip per call. The 9:16 default is the Reel format (ADR 0033).
+
+        Callers must not retry `generate` on their own: a timeout abandons an operation Google
+        may still finish and bill, so a retry can bill a second clip. Only `VideoGenBlocked` is
+        known not to bill (Veo docs); surface every other error instead of retrying.
+        """
         ...
 
 
@@ -40,7 +45,11 @@ class VideoGenNoVideo(VideoGenError):
 
 
 class VideoGenUnavailable(VideoGenError):
-    pass
+    """Transient (5xx, 408, 429, network, failed operation); still not safe to retry blindly."""
+
+
+class VideoGenRejected(VideoGenError):
+    """Google refused the request (4xx other than 408 and 429): retrying it cannot help."""
 
 
 class VideoGenTimeout(VideoGenUnavailable):
