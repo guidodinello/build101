@@ -3,8 +3,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.conversation.library import BrandBrains, BrandLibrary
+from app.conversation.library import BrandLibrary
 from app.db.models import AssetProduct, BrandAsset, BrandBrainVersion, Business, Product
+from app.knowledge.db import DbKnowledge
 from app.storage import StorageError
 from tests.conftest import make_image, requires_db
 from tests.fakes import FakeStorage, brand_brain
@@ -99,7 +100,7 @@ async def test_posts_read_the_latest_brand_brain_version(
         )
         await db.commit()
 
-    brand = await BrandBrains(sessions).latest(PHONE)
+    brand = (await DbKnowledge(sessions).of(PHONE)).brand
 
     assert brand is not None
     assert brand.one_liner == "Muebles restaurados a mano"
@@ -112,8 +113,8 @@ async def test_an_owner_without_a_brand_brain_has_none(
         db.add(Business(owner_phone=PHONE, name="Katei"))
         await db.commit()
 
-    assert await BrandBrains(sessions).latest(PHONE) is None
-    assert await BrandBrains(sessions).latest("59800000000") is None
+    assert (await DbKnowledge(sessions).of(PHONE)).brand is None
+    assert (await DbKnowledge(sessions).of("59800000000")).brand is None
 
 
 async def test_the_latest_logo_is_read_as_uploaded_once(

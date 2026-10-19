@@ -2,13 +2,12 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy.exc import SQLAlchemyError
 
 from app.agents.schemas import BrandBrain
 from app.carousel.generator import CarouselGenerator
@@ -19,6 +18,7 @@ from app.conversation.events import Event, Notify, PostFailed, PostSent
 from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
 from app.imagegen.base import ImageGenPort
+from app.knowledge.base import BusinessKnowledge, Knowledge
 from app.media.images import add_logo, to_post_image
 from app.media.public import PublicImages
 from app.rendering.base import RendererPort
@@ -87,10 +87,8 @@ class PostMaker:
         posts: InMemoryPosts,
         public_base_url: str,
         max_posts_per_day: int,
-        brand_of: Callable[[str], Awaitable[BrandBrain | None]] | None = None,
+        knowledge: Knowledge | None = None,
         now: Callable[[], datetime] = local_now,
-        notes_of: Callable[[str], Awaitable[list[str]]] | None = None,
-        trends_of: Callable[[str], Awaitable[str | None]] | None = None,
     ) -> None:
         self._drafter = drafter
         self._image_gen = image_gen
@@ -100,9 +98,7 @@ class PostMaker:
         self._posts = posts
         self._public_base_url = public_base_url.rstrip("/")
         self._max_posts_per_day = max_posts_per_day
-        self._brand_of = brand_of
-        self._notes_of = notes_of
-        self._trends_of = trends_of
+        self._knowledge = knowledge
         self._now = now
         self._generating: set[str] = set()
         self._designs_today: dict[str, tuple[date, int]] = {}
@@ -222,10 +218,16 @@ class PostMaker:
         started = time.monotonic()
         event: Event
         try:
-            brand = await self._brand(sender, post_id)
-            notes = await self._notes(sender, post_id)
-            trends = await self._trends(sender, post_id)
-            post = await self._render(args, photos, brand, logo, notes, remake, trends)
+            known = await self._known(sender)
+            post = await self._render(
+                args,
+                photos,
+                known.brand,
+                logo,
+                [note.text for note in known.notes],
+                remake,
+                known.trend_notes,
+            )
             paths = await self._send(sender, post.images, post.text, channel)
             self._keep(sender, post_id, args, photos, paths, post)
             event = PostSent(
@@ -254,41 +256,11 @@ class PostMaker:
         # failed post that the Owner already has.
         await self._announce(sender, post_id, event, channel)
 
-    async def _brand(self, sender: str, post_id: str) -> BrandBrain | None:
-        """The sender's Brand Brain; without it when the database fails, rather than no post."""
-        if self._brand_of is None:
-            return None
-        try:
-            return await self._brand_of(sender)
-        except SQLAlchemyError:
-            logger.warning(
-                "post %s for %s goes without the Brand Brain", post_id, mask(sender), exc_info=True
-            )
-            return None
-
-    async def _notes(self, sender: str, post_id: str) -> list[str]:
-        """The Owner's notes; without them when the database fails, rather than no post."""
-        if self._notes_of is None:
-            return []
-        try:
-            return await self._notes_of(sender)
-        except SQLAlchemyError:
-            logger.warning(
-                "post %s for %s goes without the notes", post_id, mask(sender), exc_info=True
-            )
-            return []
-
-    async def _trends(self, sender: str, post_id: str) -> str | None:
-        """The niche's trend notes; without them when the database fails, rather than no post."""
-        if self._trends_of is None:
-            return None
-        try:
-            return await self._trends_of(sender)
-        except SQLAlchemyError:
-            logger.warning(
-                "post %s for %s goes without the trend notes", post_id, mask(sender), exc_info=True
-            )
-            return None
+    async def _known(self, sender: str) -> BusinessKnowledge:
+        """What the Agency knows about the sender's Business; a post makes do with nothing."""
+        if self._knowledge is None:
+            return BusinessKnowledge()
+        return await self._knowledge.of(sender)
 
     async def _announce(
         self, sender: str, post_id: str, event: Event, channel: ChannelPort

@@ -1,12 +1,12 @@
 import logging
-from collections.abc import Awaitable, Callable
-from pathlib import Path
 
-from app.agents.niche_analyst import NicheReport, trend_notes
 from app.channels.inbound import EchoHandler, InboundHandler
 from app.config import Settings
 from app.db.session import get_sessionmaker
 from app.imagegen.factory import build_image_gen
+from app.knowledge.base import Knowledge
+from app.knowledge.db import DbKnowledge
+from app.knowledge.local import LocalKnowledge, load_trend_notes
 from app.llm.client import GeminiChat
 from app.media.public import PublicImages
 from app.posts.drafts import PostDrafter
@@ -20,9 +20,8 @@ from app.storage import get_storage
 
 from .button_router import ButtonRouter
 from .chat import ChatHandler
-from .context import BusinessContexts
 from .history import DbHistory, History, InMemoryHistory
-from .library import BrandBrains, BrandLibrary, NicheTrends
+from .library import BrandLibrary
 from .notes import DbNotes, InMemoryNotes, OwnerNotes
 from .onboarding import OnboardingGate
 from .photo_keeper import PhotoKeeper
@@ -58,7 +57,11 @@ def build_inbound_handler(
             notes: OwnerNotes = DbNotes(sessions) if sessions else InMemoryNotes()
             # With the database, each Business reads its niche's latest report (ADR 0025); the
             # file is only the fallback without it, where every sender shares it.
-            trend_notes = None if sessions else load_trend_notes(settings.niche_report_path)
+            knowledge: Knowledge = (
+                DbKnowledge(sessions)
+                if sessions
+                else LocalKnowledge(notes, history, load_trend_notes(settings.niche_report_path))
+            )
             posts = PostMaker(
                 PostDrafter(model),
                 build_image_gen(settings),
@@ -68,9 +71,7 @@ def build_inbound_handler(
                 store,
                 settings.public_backend_url,
                 settings.max_posts_per_day,
-                brand_of=BrandBrains(sessions).latest if sessions else None,
-                notes_of=note_texts(notes),
-                trends_of=NicheTrends(sessions).latest if sessions else fixed(trend_notes),
+                knowledge=knowledge,
             )
             publishing = PostPublisher(
                 publisher, store, images, settings.public_backend_url, account_id
@@ -94,9 +95,8 @@ def build_inbound_handler(
                 settings.assistant_name,
                 max_photo_mb=settings.max_photo_mb,
                 notes=notes,
-                contexts=BusinessContexts(sessions) if sessions else None,
+                knowledge=knowledge,
                 keeper=PhotoKeeper(model, sessions, storage),
-                trend_notes=trend_notes,
             )
             posts.on_event(chat.notify)
             publishing.on_event(chat.notify)
@@ -105,30 +105,3 @@ def build_inbound_handler(
             return OnboardingGate(chat, sessions, settings.frontend_url, settings.assistant_name)
         case "echo":
             return EchoHandler()
-
-
-def note_texts(notes: OwnerNotes) -> Callable[[str], Awaitable[list[str]]]:
-    async def texts(sender: str) -> list[str]:
-        return [note.text for note in await notes.list(sender)]
-
-    return texts
-
-
-def fixed(trend_notes: str | None) -> Callable[[str], Awaitable[str | None]] | None:
-    """The same trend notes for every sender (no database), or None without them."""
-    if trend_notes is None:
-        return None
-
-    async def same(sender: str) -> str | None:
-        return trend_notes
-
-    return same
-
-
-def load_trend_notes(path: Path | None) -> str | None:
-    """The saved Niche Report's insights as trend notes; a missing file is a config error."""
-    if path is None:
-        return None
-    report = NicheReport.model_validate_json(path.read_text())
-    logger.info("trend notes from the Niche Report of the week of %s", report.week_start)
-    return trend_notes(report)

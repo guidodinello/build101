@@ -7,12 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.schemas import AssetAnalysis
 from app.conversation.chat import context_block
-from app.conversation.context import BusinessContexts, CatalogItem, OwnerContext, render
+from app.conversation.context import render
 from app.conversation.library import BrandLibrary
-from app.conversation.notes import DbNotes, InMemoryNotes, Note
+from app.conversation.notes import DbNotes, InMemoryNotes
 from app.conversation.photo_keeper import PhotoKeeper
 from app.conversation.photos import InMemoryPhotos
 from app.db.models import AssetProduct, BrandAsset, BrandBrainVersion, Business, Product
+from app.knowledge.base import BusinessKnowledge, CatalogItem, Note
+from app.knowledge.db import DbKnowledge
 from tests.conftest import make_image, requires_db
 from tests.fakes import FakeStorage, ScriptedModel, brand_brain
 
@@ -47,18 +49,19 @@ async def test_in_memory_notes_add_list_and_forget() -> None:
 
 
 def test_an_empty_context_renders_nothing() -> None:
-    assert render(OwnerContext()) == ""
+    assert render(BusinessKnowledge()) == ""
 
 
 def test_the_context_lists_what_is_known() -> None:
-    context = OwnerContext(
+    context = BusinessKnowledge(
         brand=brand_brain(),
         catalog=[CatalogItem("Mesa nórdica", "$U 12.000", "Roble macizo")],
         notes=[Note("n1", "No poner precios")],
         summary="Pidió un post de la mesa.",
+        trend_notes="- [hook] Pieza heredable",
     )
 
-    text = render(context, trend_notes="- [hook] Pieza heredable")
+    text = render(context)
 
     assert '"business_name":"Katei"' in text
     assert "whatsapp_summary" not in text.split("<brand_summary_sent>")[0]
@@ -130,13 +133,13 @@ async def test_the_business_context_reads_the_latest_brand_and_the_catalog(
         )
         await db.commit()
 
-    context = await BusinessContexts(sessions).load(PHONE)
+    context = await DbKnowledge(sessions).of(PHONE)
 
     assert context.business and context.business.current_offer == "15% en sillas"
     assert context.business.awaiting == "brand_correction"
     assert context.brand == brand_brain()
     assert context.catalog == [CatalogItem("Mesa nórdica", "$U 12.000", "")]
-    assert await BusinessContexts(sessions).load("000") == OwnerContext()
+    assert await DbKnowledge(sessions).of("000") == BusinessKnowledge()
 
 
 @requires_db

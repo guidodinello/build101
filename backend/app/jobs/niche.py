@@ -18,15 +18,15 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.data.niches import CURATED_WOOD_FURNITURE_UY, NICHES, Niche
+from app.agents.data.niches import NICHES
 from app.agents.niche_analyst import (
     HttpRedirectResolver,
     NicheAnalyst,
     NicheReport,
-    trend_notes,
     week_start,
 )
 from app.db.models import Business, Job, NicheReportRow
+from app.knowledge.db import niche_of
 from app.llm.client import GroundedModel
 
 from .queue import enqueue
@@ -41,12 +41,6 @@ ELIGIBLE_STATE = "active"
 # Each attempt can run several billed Google searches: a failing call (a 429, fewer than 3
 # sourced insights) is tried once more that week, then waits for next week.
 MAX_ATTEMPTS_PER_WEEK = 2
-
-
-def niche_of(business: Business) -> Niche:
-    """The Business's niche. Nothing records it yet (no wizard field, no classifier), and the
-    MVP serves one vertical (mvp.md), so every Business is in curated wood furniture."""
-    return CURATED_WOOD_FURNITURE_UY
 
 
 def niche_report_job(
@@ -81,22 +75,6 @@ async def save_report(db: AsyncSession, niche_id: str, report: NicheReport) -> N
             set_={"report": statement.excluded.report},
         )
     )
-
-
-async def latest_niche_report(db: AsyncSession, niche_id: str) -> NicheReport | None:
-    row = await db.scalar(
-        select(NicheReportRow)
-        .where(NicheReportRow.niche_id == niche_id)
-        .order_by(NicheReportRow.week_start.desc())
-        .limit(1)
-    )
-    return NicheReport.model_validate(row.report) if row else None
-
-
-async def latest_trend_notes(db: AsyncSession, business: Business) -> str | None:
-    """The trend notes of the Business's niche, from its latest report; None before the first."""
-    report = await latest_niche_report(db, niche_of(business).id)
-    return trend_notes(report) if report else None
 
 
 async def enqueue_due_niche_reports(
