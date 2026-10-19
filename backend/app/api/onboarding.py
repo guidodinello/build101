@@ -560,15 +560,17 @@ async def _instagram(session: AsyncSession, business: Business) -> schemas.Insta
     )
     if account is None:
         return schemas.Instagram(status="not_connected", handle=business.instagram_handle)
-    return schemas.Instagram(status=account.status, handle=account.handle)
+    # str column, Literal field: typed in #89
+    return schemas.Instagram(status=account.status, handle=account.handle)  # pyright: ignore[reportArgumentType]
 
 
 def _to_asset(asset: BrandAsset, url: str, product_ids: list[str]) -> schemas.Asset:
+    # str columns, Literal fields: typed in #89; `source` can also be "whatsapp" (#85)
     return schemas.Asset(
         id=str(asset.id),
-        kind=asset.kind,
-        source=asset.source,
-        status=asset.status,
+        kind=asset.kind,  # pyright: ignore[reportArgumentType]
+        source=asset.source,  # pyright: ignore[reportArgumentType]
+        status=asset.status,  # pyright: ignore[reportArgumentType]
         url=url,
         thumbnail_url=None,
         width=asset.width,
