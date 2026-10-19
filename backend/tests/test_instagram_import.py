@@ -92,6 +92,11 @@ def binding_cookie(started: httpx.Response) -> dict[str, str]:
     return {"Cookie": f"{BINDING_COOKIE}={cookie[BINDING_COOKIE].value}"}
 
 
+def assert_cookie_cleared(response: httpx.Response) -> None:
+    cleared = response.headers["set-cookie"].lower()
+    assert f"{BINDING_COOKIE}=" in cleared and "max-age=0" in cleared
+
+
 def callback_params(started: httpx.Response, **extra: str) -> dict[str, str]:
     """What the consent screen sends back: our `state`, plus the `code` (or `error`) it adds."""
     query = parse_qs(urlsplit(started.headers["location"]).query)
@@ -219,8 +224,7 @@ async def test_the_cookie_is_cleared_once_the_callback_ran(client: httpx.AsyncCl
 
     response = await connect(client, token)
 
-    cleared = response.headers["set-cookie"].lower()
-    assert f"{BINDING_COOKIE}=" in cleared and "max-age=0" in cleared
+    assert_cookie_cleared(response)
 
 
 async def test_a_callback_without_the_cookie_is_refused(
@@ -256,8 +260,51 @@ async def test_a_callback_with_another_browsers_cookie_is_refused(
 
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_state"
+    assert_cookie_cleared(response)
     async with sessions() as db:
         assert await db.scalar(select(SocialAccount)) is None
+
+
+async def test_a_callback_for_a_link_that_is_gone_clears_the_cookie(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    started = await start(client, token)
+    async with sessions() as db:
+        link = await db.scalar(select(MagicLink))
+        assert link is not None
+        link.expires_at = datetime.now(UTC)
+        await db.commit()
+
+    response = await client.get(
+        "/oauth/instagram/callback",
+        params=callback_params(started, code="c"),
+        headers=binding_cookie(started),
+    )
+
+    assert response.status_code == 410
+    assert_cookie_cleared(response)
+
+
+async def test_an_unexpected_failure_in_the_callback_clears_the_cookie(
+    client: httpx.AsyncClient,
+) -> None:
+    class Crashing(MockInstagram):
+        async def exchange_code(self, code: str, redirect_uri: str) -> Any:
+            raise RuntimeError("boom")
+
+    token = await new_link(client)
+    started = await start(client, token)
+    app.dependency_overrides[get_instagram] = Crashing
+
+    response = await client.get(
+        "/oauth/instagram/callback",
+        params=callback_params(started, code="c"),
+        headers=binding_cookie(started),
+    )
+
+    assert response.status_code == 500
+    assert_cookie_cleared(response)
 
 
 async def test_a_forged_cookie_is_refused(client: httpx.AsyncClient) -> None:

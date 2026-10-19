@@ -9,7 +9,7 @@ import secrets
 from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +29,7 @@ from app.instagram.oauth_state import (
 from app.jobs.queue import enqueue
 from app.onboarding.links import onboarding_url
 
-from .errors import ApiError
+from .errors import ApiError, error_response
 from .onboarding import (
     OpenOnboardingDep,
     SessionDep,
@@ -113,15 +113,28 @@ async def instagram_callback(
     state: str | None = None,
     error: str | None = None,
     binding: Annotated[str | None, Cookie(alias=BINDING_COOKIE)] = None,
-) -> RedirectResponse:
+) -> Response:
+    """Every outcome, errors included, clears the cookie: it holds the token for 15 minutes."""
     try:
-        token = verify_binding(binding or "", state or "", _state_secret(settings))
+        token = _bound_token(binding, state, settings)
+        response: Response = await _finish_connect(
+            token, code, error, request, session, settings, instagram
+        )
+    except ApiError as exc:
+        response = error_response(exc)
+    except Exception:
+        logger.exception("instagram callback failed")
+        response = PlainTextResponse("Internal Server Error", status_code=500)
+    response.delete_cookie(BINDING_COOKIE, path=BINDING_COOKIE_PATH)
+    return response
+
+
+def _bound_token(binding: str | None, state: str | None, settings: Settings) -> str:
+    try:
+        return verify_binding(binding or "", state or "", _state_secret(settings))
     except InvalidState as exc:
         logger.warning("instagram callback with a bad state: %s", exc)
         raise ApiError(400, "invalid_state", CONNECT_EXPIRED) from None
-    response = await _finish_connect(token, code, error, request, session, settings, instagram)
-    response.delete_cookie(BINDING_COOKIE, path=BINDING_COOKIE_PATH)
-    return response
 
 
 async def _finish_connect(

@@ -139,7 +139,8 @@ def test_the_access_filter_ignores_records_that_are_not_access_lines() -> None:
 
 
 async def test_a_real_uvicorn_server_logs_no_token_code_or_state() -> None:
-    """Drives real requests through uvicorn's own access logger, as main.py configures it."""
+    """Real requests through uvicorn's own access logger, with its default logging config applied
+    (the dictConfig runs when the Config is built): the filter set in main.py survives it."""
     from app.db.session import get_session
     from app.main import app  # importing it installs the filter on `uvicorn.access`
 
@@ -153,19 +154,19 @@ async def test_a_real_uvicorn_server_logs_no_token_code_or_state() -> None:
         # The callback is refused before it queries anything, so no session is ever used.
         yield None
 
+    uvicorn_loggers = [logging.getLogger(n) for n in ("uvicorn", "uvicorn.error", "uvicorn.access")]
+    saved = [(lg, lg.handlers[:], lg.level, lg.propagate) for lg in uvicorn_loggers]
     app.dependency_overrides[get_session] = no_database
-    capture = Capture()
-    access = logging.getLogger("uvicorn.access")
-    level = access.level
-    access.setLevel(logging.INFO)
-    access.addHandler(capture)
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=0, log_config=None, lifespan="off")
-    )
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, lifespan="off"))
+    logging.getLogger("uvicorn.access").addHandler(Capture())  # after the dictConfig
     serving = asyncio.create_task(server.serve())
     try:
-        while not server.started:
-            await asyncio.sleep(0.01)
+        async with asyncio.timeout(5):
+            while not server.started:
+                if serving.done():
+                    serving.result()  # raises why the server failed to start
+                    pytest.fail("the server stopped before it started")
+                await asyncio.sleep(0.01)
         port = server.servers[0].sockets[0].getsockname()[1]
         async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client:
             await client.get(f"/api/o/{TOKEN}/not-a-route")
@@ -174,9 +175,9 @@ async def test_a_real_uvicorn_server_logs_no_token_code_or_state() -> None:
     finally:
         server.should_exit = True
         await serving
-        access.removeHandler(capture)
-        access.setLevel(level)
         app.dependency_overrides.pop(get_session, None)
+        for lg, handlers, level, propagate in saved:  # uvicorn's dictConfig is global state
+            lg.handlers[:], lg.level, lg.propagate = handlers, level, propagate
 
     text = "\n".join(lines)
     assert len(lines) == 3
