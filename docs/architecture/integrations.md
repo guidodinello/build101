@@ -229,12 +229,15 @@ The Owner connects their Instagram in wizard step 2 ([ADR 0032](../decisions/003
 **Calls** ([Business Login](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login), read 2026-10-18):
 
 ```python
-# 1. The wizard's POST /api/o/{token}/instagram/connect returns
+# 1. The wizard's POST /api/o/{token}/instagram/connect returns our own start hop,
+#    GET /api/o/{token}/instagram/start?ticket=..., which sets the `ig_oauth` binding cookie
+#    (HttpOnly, SameSite=Lax) and redirects to
 https://www.instagram.com/oauth/authorize?client_id={INSTAGRAM_APP_ID}&redirect_uri={callback}
-    &response_type=code&scope=instagram_business_basic&state={signed state}
+    &response_type=code&scope=instagram_business_basic&state={nonce}
 # The code Instagram sends back "is valid for 1 hour and can only be used once"
 
-# 2. GET /oauth/instagram/callback?code&state: code → short-lived token (form POST)
+# 2. GET /oauth/instagram/callback?code&state (+ the cookie, whose nonce must equal `state`):
+#    code → short-lived token (form POST)
 POST https://api.instagram.com/oauth/access_token
 client_id, client_secret, grant_type=authorization_code, redirect_uri, code
 → {"access_token": "...", "user_id": 178...}      # also seen as {"data": [{...}]}: both are read
