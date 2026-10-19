@@ -12,7 +12,7 @@ from app.media.public import PublicImages
 from app.posts.drafts import PostDrafter
 from app.posts.maker import PostMaker
 from app.posts.publish import MAX_RETRY_AFTER_S, PostPublisher
-from app.posts.store import InMemoryPosts, Post, PostImage
+from app.posts.store import InMemoryPosts, Post, PostImage, PostVideo
 from app.publishing.base import (
     PublisherError,
     PublishInProgress,
@@ -145,6 +145,33 @@ async def test_a_carousel_goes_out_with_its_slides_in_order() -> None:
     [call] = rig.publisher.calls
     assert call["media"].format == "carousel"
     assert call["media"].urls == [BASE_URL + image.path for image in post.images]
+
+
+async def test_a_post_with_a_video_goes_out_as_a_reel() -> None:
+    rig = Rig(ScriptedModel(replies=[approve("p1"), STARTED]))
+    post = rig.add_post("p1")
+    post.video = PostVideo("/media/v1.mp4", b"mp4")
+    post.video_cover_offset_ms = 2500
+
+    await rig.say("subilo")
+    await rig.finish()
+
+    [call] = rig.publisher.calls
+    assert call["media"].format == "reel"
+    assert call["media"].url == BASE_URL + "/media/v1.mp4"
+    assert call["media"].cover_offset_ms == 2500
+
+
+async def test_a_video_post_is_not_published_without_an_explicit_approval() -> None:
+    rig = Rig(ScriptedModel(replies=[approve("p1"), ASK]))
+    post = rig.add_post("p1")
+    post.video = PostVideo("/media/v1.mp4", b"mp4")
+
+    await rig.say("me encanta")
+    await rig.finish()
+
+    assert rig.publisher.calls == []
+    assert status(rig, "p1") == "pending_approval"
 
 
 async def test_the_outcome_message_waits_for_the_turn_that_started_the_publish() -> None:
