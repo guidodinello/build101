@@ -128,7 +128,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run pyright                  # type check (standard mode), 0 errors
 
 cd frontend
-npm run lint && npm run build
+npm run typecheck && npm run lint && npm run build
 ```
 
 ## Deploy

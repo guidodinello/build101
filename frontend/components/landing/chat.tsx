@@ -33,7 +33,7 @@ export function Bubble({ from, time, className, rowClassName, timeClassName, chi
   );
 }
 
-export function Timestamp({ time, read, className }: { time: string; read?: boolean; className?: string }) {
+export function Timestamp({ time, read, className }: { time: string; read?: boolean; className?: string | undefined }) {
   return (
     <span
       className={cn(
