@@ -89,3 +89,18 @@ def test_an_evicted_clip_is_still_served_while_its_post_holds_it() -> None:
     assert head.status_code == 200
     assert head.headers["content-length"] == "1"
     assert missing.status_code == 404
+
+
+def test_the_store_finds_a_clip_by_path_until_its_post_is_dropped() -> None:
+    from app.posts.store import InMemoryPosts, Post, PostVideo
+
+    store = InMemoryPosts(max_per_sender=1)
+    store.add(Post("a", "s", [], "c", video=PostVideo("/media/a.mp4", b"A")))
+
+    assert store.video("/media/a.mp4") == b"A"
+    assert store.video("/media/other.mp4") is None
+
+    store.add(Post("b", "s", [], "c", video=PostVideo("/media/b.mp4", b"B")))  # drops "a"
+
+    assert store.video("/media/a.mp4") is None
+    assert store.video("/media/b.mp4") == b"B"
