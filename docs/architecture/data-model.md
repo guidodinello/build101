@@ -188,7 +188,7 @@ create table social_accounts (
   provider_account_id  text,                          -- the provider's id for the connected IG account
   handle               text,
   status               text not null default 'pending',
-  access_token         text,                          -- 'meta': the long-lived Instagram Login token, held only until import_instagram runs and then set to null (0005)
+  access_token         text,                          -- 'meta': the long-lived Instagram Login token, import_instagram nulls it when it starts, before any call to Instagram (0005)
   token_expires_at     timestamptz,                   -- 60 days after the connect; not refreshed yet
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now(),
@@ -424,4 +424,4 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 | `0002` | Instagram import ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)): `social_accounts.access_token`, `token_expires_at`, unique on `(business_id, platform, provider)`, RLS on; `brand_assets.external_id` and its partial unique index; job kind `import_instagram` |
 | `0003` | The orchestrator's memory ([ADR 0030](../decisions/0030-orchestrator-memory-and-context.md)): `conversation_steps`, `owner_notes`, `businesses.conversation_summary` |
 | `0004` | Weekly Niche Reports ([ADR 0025](../decisions/0025-weekly-niche-report.md)): `niche_reports`, one per niche and week (the first design had one per Business and was never migrated); job kind `generate_niche_report` |
-| `0005` | Instagram tokens are not kept (security audit M-5, [ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)): sets `social_accounts.access_token` to null for every row; `import_instagram` now clears it itself. The downgrade is a no-op, since the tokens can't be restored |
+| `0005` | Instagram tokens are not kept (security audit M-5, [ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)): sets `social_accounts.access_token` to null for every row; `import_instagram` now claims it (reads and nulls it in one transaction) when it starts. The downgrade is a no-op, since the tokens can't be restored |

@@ -5,10 +5,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import exists, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-from app.db.models import BrandAsset, Business, Job, SocialAccount
+from app.db.models import BrandAsset, Business, SocialAccount
 from app.instagram.base import (
     InstagramError,
     InstagramImage,
@@ -56,135 +55,97 @@ def import_instagram_job(instagram: InstagramPort, max_posts: int, max_images: i
         become Brand assets (`source = 'instagram'`) with an Asset Analyst job each. Images
         imported before are skipped, so a reconnect only adds what is new.
 
-        The Owner's token is used here once and then deleted: when the import ends, fails or is
-        cancelled, the job clears the token it read (a killed process is covered by the runner's
-        `fail_stale`, see `clear_stale_token`). Nothing else reads it, and a reconnect
-        stores a fresh one, which a job still running on the old one must not clear (#102).
+        The Owner's token is claimed first: the job reads it and nulls the column in one
+        transaction, committed before any call to Instagram. From then on the token lives only in
+        this job's memory, so a failure, a cancellation or a killed process leaves nothing in the
+        database; a reconnect stores a fresh token for its own import; and two overlapping
+        imports can't both get one, the second is skipped (#102). A failed import therefore
+        needs a reconnect.
         """
         if context.business_id is None:
             raise ValueError("import_instagram needs a business")
         business_id = context.business_id
+        access_token = await _claim_token(context, business_id)
+        if access_token is None:
+            return {"skipped": "no connected instagram"}
+
         async with context.sessions() as db:
-            account = await db.scalar(
-                select(SocialAccount).where(
-                    SocialAccount.business_id == business_id,
-                    SocialAccount.platform == "instagram",
-                    SocialAccount.status == "connected",
-                    SocialAccount.access_token.is_not(None),
-                )
-            )
-            if account is None:
-                return {"skipped": "no connected instagram"}
-            account_id = account.id
-            access_token = account.access_token or ""
-
-        try:
-            async with context.sessions() as db:
-                imported = set(
-                    (
-                        await db.scalars(
-                            select(BrandAsset.external_id).where(
-                                BrandAsset.business_id == business_id,
-                                BrandAsset.source == "instagram",
-                                BrandAsset.external_id.is_not(None),
-                            )
-                        )
-                    ).all()
-                )
-            profile = await instagram.profile(access_token)
-            media = await instagram.recent_media(access_token, max_posts)
-            wanted = _images_to_import(media, imported, max_images)
-            limit = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
-
-            async def fetch(item: tuple[InstagramImage, str | None]) -> ImportedImage | None:
-                async with limit:
-                    return await _store_image(context, instagram, business_id, *item)
-
-            images = [image for image in await asyncio.gather(*map(fetch, wanted)) if image]
-
-            async with context.sessions() as db:
-                business = await db.get_one(Business, business_id)
-                business.onboarding_data = {
-                    **business.onboarding_data,
-                    "instagram": _summary(profile, media),
-                }
-                business.instagram_handle = business.instagram_handle or profile.username
-                business.website = business.website or profile.website
-                for image in images:
-                    db.add(
-                        BrandAsset(
-                            id=image.asset_id,
-                            business_id=business_id,
-                            kind="photo",
-                            source="instagram",
-                            status="ready",
-                            storage_path=image.storage_path,
-                            mime_type=image.mime_type,
-                            size_bytes=image.size_bytes,
-                            width=image.processed.width,
-                            height=image.processed.height,
-                            owner_hint=(image.caption or "")[:MAX_HINT_CHARS] or None,
-                            external_id=image.external_id,
+            imported = set(
+                (
+                    await db.scalars(
+                        select(BrandAsset.external_id).where(
+                            BrandAsset.business_id == business_id,
+                            BrandAsset.source == "instagram",
+                            BrandAsset.external_id.is_not(None),
                         )
                     )
-                    enqueue(db, "analyze_asset", business_id, {"asset_id": str(image.asset_id)})
-                await _clear_token(db, account_id, access_token)
-                await db.commit()
-        except BaseException:
-            # BaseException: a deploy cancels the job (CancelledError) and must not leave the token
-            await _drop_token(context, account_id, access_token)
-            raise
+                ).all()
+            )
+        profile = await instagram.profile(access_token)
+        media = await instagram.recent_media(access_token, max_posts)
+        wanted = _images_to_import(media, imported, max_images)
+        limit = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
+
+        async def fetch(item: tuple[InstagramImage, str | None]) -> ImportedImage | None:
+            async with limit:
+                return await _store_image(context, instagram, business_id, *item)
+
+        images = [image for image in await asyncio.gather(*map(fetch, wanted)) if image]
+
+        async with context.sessions() as db:
+            business = await db.get_one(Business, business_id)
+            business.onboarding_data = {
+                **business.onboarding_data,
+                "instagram": _summary(profile, media),
+            }
+            business.instagram_handle = business.instagram_handle or profile.username
+            business.website = business.website or profile.website
+            for image in images:
+                db.add(
+                    BrandAsset(
+                        id=image.asset_id,
+                        business_id=business_id,
+                        kind="photo",
+                        source="instagram",
+                        status="ready",
+                        storage_path=image.storage_path,
+                        mime_type=image.mime_type,
+                        size_bytes=image.size_bytes,
+                        width=image.processed.width,
+                        height=image.processed.height,
+                        owner_hint=(image.caption or "")[:MAX_HINT_CHARS] or None,
+                        external_id=image.external_id,
+                    )
+                )
+                enqueue(db, "analyze_asset", business_id, {"asset_id": str(image.asset_id)})
+            await db.commit()
         return {"posts": len(media), "images": len(images), "skipped": len(wanted) - len(images)}
 
     return import_instagram
 
 
-async def _clear_token(db: AsyncSession, account_id: uuid.UUID, token: str) -> None:
-    """Null the token only if it is still the one this job read: a reconnect in the meantime
-    stored a fresh one for the next import, and that one is not ours to clear."""
-    await db.execute(
-        update(SocialAccount)
-        .where(SocialAccount.id == account_id, SocialAccount.access_token == token)
-        .values(access_token=None)
-    )
-
-
-async def clear_stale_token(db: AsyncSession, business_id: uuid.UUID) -> None:
-    """The runner's `on_stale` hook: an import that a killed process (SIGKILL, OOM) left behind
-    never cleared the token it read, so clear the Business's.
-
-    `fail_stale` runs at startup and then every minute, and a job from a process killed less
-    than `STALE_AFTER` before the restart is only caught by a later pass, so the Owner may have
-    reconnected since. The token is left alone while another import of the Business is queued or
-    running: that job owns it (it reads, then clears it). The failed job is already marked
-    failed in this transaction, so it doesn't count.
-    """
-    another_import = exists().where(
-        Job.kind == "import_instagram",
-        Job.business_id == SocialAccount.business_id,
-        Job.status.in_(("queued", "running")),
-    )
-    await db.execute(
-        update(SocialAccount)
-        .where(
-            SocialAccount.business_id == business_id,
-            SocialAccount.platform == "instagram",
-            SocialAccount.access_token.is_not(None),
-            ~another_import,
+async def _claim_token(context: JobContext, business_id: uuid.UUID) -> str | None:
+    """Take the connected account's token out of the database: the token, or None if there is
+    none. `FOR UPDATE` makes the read and the null one step: a second claim waits for the first
+    to commit, then no longer matches. (A single `UPDATE ... RETURNING` can't do it: RETURNING
+    gives the new value, which is null.)"""
+    async with context.sessions() as db:
+        account = await db.scalar(
+            select(SocialAccount)
+            .where(
+                SocialAccount.business_id == business_id,
+                SocialAccount.platform == "instagram",
+                SocialAccount.status == "connected",
+                SocialAccount.access_token.is_not(None),
+            )
+            .with_for_update()
         )
-        .values(access_token=None)
-    )
-
-
-async def _drop_token(context: JobContext, account_id: uuid.UUID, token: str) -> None:
-    """Clear the token after a failed or cancelled import. A failure here is logged and
-    swallowed so the caller still re-raises the error that ended the import."""
-    try:
-        async with context.sessions() as db:
-            await _clear_token(db, account_id, token)
-            await db.commit()
-    except Exception:
-        logger.exception("could not clear the instagram token of account %s", account_id)
+        if account is None:
+            return None
+        token = account.access_token
+        account.access_token = None
+        await db.commit()
+        return token
 
 
 def _images_to_import(

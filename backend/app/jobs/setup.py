@@ -9,7 +9,7 @@ from app.storage import get_storage
 
 from .asset import analyze_asset
 from .brand import generate_brand
-from .instagram import clear_stale_token, import_instagram_job
+from .instagram import import_instagram_job
 from .niche import CHECK_EVERY, enqueue_due_niche_reports, niche_report_job
 from .runner import JobFunction, JobRunner, PeriodicCheck
 
@@ -57,5 +57,4 @@ def build_job_runner(settings: Settings, channel: ChannelPort) -> JobRunner | No
         model,
         NOTIFY_ON_FAILURE,
         checks=(PeriodicCheck("niche reports", CHECK_EVERY, enqueue_due_niche_reports),),
-        on_stale={"import_instagram": clear_stale_token},
     )

@@ -1,4 +1,4 @@
-"""Clear stored Instagram access tokens: the import job deletes them after use (#102)
+"""Clear stored Instagram access tokens: the import job claims them when it starts (#102)
 
 Revision ID: 0005
 Revises: 0004
