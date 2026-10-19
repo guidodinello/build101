@@ -64,7 +64,9 @@ class Post:
         return self.id if self.publish_attempts <= 1 else f"{self.id}-r{self.publish_attempts}"
 
     @property
-    def format(self) -> Literal["image", "carousel"]:
+    def format(self) -> Literal["image", "carousel", "reel"]:
+        if self.video is not None:
+            return "reel"
         return "image" if len(self.images) == 1 else "carousel"
 
 

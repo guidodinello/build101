@@ -39,6 +39,7 @@ class FakeChannel:
     sent: list[tuple[str, str]] = field(default_factory=list)
     images: list[tuple[str, str, str | None]] = field(default_factory=list)
     buttons: list[tuple[str, str, list[str]]] = field(default_factory=list)
+    video_headers: list[str | None] = field(default_factory=list)
     read: list[tuple[str, bool]] = field(default_factory=list)
     downloads: list[str] = field(default_factory=list)
     media: bytes = field(default_factory=lambda: make_image((800, 1000)))
@@ -63,6 +64,7 @@ class FakeChannel:
         # The body is a message the Owner reads, in order with the rest: `sent` keeps it too.
         self.sent.append((to, body))
         self.buttons.append((to, body, [button.id for button in buttons]))
+        self.video_headers.append(header_video_url)
         return "wamid.BTN"
 
     async def mark_read(self, message_id: str, typing: bool = False) -> None:

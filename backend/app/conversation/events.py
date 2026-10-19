@@ -49,6 +49,34 @@ class PostFailed:
 
 
 @dataclass(frozen=True, slots=True)
+class VideoSent:
+    post_id: str  # the new video Post, next to the Post it animates
+    video_url: str  # public, shown as the header of the buttons message
+    duration_seconds: int
+    text: str  # caption + hashtags, reused from the Post it animates
+
+    def note(self) -> str:
+        return (
+            f"[post {self.post_id} video sent to the Owner] A {self.duration_seconds} s video "
+            "made from the product photo, waiting for their approval.\n"
+            f'Text: "{self.text}"'
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class VideoFailed:
+    post_id: str
+    reason: str  # blocked, rejected, unavailable, timeout, no_video or failed
+    photo_ids: tuple[str, ...]
+
+    def note(self) -> str:
+        return (
+            f"[video {self.post_id} failed] A video from photos {' '.join(self.photo_ids)} could "
+            f"not be made ({self.reason}). Nothing reached the Owner and nothing can be published."
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Published:
     post_id: str
     permalink: str | None
@@ -193,7 +221,7 @@ class PostStarted:
 
 @dataclass(frozen=True, slots=True)
 class PostNotStarted:
-    reason: str  # generation_in_progress, daily_limit, unknown_asset or no_photos
+    reason: str  # generation_in_progress, daily_limit, video_daily_limit, unknown_asset, no_photos
 
     def note(self) -> str:
         return f"[post not started] The Owner's tap could not start a post: {self.reason}."
@@ -219,6 +247,8 @@ class ActionFailed:
 Event = (
     PostSent
     | PostFailed
+    | VideoSent
+    | VideoFailed
     | Published
     | PublishPending
     | PublishFailed
@@ -247,7 +277,7 @@ Notify = Callable[[str, Event, ChannelPort], Awaitable[None]]
 def buttons(event: Event) -> list[Button]:
     """The buttons that go under the model's message about `event` (T18)."""
     match event:
-        case PostSent(post_id=post_id):
+        case PostSent(post_id=post_id) | VideoSent(post_id=post_id):
             return [
                 Button(id=f"post_approve:{post_id}", title=messages_es.BUTTON_APPROVE),
                 Button(id=f"post_change:{post_id}", title=messages_es.BUTTON_CHANGE),
@@ -266,11 +296,17 @@ def buttons(event: Event) -> list[Button]:
             return []
 
 
+def header_video_url(event: Event) -> str | None:
+    """The video that goes as the header of the buttons message about `event`."""
+    return event.video_url if isinstance(event, VideoSent) else None
+
+
 POST_NOT_STARTED = {
     "generation_in_progress": messages_es.GENERATION_BUSY,
     "daily_limit": messages_es.DAILY_LIMIT,
     "unknown_asset": messages_es.PHOTOS_GONE,
     "no_photos": messages_es.PHOTOS_GONE,
+    "video_daily_limit": messages_es.VIDEO_DAILY_LIMIT,
 }
 
 
@@ -285,6 +321,12 @@ def fallback(event: Event) -> str | None:
             return messages_es.post_actions()
         case PostFailed():
             return messages_es.JOB_FAILED
+        case VideoSent():
+            return messages_es.VIDEO_ACTIONS
+        case VideoFailed(reason="blocked"):
+            return messages_es.VIDEO_BLOCKED
+        case VideoFailed():
+            return messages_es.VIDEO_FAILED
         case Published(permalink=permalink):
             return messages_es.published(permalink or "")
         case PublishPending():

@@ -187,6 +187,8 @@ type SimMessage = {
 
 Free-text approvals ("subilo", "publicalo") reach the same handlers through the orchestrator's `approve_post` tool ([agents.md](agents.md#conversation-rules)). Format: `<action>:<entity_id>`, or `<action>:<entity_id>:<n>` for `variation_pick` (≤ 256 chars). Parsed by `conversation/button_router.py`. Unknown or stale IDs (entity in a state that doesn't allow the action) → send `stale_button` and do nothing else.
 
+**Video Posts** (`create_video`, [agents.md](agents.md#when-video-generation-runs)) reuse the `post_*` IDs below with no new button: the video message carries `post_approve`, `post_change` and `post_discard` with the video Post's id and the clip as the header (`send_buttons(header_video_url=...)`). `post_publish` publishes it as a Reel (`PublishMedia.format = "reel"`, `ai_generated = true`). `post_replace` after discarding a video makes another video from the same photo (it counts against the daily video limit) and is one-shot: the discarded video becomes `replaced`, so a second tap is stale and cannot bill another clip. The original image Post is untouched. `post_change` on a video has no revise: the Owner asks for another take by writing.
+
 | ID | Allowed when | Handler |
 |---|---|---|
 | `brand_ok` | `awaiting_brand_confirmation` | state → `active`, send `ready_open_chat` ("¿En qué te puedo ayudar hoy?", F1.10). No plan is proposed |
