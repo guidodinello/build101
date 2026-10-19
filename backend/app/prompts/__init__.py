@@ -1,13 +1,12 @@
 import json
 import re
 from pathlib import Path
-from typing import Any
 
 # A line that is only `{{include <path>}}`; the path is relative to the including file.
 INCLUDE = re.compile(r"^\{\{include (?P<path>[^}]+)\}\}$")
 
 
-def tagged(tag: str, value: Any) -> str:
+def tagged(tag: str, value: object) -> str:
     """`value` as JSON inside `<tag>…</tag>`, with `<` and `>` escaped so text the Owner wrote
     can't close the block or open another one."""
     encoded = json.dumps(value, ensure_ascii=False, indent=1)
