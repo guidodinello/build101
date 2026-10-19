@@ -6,8 +6,10 @@ module holds only:
 
 - fallbacks for when the LLM is unavailable: `REPLY_FAILED`, `STILL_WORKING`, `LOOKING_AT_PHOTOS`
   and the text of each event (`events.fallback`), sent only if that event's turn fails;
+- verbatim events, sent as written without a model turn (`events.verbatim`): `brand_summary`,
+  `JOB_FAILED` for a failed job and `BRAND_GENERATING`;
 - text sent directly, outside the chat: Flow 1 before the web form (`welcome`, `name_ack_link`,
-  `link_reminder`) and `BRAND_GENERATING` (onboarding API);
+  `link_reminder`, the `OnboardingGate`, an exception recorded in ADR 0026);
 - labels, not conversation: `carousel_slide`.
 """
 

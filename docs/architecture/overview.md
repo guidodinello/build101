@@ -182,10 +182,10 @@ sequenceDiagram
 Hackathon implementation (`app/jobs/runner.py`, T16): a small in-process `JobRunner` that polls `jobs` every second, claims `queued` rows with `FOR UPDATE SKIP LOCKED` (so a job starts only after the transaction that queued it commits, and jobs queued before a restart still run), and runs each as an `asyncio` task. It
 
 - writes a `jobs` row (`queued → running → succeeded | failed`) with `kind`, `payload`, `result`, `error`;
-- catches exceptions, marks the job failed, and sends `job_failed` to the owner;
+- catches exceptions, marks the job failed, and raises the `JobFailed` event for the Owner (`notify`, sent as fixed text);
 - limits concurrency with a semaphore (`MAX_CONCURRENT_JOBS=4`).
 
-`running` jobs older than 5 minutes were left by a process that died (a deploy, a dev reload) and are marked `failed`, at startup and then every minute (no automatic retries in the demo). Only `generate_brand` sends `job_failed` (with `retry:{job_id}`); a failed photo analysis is only logged, since the brand is generated without it. `retry:{job_id}` queues a copy and records `retried_by` on the failed row, so a second tap does nothing.
+`running` jobs older than 5 minutes were left by a process that died (a deploy, a dev reload) and are marked `failed`, at startup and then every minute (no automatic retries in the demo). Only `generate_brand` raises `JobFailed` (the `job_failed` text with `retry:{job_id}`); a failed photo analysis is only logged, since the brand is generated without it. `retry:{job_id}` queues a copy and records `retried_by` on the failed row, so a second tap does nothing.
 
 **Production path (post-hackathon):** replace `JobRunner` with a real queue (arq on Redis, or Postgres-based like `procrastinate`) without changing job functions. That's why jobs are plain `async def job(ctx, payload)` functions.
 
@@ -224,7 +224,7 @@ build101/
 │   │   ├── config.py         # pydantic-settings
 │   │   ├── api/              # webhooks_whatsapp.py, onboarding.py, dashboard.py, uploads.py, dev.py
 │   │   ├── conversation/     # onboarding.py (OnboardingGate: Flow 1 before the web form, wraps chat.py), chat.py (orchestrator loop),
-│   │   │                     # tools.py, approval.py, button_router.py, brand.py, history.py, photos.py, factory.py,
+│   │   │                     # tools.py, approval.py, button_router.py, brand.py, history.py, photos.py, outbound.py (the one way to send an event to the Owner), factory.py,
 │   │   │                     # prompts/ (orchestrator.md + making_posts.md, publishing.md, rules.md); planned: state.py
 │   │   ├── posts/            # lifecycle.py (PostLifecycle: every Post state change and the Approval inputs), store.py (InMemoryPosts), maker.py, video_maker.py, publish.py, drafts.py
 │   │   ├── knowledge/        # base.py (Knowledge: what the Agency knows about a Business), db.py (DbKnowledge + readers), local.py (LocalKnowledge, no database)

@@ -13,7 +13,8 @@ from app.agents.schemas import (
     VisualIdentity,
     Voice,
 )
-from app.channels.base import Button, ChannelError
+from app.channels.base import Button, ChannelError, ChannelPort
+from app.conversation.events import Event
 from app.imagegen.base import GeneratedImage
 from app.llm.client import Content, FunctionCall, LLMError, Reply, Step, Tool
 from app.publishing.base import PublishMedia, PublishResult
@@ -75,6 +76,16 @@ class FakeChannel:
     async def download_media(self, media_id: str) -> tuple[bytes, str]:
         self.downloads.append(media_id)
         return self.media, "image/jpeg"
+
+
+@dataclass
+class EventLog:
+    """A `Notify` that only records what code asked to tell the Owner."""
+
+    events: list[tuple[str, Event]] = field(default_factory=list)
+
+    async def __call__(self, sender: str, event: Event, channel: ChannelPort) -> None:
+        self.events.append((sender, event))
 
 
 @dataclass

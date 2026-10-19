@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 
 from app.channels.inbound import EchoHandler, InboundHandler
 from app.config import Settings
@@ -23,22 +24,33 @@ from app.videogen.factory import build_video_gen
 
 from .button_router import ButtonRouter
 from .chat import ChatHandler
+from .events import Notify
 from .history import DbHistory, History, InMemoryHistory
 from .library import BrandLibrary
 from .notes import DbNotes, InMemoryNotes, OwnerNotes
 from .onboarding import OnboardingGate
+from .outbound import FixedReplies
 from .photo_keeper import PhotoKeeper
 from .photos import InMemoryPhotos
 
 logger = logging.getLogger(__name__)
 
 
-def build_inbound_handler(
+@dataclass(frozen=True, slots=True)
+class Conversation:
+    """What answers the Owner: `handler` for their messages, `notify` for the events code raises
+    (jobs, the onboarding API). Both share one history, so one lock per sender."""
+
+    handler: InboundHandler
+    notify: Notify
+
+
+def build_conversation(
     settings: Settings,
     images: PublicImages,
     publisher: PublisherPort,
     videos: PublicVideos | None = None,
-) -> InboundHandler:
+) -> Conversation:
     match settings.inbound_handler:
         case "chat":
             if not settings.gemini_api_key:
@@ -131,7 +143,10 @@ def build_inbound_handler(
             if video_maker:
                 video_maker.on_event(chat.notify)
             if sessions is None:
-                return chat
-            return OnboardingGate(chat, sessions, settings.frontend_url, settings.assistant_name)
+                return Conversation(chat, chat.notify)
+            gate = OnboardingGate(chat, sessions, settings.frontend_url, settings.assistant_name)
+            return Conversation(gate, chat.notify)
         case "echo":
-            return EchoHandler()
+            # No chat handler: events still reach the Owner, as their fixed text.
+            history = DbHistory(get_sessionmaker()) if settings.database_url else InMemoryHistory()
+            return Conversation(EchoHandler(), FixedReplies(history))

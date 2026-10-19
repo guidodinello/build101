@@ -8,8 +8,10 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.channels.router import get_channel
+from app.channels.router import get_channel, get_owner_notify
 from app.config import Settings, get_settings
+from app.conversation.history import InMemoryHistory
+from app.conversation.outbound import FixedReplies
 from app.copy import messages_es
 from app.db.models import BrandAsset, Business, Job, MagicLink
 from app.db.session import get_session
@@ -70,6 +72,7 @@ async def client(
     app.dependency_overrides[get_session] = session
     app.dependency_overrides[get_storage] = lambda: storage
     app.dependency_overrides[get_channel] = lambda: channel
+    app.dependency_overrides[get_owner_notify] = lambda: FixedReplies(InMemoryHistory())
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
         yield http

@@ -1,7 +1,7 @@
 """Button replies (api.md § Button IDs): `<action>:<entity_id>`, checked against the entity's state.
 
 Each tap does its work in code and returns the event the orchestrator answers (ADR 0026), with
-the next buttons attached by `events.buttons`. An unknown action, or one the entity's state
+the next buttons attached by `outbound.buttons`. An unknown action, or one the entity's state
 doesn't allow, is a `StaleButton`. Posts still live in memory (T56, T57) and the Brand Brain in
 the database; `PostLifecycle` owns every state change (T19 moves the posts).
 """

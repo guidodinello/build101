@@ -9,7 +9,7 @@ from app.api.dev import router as dev_router
 from app.api.errors import install_error_handlers
 from app.api.instagram import router as instagram_router
 from app.api.onboarding import router as onboarding_router
-from app.channels.router import get_channel
+from app.channels.router import get_channel, get_owner_notify
 from app.channels.router import router as whatsapp_router
 from app.config import get_settings
 from app.jobs.setup import build_job_runner
@@ -27,7 +27,11 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
-        runner = build_job_runner(get_settings(), get_channel())
+        runner = build_job_runner(
+            get_settings(),
+            get_channel(),
+            lambda: app.dependency_overrides.get(get_owner_notify, get_owner_notify)(),
+        )
     except ValueError:
         logger.warning("job runner is off: no WhatsApp channel", exc_info=True)
         runner = None

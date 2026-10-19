@@ -8,7 +8,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 
 from app.config import Settings, get_settings
-from app.conversation.factory import build_inbound_handler
+from app.conversation.events import Notify
+from app.conversation.factory import Conversation, build_conversation
 from app.media.public import get_public_images, get_public_videos
 from app.publishing.factory import get_publisher
 
@@ -31,10 +32,19 @@ def get_dedupe_store() -> DedupeStore:
 
 
 @cache
-def get_inbound_handler() -> InboundHandler:
-    return build_inbound_handler(
+def get_conversation() -> Conversation:
+    return build_conversation(
         get_settings(), get_public_images(), get_publisher(), get_public_videos()
     )
+
+
+def get_inbound_handler() -> InboundHandler:
+    return get_conversation().handler
+
+
+def get_owner_notify() -> Notify:
+    """How code outside the chat (jobs, the onboarding API) tells the Owner something."""
+    return get_conversation().notify
 
 
 @asynccontextmanager
