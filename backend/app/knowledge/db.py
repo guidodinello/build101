@@ -12,6 +12,7 @@ from app.agents.niche_analyst import NicheReport, trend_notes
 from app.agents.schemas import BrandBrain
 from app.channels.inbound import mask
 from app.db.models import BrandBrainVersion, Business, NicheReportRow, OwnerNote, Product
+from app.onboarding.state import awaiting, state_of
 
 from .base import BusinessFacts, BusinessKnowledge, CatalogItem, Note, short_id
 
@@ -111,8 +112,8 @@ class DbKnowledge:
             website=business.website,
             instagram_handle=business.instagram_handle,
             current_offer=preferences.get("current_offer"),
-            onboarding_state=business.onboarding_state,
-            awaiting=business.conversation_state.get("awaiting"),
+            onboarding_state=state_of(business),
+            awaiting=awaiting(business),
         )
         catalog = [
             CatalogItem(

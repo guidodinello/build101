@@ -10,11 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.brand_strategist import BrandInputs, write_brand_brain
 from app.agents.schemas import BrandBrain
 from app.channels.base import Button, ChannelPort
-from app.conversation.brand import RESUME_STATE
 from app.conversation.history import record_note
 from app.copy import messages_es
 from app.db.models import BrandAsset, BrandBrainVersion, Business, Job
 from app.knowledge.db import active_products, latest_brand_brain
+from app.onboarding.state import brand_brain_written, resume_after_failed_revision
 
 from .runner import JobContext
 
@@ -77,8 +77,7 @@ async def _generate_brand(
                 reason="correction" if correction else "onboarding",
             )
         )
-        business.onboarding_state = "awaiting_brand_confirmation"
-        business.conversation_state = {}
+        brand_brain_written(business)
         await db.commit()
         owner_phone, channel_kind, name = business.owner_phone, business.channel, business.name
 
@@ -92,10 +91,7 @@ async def _resume(context: JobContext, business_id: uuid.UUID) -> None:
     """A failed revision of a confirmed brand puts the Business back where it was (ADR 0030)."""
     async with context.sessions() as db:
         business = await db.get_one(Business, business_id, with_for_update=True)
-        previous = business.conversation_state.get(RESUME_STATE)
-        if business.onboarding_state == "generating_brand" and previous:
-            business.onboarding_state = previous
-            business.conversation_state = {}
+        if resume_after_failed_revision(business):
             await db.commit()
 
 

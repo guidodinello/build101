@@ -28,6 +28,7 @@ from app.agents.niche_analyst import (
 from app.db.models import Business, Job, NicheReportRow
 from app.knowledge.db import niche_of
 from app.llm.client import GroundedModel
+from app.onboarding.state import OnboardingState
 
 from .queue import enqueue
 from .runner import JobContext, JobFunction
@@ -36,8 +37,8 @@ logger = logging.getLogger(__name__)
 
 KIND = "generate_niche_report"
 CHECK_EVERY = timedelta(minutes=15)
-# Onboarding is complete once the Owner confirmed the brand (conversation/brand.py).
-ELIGIBLE_STATE = "active"
+# Onboarding is complete once the Owner confirmed the brand (onboarding/state.py).
+ELIGIBLE_STATE = OnboardingState.ACTIVE
 # Each attempt can run several billed Google searches: a failing call (a 429, fewer than 3
 # sourced insights) is tried once more that week, then waits for next week.
 MAX_ATTEMPTS_PER_WEEK = 2

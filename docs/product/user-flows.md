@@ -25,8 +25,13 @@ stateDiagram-v2
     generating_brand --> awaiting_brand_confirmation: Brand Brain ready, summary sent
     awaiting_brand_confirmation --> active: [Sí, es mi marca]
     awaiting_brand_confirmation --> generating_brand: correction in free text
+    active --> generating_brand: brand change asked in the chat (update_brand)
+    generating_brand --> active: revision failed, back to where it was
+    generating_brand --> awaiting_brand_confirmation: revision failed, back to where it was
     active --> active
 ```
+
+The states and these moves are owned by one module, `backend/app/onboarding/state.py`: nothing else writes `onboarding_state`. A failed first brand stays in `generating_brand` (the Owner gets `job_failed` with a retry button); a failed revision puts the Business back in the state it was in.
 
 While `onboarding_state != active`, inbound messages are handled by the **onboarding router** (deterministic copy + light LLM for free-text answers). Once `active`, they go to the **orchestrator**.
 

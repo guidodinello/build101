@@ -72,6 +72,8 @@ Every inbound message passes through two handlers in a row: `OnboardingGate`, wh
 - `awaiting_web_form`: resends a fresh link, at most once every 30 s.
 - Any later state: hands the message to `ChatHandler`.
 
+The states and the moves between them live in one module, `onboarding/state.py`: an enum plus a transition function per move (`welcome`, `name_received`, `form_submitted`, `confirm_brand`, ...). The gate, the web API, the `generate_brand` job and the brand buttons ask it to move the Business and never write `onboarding_state` themselves.
+
 **`ChatHandler`** (`conversation/chat.py`) treats each kind of message differently:
 
 - **Photos** are downloaded, resized, and held in a 5-second batch, because WhatsApp sends an album as one message per photo. The batch is answered when the timer fires, or together with a text that arrives meanwhile.

@@ -13,9 +13,9 @@ from app.config import Settings, get_settings
 from app.db.models import Business
 from app.db.session import get_session
 from app.onboarding.links import add_onboarding_link, onboarding_url
+from app.onboarding.state import skip_to_web_form
 
 BusinessName = Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)]
-STATES_BEFORE_THE_FORM = frozenset({"new", "awaiting_name"})
 
 
 def require_dev_token(
@@ -57,8 +57,7 @@ async def create_onboarding_link(
         await session.flush()
     if body.business_name:
         business.name = body.business_name
-    if business.onboarding_state in STATES_BEFORE_THE_FORM:
-        business.onboarding_state = "awaiting_web_form"
+    skip_to_web_form(business)
     token = add_onboarding_link(session, business)
     await session.commit()
     return OnboardingLinkResponse(
