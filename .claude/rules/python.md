@@ -206,6 +206,7 @@ since git hooks are repository-wide.
 uv pip install -e .          # editable install — do this once on a fresh clone
 uv run ruff check .          # lint (must be clean before committing)
 uv run ruff check --fix .    # auto-fix what ruff can
+uv run pyright               # type check, standard mode (must report 0 errors before committing)
 uv run pytest tests/ -v      # run test suite (must be green before committing)
 pre-commit install           # install git hooks (once per clone)
 ```
@@ -301,6 +302,16 @@ def load_settings(path: Path, env: str = "dev") -> Settings: ...
 
 # Bad
 def format_reply(text, max_chars, locale): ...
+```
+
+pyright runs in CI (standard mode, `app/` and `migrations/`; config in `pyproject.toml`). When a
+library's stubs are wrong, suppress with a scoped ignore and say why on the line or the line above;
+never a bare `# type: ignore`. `reportUnnecessaryTypeIgnoreComment` is on, so an ignore that stops
+being needed fails the check.
+
+```python
+# Pillow stubs: `getextrema()` is `float | tuple[int, int]`; a single band gives ints.
+low = alpha.getextrema()[0]  # pyright: ignore[reportOperatorIssue]
 ```
 
 Use modern Python 3.10+ syntax — never `Optional`, `List`, `Dict`, `Union`, or
@@ -941,6 +952,7 @@ why.
 | Build backend | TBD |
 | Test runner | pytest |
 | Linter/formatter | ruff |
+| Type checker | pyright, standard mode (`[tool.pyright]` in `backend/pyproject.toml`) |
 | Database / ORM | PostgreSQL (Supabase) + SQLAlchemy 2 async + Alembic — see [ADR 0003](../../docs/decisions/0003-database-supabase-sqlalchemy.md) |
 
 FastAPI-specific conventions are not yet defined; record them as an ADR in
