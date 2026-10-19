@@ -2,22 +2,16 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
-import {
-  ArrowRightIcon,
-  CircleCheckIcon,
-  LockIcon,
-  MessageCircleCheckIcon,
-  SparklesIcon,
-} from "lucide-react";
+import { ArrowRightIcon, CheckIcon, LockIcon, MessageCircleCheckIcon, SparklesIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { WizardStep } from "@/components/onboarding/wizard-step";
 import { useWizard } from "@/components/onboarding/wizard-context";
 import { messageOf, onboardingApi } from "@/lib/api";
-import { atHandle } from "@/lib/onboarding";
+import { atHandle, isInstagramConnected } from "@/lib/onboarding";
 
-const CONNECT_FAILED = "No pudimos conectar tu Instagram. Probá de nuevo.";
+const CONNECT_FAILED = "No pude conectar tu Instagram. Probá de nuevo.";
 
 export function InstagramStep() {
   const { token, state, setState, goTo } = useWizard();
@@ -52,41 +46,28 @@ export function InstagramStep() {
     }
   }
 
-  const connected = state.instagram.status === "connected";
+  const connected = isInstagramConnected(state);
   const failed = state.instagram.status === "error" || !!error;
 
   return (
     <WizardStep
       step="instagram"
-      icon={
-        <div className="flex size-18 items-center justify-center rounded-[22px] bg-foreground text-background">
-          <svg
-            viewBox="0 0 24 24"
-            className="size-9"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.8}
-            strokeLinecap="round"
-            aria-hidden
-          >
-            <rect x="3" y="3" width="18" height="18" rx="5" />
-            <circle cx="12" cy="12" r="4" />
-            <circle cx="17.3" cy="6.7" r="0.6" fill="currentColor" />
-          </svg>
-        </div>
-      }
-      title="Conectá tu Instagram"
-      subtitle="Leemos tu feed para conocer tu estilo y publicamos solo lo que vos apruebes."
+      title="¿Tenés Instagram? Conectalo"
+      subtitle="Leo tus posts y tus fotos para aprender cómo hablás. Así te pregunto menos."
       footer={
         connected ? (
-          <Button size="xl" className="w-full" onClick={() => goTo("done")}>
+          <Button variant="cta" size="xl" className="w-full" onClick={() => goTo("products")}>
             Siguiente
             <ArrowRightIcon data-icon="inline-end" />
           </Button>
         ) : (
-          <div className="flex flex-col gap-2">
-            <Button size="xl" className="w-full" disabled={connecting} onClick={connect}>
-              {connecting && <Spinner data-icon="inline-start" aria-label="Conectando" />}
+          <div className="flex flex-col gap-1.5">
+            <Button variant="cta" size="xl" className="w-full" disabled={connecting} onClick={connect}>
+              {connecting ? (
+                <Spinner data-icon="inline-start" aria-label="Conectando" />
+              ) : (
+                <InstagramGlyph className="size-5" />
+              )}
               Conectar Instagram
             </Button>
             <Button
@@ -94,38 +75,45 @@ export function InstagramStep() {
               size="lg"
               className="w-full text-foreground underline underline-offset-3"
               disabled={connecting}
-              onClick={() => goTo("done")}
+              onClick={() => goTo("products")}
             >
-              Lo hago después
+              No tengo, o lo hago después
             </Button>
           </div>
         )
       }
     >
-      <ul className="flex flex-col gap-3.5">
-        <Reassurance icon={<MessageCircleCheckIcon className="size-4.5" aria-hidden />}>
-          Cada post te llega primero por WhatsApp para que lo apruebes.
-        </Reassurance>
-        <Reassurance icon={<LockIcon className="size-4.5" aria-hidden />}>
-          Iniciás sesión en la página de Instagram, nunca nos das tu contraseña.
-        </Reassurance>
-        <Reassurance icon={<SparklesIcon className="size-4.5" aria-hidden />}>
-          Traemos tus posts y fotos para aprender cómo hablás y qué le gusta a tu gente.
-        </Reassurance>
-      </ul>
-
-      {connected && (
-        <p className="flex items-center gap-2 rounded-lg bg-primary-soft px-3.5 py-3 text-[15px] font-semibold text-primary">
-          <CircleCheckIcon className="size-5" aria-hidden />
-          {state.instagram.handle ? `${atHandle(state.instagram.handle)} conectado` : "Instagram conectado"}
-        </p>
+      {connected ? (
+        <div className="flex items-center gap-3.5 rounded-[22px] bg-card p-4 shadow-bubble">
+          <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+            <CheckIcon className="size-6" strokeWidth={2.6} aria-hidden />
+          </span>
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <p className="truncate text-[17px] font-bold">
+              {state.instagram.handle ? `${atHandle(state.instagram.handle)} conectado` : "Instagram conectado"}
+            </p>
+            <p className="text-[15px] leading-snug text-muted-foreground">
+              Ya estoy trayendo tus fotos. Las vas a ver en el paso de fotos.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <ul className="flex flex-col gap-4">
+          <Reassurance icon={<MessageCircleCheckIcon className="size-5" aria-hidden />}>
+            Nunca publico nada sin que lo apruebes por WhatsApp.
+          </Reassurance>
+          <Reassurance icon={<LockIcon className="size-5" aria-hidden />}>
+            Entrás desde la página de Instagram. Nunca veo tu contraseña.
+          </Reassurance>
+          <Reassurance icon={<SparklesIcon className="size-5" aria-hidden />}>
+            Traigo tus fotos y tus textos para aprender tu estilo y lo que le gusta a tu gente.
+          </Reassurance>
+        </ul>
       )}
 
       {!connected && failed && !connecting && (
         <Alert variant="destructive">
-          <AlertDescription>
-            {error ?? CONNECT_FAILED}
-          </AlertDescription>
+          <AlertDescription>{error ?? CONNECT_FAILED}</AlertDescription>
         </Alert>
       )}
     </WizardStep>
@@ -134,11 +122,29 @@ export function InstagramStep() {
 
 function Reassurance({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
-    <li className="flex items-start gap-3 text-[15px] leading-snug">
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-primary-soft text-primary">
+    <li className="flex items-center gap-3.5 text-base leading-snug">
+      <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary">
         {icon}
       </span>
-      <span className="pt-1">{children}</span>
+      <span>{children}</span>
     </li>
+  );
+}
+
+function InstagramGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      aria-hidden
+    >
+      <rect x="3" y="3" width="18" height="18" rx="5" />
+      <circle cx="12" cy="12" r="4" />
+      <circle cx="17.3" cy="6.7" r="0.6" fill="currentColor" />
+    </svg>
   );
 }

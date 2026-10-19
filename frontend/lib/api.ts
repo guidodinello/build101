@@ -22,10 +22,12 @@ export type Product = {
 };
 
 export type AssetKind = "logo" | "photo" | "video";
+export type AssetSource = "web" | "instagram";
 
 export type Asset = {
   id: string;
   kind: AssetKind;
+  source: AssetSource;
   status: "uploading" | "ready" | "failed";
   url: string;
   thumbnail_url: string | null;
@@ -49,10 +51,10 @@ export type PostsPerWeek = 2 | 3 | 5;
 export type Questionnaire = {
   goal: Goal;
   audiences: string[];
-  formality: Scale;
-  humor: Scale;
-  posts_per_week: PostsPerWeek;
-  emoji_policy: EmojiPolicy;
+  formality: Scale | null;
+  humor: Scale | null;
+  posts_per_week: PostsPerWeek | null;
+  emoji_policy: EmojiPolicy | null;
   avoid: string | null;
   current_offer: string | null;
 };
@@ -74,10 +76,7 @@ export type BusinessInput = {
   name: string;
   category: string;
   one_liner: string;
-  description?: string;
-  location: string;
-  website?: string;
-  instagram_handle?: string;
+  location?: string;
 };
 
 export type ProductInput = {
@@ -90,7 +89,7 @@ export type ProductInput = {
 };
 
 export type BrandInput = {
-  three_words: [string, string, string];
+  three_words: string[];
   colors: string[];
   no_brand_yet?: boolean;
 };

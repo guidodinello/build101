@@ -107,29 +107,29 @@
 }
 
 :root {
-  --background: #faf7f2;
-  --foreground: #1f1b16;
+  --background: #f2f5f1;
+  --foreground: #0b1f17;
   --card: #ffffff;
-  --card-foreground: #1f1b16;
+  --card-foreground: #0b1f17;
   --popover: #ffffff;
-  --popover-foreground: #1f1b16;
-  --primary: #1f6f5c;
-  --primary-foreground: #ffffff;
-  --primary-soft: #e3efea;
-  --secondary: #efe9e0;
-  --secondary-foreground: #1f1b16;
-  --muted: #efe9e0;
-  --muted-foreground: #6b6257;
-  --accent: #f2b84b;
-  --accent-foreground: #1f1b16;
-  --callout: #f7ebd2;
-  --callout-foreground: #4a3b1e;
-  --destructive: #c2410c;
-  --border: #eae3d8;
-  --input: #bfb3a3;
-  --track: #e7dfd3;
-  --ring: #1f6f5c;
-  --radius: 14px;
+  --popover-foreground: #0b1f17;
+  --primary: #0e2a20;
+  --primary-foreground: #eef5f0;
+  --primary-soft: #e6eee8;
+  --secondary: #edf2ee;
+  --secondary-foreground: #0e2a20;
+  --muted: #f4f7f4;
+  --muted-foreground: #4d5f56;
+  --accent: #ff6a1a;
+  --accent-foreground: #0b1f17;
+  --callout: #fff1e8;
+  --callout-foreground: #7a3410;
+  --destructive: #b93a0a;
+  --border: #e2e9e4;
+  --input: #c3d2c8;
+  --track: #dfe7e1;
+  --ring: #0e2a20;
+  --radius: 16px;
 }
 
 @layer base {
@@ -141,5 +141,12 @@
   }
   html {
     @apply font-sans;
+  }
+  ::selection {
+    background: rgb(255 106 26 / 0.25);
+  }
+  input,
+  textarea {
+    caret-color: var(--accent);
   }
 }

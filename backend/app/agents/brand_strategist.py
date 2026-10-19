@@ -22,6 +22,7 @@ SYSTEM_PROMPT = load_prompt(Path(__file__).parent / "prompts" / "brand_strategis
 )
 MAX_SUMMARY_CHARS = 600
 MAX_FEATURED = 5
+DEFAULT_POSTS_PER_WEEK = 3
 # The Owner's Instagram (ADR 0028): the captions that did best and the newest ones
 MAX_TOP_CAPTIONS = 10
 MAX_RECENT_CAPTIONS = 20
@@ -145,8 +146,7 @@ def _enforce(brain: BrandBrain, inputs: BrandInputs) -> BrandBrain:
     goal = inputs.questionnaire.get("goal") or brain.goal
     posting = brain.posting.model_copy(
         update={
-            "posts_per_week": inputs.questionnaire.get("posts_per_week")
-            or brain.posting.posts_per_week
+            "posts_per_week": inputs.questionnaire.get("posts_per_week") or DEFAULT_POSTS_PER_WEEK
         }
     )
     return brain.model_copy(

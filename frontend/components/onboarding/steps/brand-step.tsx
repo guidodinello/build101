@@ -17,15 +17,17 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { asOptions, ChoiceChips } from "@/components/onboarding/choice-chips";
+import { PostPreview } from "@/components/onboarding/post-preview";
 import { WizardStep } from "@/components/onboarding/wizard-step";
 import { useWizard } from "@/components/onboarding/wizard-context";
-import { messageOf, onboardingApi } from "@/lib/api";
-import { currentLogo } from "@/lib/onboarding";
+import { messageOf, onboardingApi, type OnboardingState } from "@/lib/api";
+import { copyFor } from "@/lib/categories";
+import { currentLogo, MAX_BRAND_WORDS, ownPhotos, readyPhotos } from "@/lib/onboarding";
 import { uploadAsset, validatePhoto } from "@/lib/upload";
 
 const MAX_COLORS = 5;
-const NEW_COLOR = "#c89b6d";
-const WORD_PLACEHOLDERS = ["Ej: cálidos", "Ej: artesanales", "Ej: confiables"];
+const NEW_COLORS = ["#c89b6d", "#4b5d3a", "#e9dcc6", "#6b3e26", "#1f3a5f"];
 
 type LogoUpload = {
   fileName: string;
@@ -34,18 +36,25 @@ type LogoUpload = {
   failed: boolean;
 };
 
+function previewPhoto(state: OnboardingState) {
+  const own = ownPhotos(state);
+  const photo =
+    own.find((asset) => asset.product_ids.length > 0) ?? own[0] ?? readyPhotos(state)[0];
+  return photo ? (photo.thumbnail_url ?? photo.url) : null;
+}
+
 export function BrandStep() {
   const { token, state, setState, upsertAsset, goTo } = useWizard();
   const logo = currentLogo(state);
+  const suggestions = copyFor(state.business.category).words;
   const [noBrandYet, setNoBrandYet] = useState(
-    !logo && state.brand.colors.length === 0 && state.brand.three_words.length === 3,
+    !logo && state.brand.colors.length === 0 && state.brand.three_words.length > 0,
   );
   const [colors, setColors] = useState(() =>
     state.brand.colors.length > 0 ? state.brand.colors : (logo?.palette ?? []),
   );
-  const [words, setWords] = useState(() =>
-    [0, 1, 2].map((index) => state.brand.three_words[index] ?? ""),
-  );
+  const [words, setWords] = useState<string[]>(state.brand.three_words);
+  const [customWord, setCustomWord] = useState("");
   const [upload, setUpload] = useState<LogoUpload | null>(null);
   const [uploadedName, setUploadedName] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -53,9 +62,10 @@ export function BrandStep() {
   const fileInput = useRef<HTMLInputElement>(null);
 
   const uploading = !!upload && !upload.failed;
+  const wordOptions = [...suggestions, ...words.filter((word) => !suggestions.includes(word))];
   const errors = {
     colors: !noBrandYet && colors.length === 0 && "Sumá al menos un color, o subí tu logo.",
-    words: words.some((word) => !word.trim()) && "Completá las 3 palabras.",
+    words: words.length === 0 && "Elegí al menos una.",
   };
   const show = (error: string | false) => (submitted ? error : false);
 
@@ -89,6 +99,24 @@ export function BrandStep() {
     }
   }
 
+  function addColor() {
+    const next = NEW_COLORS.find((color) => !colors.includes(color)) ?? NEW_COLORS[0];
+    setColors((list) => [...list, next]);
+  }
+
+  function addCustomWord() {
+    const word = customWord.trim();
+    if (!word) return;
+    if (words.length >= MAX_BRAND_WORDS) {
+      toast(`Elegí hasta ${MAX_BRAND_WORDS}. Sacá una para sumar otra.`);
+      return;
+    }
+    if (!words.some((item) => item.toLowerCase() === word.toLowerCase())) {
+      setWords((list) => [...list, word]);
+    }
+    setCustomWord("");
+  }
+
   async function submit() {
     setSubmitted(true);
     if (errors.colors || errors.words || uploading) return;
@@ -96,12 +124,12 @@ export function BrandStep() {
     setPending(true);
     try {
       const next = await onboardingApi.saveBrand(token, {
-        three_words: words.map((word) => word.trim()) as [string, string, string],
+        three_words: words,
         colors: noBrandYet ? [] : colors,
         no_brand_yet: noBrandYet,
       });
       setState(next);
-      goTo("photos");
+      goTo("preferences");
     } catch (error) {
       toast.error(messageOf(error));
     } finally {
@@ -113,19 +141,31 @@ export function BrandStep() {
   const logoSrc = upload?.previewUrl ?? logo?.url;
 
   return (
-    <WizardStep step="brand" title="Tu marca" onSubmit={submit} pending={pending || uploading}>
-      <FieldLabel className="w-full cursor-pointer rounded-lg bg-callout px-3.5 py-2.5 text-callout-foreground">
+    <WizardStep
+      step="brand"
+      title="Así se vería tu marca"
+      subtitle="Tocá los colores y mirá cómo cambia."
+      onSubmit={submit}
+      pending={pending || uploading}
+    >
+      <PostPreview
+        name={state.business.name ?? "Tu negocio"}
+        location={state.business.location}
+        caption={state.business.one_liner}
+        photoUrl={previewPhoto(state)}
+        logoUrl={noBrandYet ? null : (logoSrc ?? null)}
+        colors={noBrandYet ? [] : colors}
+      />
+
+      <FieldLabel className="w-full cursor-pointer rounded-[18px] bg-card px-3.5 py-3 shadow-[0_0_0_1px_var(--border)]">
         <Field orientation="horizontal" className="items-center gap-3">
-          <Checkbox
-            checked={noBrandYet}
-            onCheckedChange={(checked) => setNoBrandYet(checked)}
-          />
+          <Checkbox checked={noBrandYet} onCheckedChange={(checked) => setNoBrandYet(checked)} />
           <FieldContent>
             <FieldTitle className="text-[15px] font-semibold text-foreground">
               Todavía no tengo logo ni colores
             </FieldTitle>
-            <FieldDescription className="text-[13px] text-callout-foreground">
-              Te ayudamos a elegirlos por WhatsApp
+            <FieldDescription className="text-[13px]">
+              Uso colores neutros. Los cambiamos cuando quieras por WhatsApp.
             </FieldDescription>
           </FieldContent>
         </Field>
@@ -133,8 +173,8 @@ export function BrandStep() {
 
       {!noBrandYet && (
         <>
-          <section aria-labelledby="logo-title" className="flex flex-col gap-2">
-            <h2 id="logo-title" className="text-sm font-semibold">
+          <section aria-labelledby="logo-title" className="flex flex-col gap-2.5">
+            <h2 id="logo-title" className="text-[15px] font-bold">
               Tu logo <span className="font-normal text-muted-foreground">(opcional)</span>
             </h2>
             <input
@@ -151,8 +191,8 @@ export function BrandStep() {
               }}
             />
             {logoName && logoSrc ? (
-              <div className="flex items-center gap-3.5 rounded-lg border bg-card p-3">
-                <div className="flex size-18 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
+              <div className="flex items-center gap-3.5 rounded-[18px] bg-card p-3 shadow-[0_0_0_1px_var(--border)]">
+                <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
                   {/* eslint-disable-next-line @next/next/no-img-element -- signed Storage URLs and object URLs */}
                   <img src={logoSrc} alt="Tu logo" className="size-full object-contain" />
                 </div>
@@ -163,7 +203,7 @@ export function BrandStep() {
                   )}
                   {upload?.failed && <p className="text-[13px] text-destructive">No se pudo subir</p>}
                   {!upload && (
-                    <p className="flex items-center gap-1 text-[13px] text-primary">
+                    <p className="flex items-center gap-1 text-[13px] font-medium text-primary">
                       <CheckIcon className="size-3.5" aria-hidden />
                       Subido
                     </p>
@@ -173,7 +213,7 @@ export function BrandStep() {
                   type="button"
                   variant="secondary"
                   size="lg"
-                  className="h-11"
+                  className="h-11 rounded-full"
                   disabled={uploading}
                   onClick={() => fileInput.current?.click()}
                 >
@@ -184,7 +224,7 @@ export function BrandStep() {
               <Button
                 type="button"
                 variant="ghost"
-                className="h-24 flex-col gap-1.5 border-[1.5px] border-dashed border-input bg-card text-[15px] font-semibold text-primary hover:bg-card hover:text-primary"
+                className="h-20 gap-2.5 rounded-[18px] border-[1.5px] border-dashed border-input bg-card text-base font-bold text-primary hover:bg-card hover:text-primary"
                 onClick={() => fileInput.current?.click()}
               >
                 <ImageUpIcon className="size-6" aria-hidden />
@@ -193,22 +233,22 @@ export function BrandStep() {
             )}
           </section>
 
-          <FieldSet data-invalid={!!show(errors.colors)} className="gap-2.5">
+          <FieldSet data-invalid={!!show(errors.colors)} className="gap-3">
             <div className="flex flex-col gap-0.5">
-              <FieldLegend variant="label" className="mb-0 font-semibold">
+              <FieldLegend variant="label" className="mb-0 text-[15px] font-bold">
                 Tus colores
               </FieldLegend>
-              <FieldDescription className="text-[13px]">
+              <FieldDescription className="text-sm">
                 {logo
-                  ? "Los sacamos de tu logo. Tocá uno para cambiarlo."
-                  : "Subí tu logo y los sacamos de ahí, o agregalos vos."}
+                  ? "Los saqué de tu logo. Tocá uno para cambiarlo."
+                  : "Subí tu logo y los saco de ahí, o agregalos vos."}
               </FieldDescription>
             </div>
             <ul className="flex flex-wrap gap-3.5">
               {colors.map((color, index) => (
-                <li key={index} className="relative flex flex-col items-center gap-1.5">
+                <li key={`${index}-${color}`} className="relative flex flex-col items-center gap-1.5">
                   <label
-                    className="relative block size-14 cursor-pointer rounded-lg shadow-[inset_0_0_0_1px_rgb(31_27_22/0.12)] focus-within:ring-3 focus-within:ring-ring/40"
+                    className="relative block size-14 cursor-pointer rounded-full shadow-[inset_0_0_0_1px_rgb(14_42_32/0.12)] focus-within:ring-3 focus-within:ring-primary/40"
                     style={{ background: color }}
                   >
                     <span className="sr-only">Cambiar color {color}</span>
@@ -226,7 +266,7 @@ export function BrandStep() {
                     <button
                       type="button"
                       aria-label={`Quitar color ${color}`}
-                      className="absolute -top-2.5 -right-2.5 flex size-7 items-center justify-center rounded-full border bg-card text-muted-foreground shadow-sm"
+                      className="absolute -top-2 -right-2 flex size-7 items-center justify-center rounded-full bg-card text-muted-foreground shadow-float"
                       onClick={() => setColors((list) => list.filter((_, i) => i !== index))}
                     >
                       <XIcon className="size-3.5" aria-hidden />
@@ -238,10 +278,10 @@ export function BrandStep() {
                 <li>
                   <button
                     type="button"
-                    className="flex flex-col items-center gap-1.5 rounded-lg text-xs text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
-                    onClick={() => setColors((list) => [...list, NEW_COLOR])}
+                    className="flex flex-col items-center gap-1.5 rounded-full text-xs font-medium text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-primary/40"
+                    onClick={addColor}
                   >
-                    <span className="flex size-14 items-center justify-center rounded-lg border-[1.5px] border-dashed border-input text-primary">
+                    <span className="flex size-14 items-center justify-center rounded-full border-[1.5px] border-dashed border-input bg-card text-primary">
                       <PlusIcon className="size-5" aria-hidden />
                     </span>
                     Agregar
@@ -254,22 +294,45 @@ export function BrandStep() {
         </>
       )}
 
-      <FieldSet data-invalid={!!show(errors.words)} className="gap-2.5">
-        <FieldLegend variant="label" className="mb-0 font-semibold">
-          3 palabras que usarían tus clientes para describirte
-        </FieldLegend>
-        {words.map((word, index) => (
+      <FieldSet data-invalid={!!show(errors.words)} className="gap-3">
+        <div className="flex flex-col gap-0.5">
+          <FieldLegend id="words-label" variant="label" className="mb-0 text-[15px] font-bold">
+            ¿Cómo te describirían tus clientes?
+          </FieldLegend>
+          <FieldDescription className="text-sm">Elegí hasta {MAX_BRAND_WORDS}.</FieldDescription>
+        </div>
+        <ChoiceChips
+          aria-labelledby="words-label"
+          multiple
+          max={MAX_BRAND_WORDS}
+          options={asOptions(wordOptions)}
+          value={words}
+          onChange={setWords}
+          invalid={!!show(errors.words)}
+        />
+        <div className="flex gap-2">
           <Input
-            key={index}
-            aria-label={`Palabra ${index + 1}`}
-            placeholder={WORD_PLACEHOLDERS[index]}
-            value={word}
-            onChange={(event) =>
-              setWords((list) => list.map((item, i) => (i === index ? event.target.value : item)))
-            }
-            aria-invalid={!!show(errors.words) && !word.trim()}
+            aria-label="Otra palabra"
+            placeholder="Otra palabra"
+            value={customWord}
+            onChange={(event) => setCustomWord(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              addCustomWord();
+            }}
           />
-        ))}
+          <Button
+            type="button"
+            variant="secondary"
+            size="lg"
+            className="h-12 rounded-full px-5"
+            disabled={!customWord.trim()}
+            onClick={addCustomWord}
+          >
+            Sumar
+          </Button>
+        </div>
         <FieldError>{show(errors.words)}</FieldError>
       </FieldSet>
     </WizardStep>

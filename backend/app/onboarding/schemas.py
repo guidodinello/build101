@@ -32,7 +32,7 @@ class BusinessInput(BaseModel):
     category: RequiredText
     one_liner: RequiredText
     description: Text | None = None
-    location: RequiredText
+    location: OptionalText = None
     website: OptionalText = None
     instagram_handle: OptionalText = None
 
@@ -69,7 +69,7 @@ class Brand(BaseModel):
 
 
 class BrandInput(BaseModel):
-    three_words: Annotated[list[RequiredText], Field(min_length=3, max_length=3)]
+    three_words: Annotated[list[RequiredText], Field(min_length=1, max_length=3)]
     colors: Annotated[list[HexColor], Field(max_length=MAX_COLORS)]
     no_brand_yet: bool = False
 
@@ -77,10 +77,11 @@ class BrandInput(BaseModel):
 class Questionnaire(BaseModel):
     goal: Literal["sales", "awareness", "launch", "loyalty"]
     audiences: Annotated[list[RequiredText], Field(max_length=10)]
-    formality: Scale
-    humor: Scale
-    posts_per_week: Literal[2, 3, 5]
-    emoji_policy: Literal["many", "few", "none"]
+    # Left out when the Owner connected Instagram and kept its voice, so the import decides.
+    formality: Scale | None = None
+    humor: Scale | None = None
+    posts_per_week: Literal[2, 3, 5] | None = None
+    emoji_policy: Literal["many", "few", "none"] | None = None
     avoid: OptionalText = None
     current_offer: OptionalText = None
 
@@ -88,6 +89,7 @@ class Questionnaire(BaseModel):
 class Asset(BaseModel):
     id: str
     kind: Literal["logo", "photo", "video"]
+    source: Literal["web", "instagram"]
     status: Literal["uploading", "ready", "failed"]
     url: str
     thumbnail_url: str | None

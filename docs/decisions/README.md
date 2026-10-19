@@ -46,7 +46,8 @@ When an ADR is superseded, set its Status to `superseded`, add `- Superseded by:
 | [0025](0025-weekly-niche-report.md) | Weekly Niche Report from the niche's websites and Google Search | proposed | 2026-10-18 |
 | [0026](0026-owner-messages-from-the-orchestrator.md) | Owner messages are written by the orchestrator, from typed events | proposed | 2026-10-18 |
 | [0027](0027-owner-logo-stamped-in-code.md) | The Owner's logo is stamped on post images in code | proposed | 2026-10-18 |
-| [0028](0028-read-instagram-with-our-meta-app.md) | Read the Owner's Instagram through our own Meta app to build the Brand Brain | proposed | 2026-10-18 |
+| [0028](0028-read-instagram-with-our-meta-app.md) | Read the Owner's Instagram through our own Meta app to build the Brand Brain | proposed; connect step and imported photos in the wizard partly superseded by [0032](0032-instagram-first-onboarding.md) | 2026-10-18 |
 | [0029](0029-designed-slides-ai-scene-code-layout.md) | Designed slides: the AI makes the scene, code templates make the layout | proposed | 2026-10-18 |
 | [0030](0030-orchestrator-memory-and-context.md) | The orchestrator's memory and context | proposed | 2026-10-18 |
 | [0031](0031-pricing-free-basic-pro.md) | Launch pricing is Free, Basic US$29 and Pro US$49 | proposed | 2026-10-18 |
+| [0032](0032-instagram-first-onboarding.md) | Connect Instagram early in the wizard and let it answer for the Owner | proposed | 2026-10-18 |

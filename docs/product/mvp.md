@@ -42,13 +42,13 @@ Priority uses MoSCoW for the 24h build: **Must** = the demo fails without it; **
 | ID | Feature | Priority |
 |---|---|---|
 | F2.1 | First contact in WhatsApp: welcome, ask business name, send magic link | Must |
-| F2.2 | Web onboarding form (mobile-first, 6 steps as in the [mockups](../design/mockups/README.md)): business info, up to 5 Products, logo (optional, with a "Todavía no tengo logo ni colores" option) and colors, 3–15 photos (no videos), questionnaire | Must |
+| F2.2 | Web onboarding form (mobile-first, 6 steps, [web-app.md](../design/web-app.md#otoken-onboarding-wizard-must)): business info, Instagram connect (F2.3), up to 5 Products, at least 3 photos (no videos; Instagram's count), logo (optional, with a "Todavía no tengo logo ni colores" option) and colors, questionnaire ([ADR 0032](../decisions/0032-instagram-first-onboarding.md)) | Must |
 | F2.3 | Connect the Owner's Instagram from the wizard, through our own Meta app with Instagram Login, to read it for the Brand Brain ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)). Publishing still goes to one demo account from env ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)) | Should |
 | F2.4 | Asset Analyst describes photos and extracts logo colors | Must |
 | F2.5 | Brand Strategist generates the Brand Brain; summary sent to WhatsApp for confirmation | Must |
 | F2.6 | Owner corrects the Brand Brain in chat ("no somos formales, somos re cercanos") | Could |
 | F2.7 | Fully conversational onboarding (no web) | Won't |
-| F2.8 | After connecting, import the Owner's profile, recent captions and newest images (photos, carousel slides, video covers) automatically, as Brand assets and as Brand Strategist input; no review screen, the Owner archives photos later ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)). Needs F2.3 | Should |
+| F2.8 | After connecting, import the Owner's profile, recent captions and newest images (photos, carousel slides, video covers) automatically, as Brand assets and as Brand Strategist input; no review screen: the imported photos show in the wizard's photos step, where the Owner can drop them ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md), [ADR 0032](../decisions/0032-instagram-first-onboarding.md)). Needs F2.3 | Should |
 | F2.9 | Build colors (and optionally a simple logo) in the chat when the owner has none: the bot proposes 3 palettes from a photo | Could |
 
 ### F3 — Strategy & calendar

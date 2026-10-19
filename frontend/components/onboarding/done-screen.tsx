@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { CheckIcon, RotateCwIcon } from "lucide-react";
+import { Bubble, Label } from "@/components/landing/chat";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -9,7 +10,14 @@ import { ScreenLayout } from "@/components/onboarding/screen-layout";
 import { WhatsAppButton } from "@/components/onboarding/whatsapp-link";
 import { useWizard } from "@/components/onboarding/wizard-context";
 import { ApiError, messageOf, onboardingApi } from "@/lib/api";
-import { atHandle, currentLogo, readyPhotos, resumeStep } from "@/lib/onboarding";
+import {
+  atHandle,
+  currentLogo,
+  instagramPhotos,
+  isInstagramConnected,
+  readyPhotos,
+  resumeStep,
+} from "@/lib/onboarding";
 
 type Submission = { status: "saving" } | { status: "done" } | { status: "failed"; error: unknown };
 
@@ -43,12 +51,15 @@ export function DoneScreen() {
 
   if (submission.status === "saving") {
     return (
-      <ScreenLayout title="Un segundo…">
-        <p className="flex items-center gap-2 text-[17px] text-muted-foreground">
-          <Spinner className="size-5" aria-label="Guardando" />
-          Estamos guardando todo.
-        </p>
-      </ScreenLayout>
+      <ScreenLayout
+        title="Un segundo…"
+        subtitle={
+          <span className="flex items-center gap-2">
+            <Spinner className="size-4.5" aria-label="Guardando" />
+            Estoy guardando todo.
+          </span>
+        }
+      />
     );
   }
 
@@ -56,14 +67,14 @@ export function DoneScreen() {
     const missingData = submission.error instanceof ApiError && submission.error.status === 422;
     return (
       <ScreenLayout
-        title="Nos falta algo"
+        title="Me falta algo"
         footer={
           missingData ? (
-            <Button size="xl" className="w-full" onClick={() => goTo(resumeStep(state))}>
+            <Button variant="cta" size="xl" className="w-full" onClick={() => goTo(resumeStep(state))}>
               Revisar mis datos
             </Button>
           ) : (
-            <Button size="xl" className="w-full" onClick={retry}>
+            <Button variant="cta" size="xl" className="w-full" onClick={retry}>
               <RotateCwIcon data-icon="inline-start" />
               Probar de nuevo
             </Button>
@@ -78,70 +89,90 @@ export function DoneScreen() {
   }
 
   const logo = currentLogo(state);
-  const products = state.products.filter((product) => !product.archived).length;
+  const products = state.products.filter((product) => !product.archived);
+  const imported = instagramPhotos(state).length;
+  const photos = readyPhotos(state).length;
 
   return (
     <ScreenLayout
-      icon={
-        <div className="mt-6 flex size-16 items-center justify-center rounded-full bg-accent text-accent-foreground">
-          <CheckIcon className="size-8" strokeWidth={2.4} aria-hidden />
-        </div>
-      }
-      title={<span className="text-[34px]">¡Listo!</span>}
+      title={state.business.name ? `¡Listo, ${state.business.name}!` : "¡Listo!"}
+      subtitle="Ya tengo todo. Ahora estudio tu marca y en un minuto te escribo por WhatsApp con lo que entendí."
       footer={<WhatsAppButton href={state.whatsapp_url} label="Volver a WhatsApp" />}
     >
-      <p className="-mt-2 text-[17px] leading-relaxed text-pretty">
-        Ya tenemos todo. En un minuto te escribimos por WhatsApp con lo que entendimos de tu marca.
-      </p>
-
-      <section aria-label="Resumen" className="flex flex-col rounded-2xl border bg-card px-4 pt-4 pb-1">
-        <div className="flex items-center gap-3 pb-3.5">
+      <section
+        aria-label="Lo que me contaste"
+        className="flex flex-col gap-4 rounded-[22px] bg-card p-4.5 shadow-bubble motion-safe:animate-rise motion-safe:[animation-delay:.2s]"
+      >
+        <div className="flex items-center gap-3">
           {logo && (
-            <div className="flex size-13 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
+            <div className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted">
               {/* eslint-disable-next-line @next/next/no-img-element -- signed Storage URL */}
               <img src={logo.url} alt="" className="size-full object-contain" />
             </div>
           )}
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <p className="truncate text-[17px] font-bold">{state.business.name}</p>
-            {state.brand.colors.length > 0 && (
-              <div className="flex gap-1.5" aria-label="Tus colores">
-                {state.brand.colors.map((color) => (
-                  <span
-                    key={color}
-                    className="size-5.5 rounded-[6px] shadow-[inset_0_0_0_1px_rgb(31_27_22/0.12)]"
-                    style={{ background: color }}
-                  />
-                ))}
-              </div>
+          <div className="flex min-w-0 flex-col">
+            <p className="truncate font-heading text-xl font-extrabold tracking-tight">{state.business.name}</p>
+            {state.business.category && (
+              <p className="truncate text-sm text-muted-foreground">
+                {[state.business.category, state.business.location].filter(Boolean).join(" · ")}
+              </p>
             )}
           </div>
         </div>
-        <dl>
-          <SummaryRow label="Productos">{products}</SummaryRow>
-          <SummaryRow label="Fotos">{readyPhotos(state).length}</SummaryRow>
-          <SummaryRow label="Posts por semana">{state.preferences?.posts_per_week ?? "—"}</SummaryRow>
+        <dl className="grid grid-cols-[96px_1fr] gap-x-3 gap-y-3.5 rounded-[18px] bg-muted p-4 text-[15px]">
+          <SummaryRow label="Productos">{products.map((product) => product.name).join(" · ")}</SummaryRow>
+          {state.brand.colors.length > 0 && (
+            <SummaryRow label="Colores">
+              <span className="flex gap-1.5" aria-label={state.brand.colors.join(", ")}>
+                {state.brand.colors.map((color) => (
+                  <span
+                    key={color}
+                    className="size-6 rounded-full shadow-[inset_0_0_0_1px_rgb(14_42_32/0.12)]"
+                    style={{ background: color }}
+                  />
+                ))}
+              </span>
+            </SummaryRow>
+          )}
+          <SummaryRow label="Fotos">
+            {photos}
+            {imported > 0 && <span className="text-muted-foreground"> ({imported} de Instagram)</span>}
+          </SummaryRow>
           <SummaryRow label="Instagram">
-            {state.instagram.status === "connected" && state.instagram.handle ? (
+            {isInstagramConnected(state) && state.instagram.handle ? (
               <span className="flex items-center gap-1 font-semibold text-primary">
                 <CheckIcon className="size-4" strokeWidth={2.6} aria-hidden />
                 {atHandle(state.instagram.handle)}
               </span>
             ) : (
-              <span className="text-muted-foreground">Lo conectás después</span>
+              <span className="text-muted-foreground">Lo conectás cuando quieras</span>
             )}
           </SummaryRow>
         </dl>
       </section>
+
+      <Bubble from="neitor" className="px-4.5 py-3 sm:max-w-fit" rowClassName="my-0 motion-safe:animate-rise motion-safe:[animation-delay:.5s]">
+        <span className="flex gap-1.5 py-1" role="img" aria-label="Neitor está escribiendo">
+          {[0, 1, 2].map((dot) => (
+            <span
+              key={dot}
+              className="size-2 rounded-full bg-ld-sage motion-safe:animate-hop"
+              style={{ animationDelay: `${dot * 0.15}s` }}
+            />
+          ))}
+        </span>
+      </Bubble>
     </ScreenLayout>
   );
 }
 
 function SummaryRow({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-center justify-between border-t border-muted py-3 text-[14.5px]">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd>{children}</dd>
-    </div>
+    <>
+      <dt className="pt-0.5">
+        <Label>{label}</Label>
+      </dt>
+      <dd className="min-w-0">{children}</dd>
+    </>
   );
 }

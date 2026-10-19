@@ -4,7 +4,7 @@ import { OnboardingWizard } from "@/components/onboarding/wizard";
 import { ApiError, onboardingApi, type OnboardingState } from "@/lib/api";
 
 export const metadata: Metadata = {
-  title: "Contanos de tu negocio",
+  title: "Tu negocio · Neitor AI",
   robots: { index: false },
 };
 

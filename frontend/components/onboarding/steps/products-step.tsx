@@ -10,7 +10,8 @@ import { ProductPhotos } from "@/components/onboarding/product-photos";
 import { WizardStep } from "@/components/onboarding/wizard-step";
 import { useWizard } from "@/components/onboarding/wizard-context";
 import { messageOf, onboardingApi, type OnboardingState, type Product } from "@/lib/api";
-import { MAX_PHOTOS, MAX_PRODUCTS, readyPhotos } from "@/lib/onboarding";
+import { copyFor } from "@/lib/categories";
+import { MAX_PHOTOS, MAX_PRODUCTS, ownPhotos, readyPhotos } from "@/lib/onboarding";
 
 type ProductDraft = {
   key: number;
@@ -55,8 +56,8 @@ export function ProductsStep() {
   const [uploading, setUploading] = useState<Record<number, number>>({});
 
   const uploadingCount = Object.values(uploading).reduce((sum, count) => sum + count, 0);
-  const photoRoom =
-    MAX_PHOTOS - readyPhotos(state).length - uploadingCount - photoUploads.inFlight;
+  const photoRoom = MAX_PHOTOS - ownPhotos(state).length - uploadingCount - photoUploads.inFlight;
+  const examples = copyFor(state.business.category).product;
 
   const setUploadingOf = useCallback((key: number, count: number) => {
     setUploading((current) => (current[key] === count ? current : { ...current, [key]: count }));
@@ -64,11 +65,8 @@ export function ProductsStep() {
 
   const filled = drafts.filter((draft) => !isBlank(draft));
   const errorsOf = (draft: ProductDraft) => {
-    if (!submitted || (isBlank(draft) && filled.length > 0)) return { name: false, description: false };
-    return {
-      name: !draft.name.trim() && "Ponele un nombre.",
-      description: !draft.description.trim() && "Contalo en pocas palabras.",
-    };
+    if (!submitted || (isBlank(draft) && filled.length > 0)) return { name: false };
+    return { name: !draft.name.trim() && "Ponele un nombre, aunque sea corto." };
   };
 
   function update(key: number, changes: Partial<ProductDraft>) {
@@ -99,8 +97,7 @@ export function ProductsStep() {
 
   async function submit() {
     setSubmitted(true);
-    const invalid =
-      filled.length === 0 || filled.some((draft) => !draft.name.trim() || !draft.description.trim());
+    const invalid = filled.length === 0 || filled.some((draft) => !draft.name.trim());
     if (invalid) return;
     if (uploadingCount > 0) {
       toast("Esperá un toque que terminen de subir las fotos.");
@@ -120,7 +117,7 @@ export function ProductsStep() {
         })),
       );
       setState(next);
-      goTo("brand");
+      goTo("photos");
     } catch (error) {
       toast.error(messageOf(error));
     } finally {
@@ -132,7 +129,7 @@ export function ProductsStep() {
     <WizardStep
       step="products"
       title="¿Qué es lo que más vendés?"
-      subtitle="Hasta 5. Los que más te importa vender."
+      subtitle="Hasta 5, los que más te importa vender. Si tenés fotos de cada uno, mejor."
       onSubmit={submit}
       pending={pending}
     >
@@ -143,12 +140,12 @@ export function ProductsStep() {
           <section
             key={draft.key}
             aria-labelledby={`product-${draft.key}-title`}
-            className="flex flex-col gap-3 rounded-lg border bg-card p-3.5"
+            className="flex flex-col gap-4 rounded-[22px] bg-card p-4 shadow-bubble"
           >
             <div className="-my-1.5 flex items-center justify-between">
               <h2
                 id={`product-${draft.key}-title`}
-                className="text-[13px] font-bold tracking-wide text-primary uppercase"
+                className="font-heading text-lg font-extrabold tracking-tight"
               >
                 Producto {number}
               </h2>
@@ -170,23 +167,23 @@ export function ProductsStep() {
                 <FieldLabel htmlFor={`product-${draft.key}-name`}>Nombre</FieldLabel>
                 <Input
                   id={`product-${draft.key}-name`}
-                  placeholder="Ej: Mesa Nórdica"
+                  placeholder={`Ej: ${examples.name}`}
                   value={draft.name}
                   onChange={(event) => update(draft.key, { name: event.target.value })}
                   aria-invalid={!!errors.name}
                 />
                 <FieldError>{errors.name}</FieldError>
               </Field>
-              <Field data-invalid={!!errors.description}>
-                <FieldLabel htmlFor={`product-${draft.key}-description`}>En pocas palabras</FieldLabel>
+              <Field>
+                <FieldLabel htmlFor={`product-${draft.key}-description`}>
+                  En pocas palabras <span className="font-normal text-muted-foreground">(opcional)</span>
+                </FieldLabel>
                 <Input
                   id={`product-${draft.key}-description`}
-                  placeholder="Ej: hecha a mano, en roble macizo"
+                  placeholder={`Ej: ${examples.description}`}
                   value={draft.description}
                   onChange={(event) => update(draft.key, { description: event.target.value })}
-                  aria-invalid={!!errors.description}
                 />
-                <FieldError>{errors.description}</FieldError>
               </Field>
               <Field>
                 <FieldLabel htmlFor={`product-${draft.key}-price`}>
@@ -195,7 +192,7 @@ export function ProductsStep() {
                 <Input
                   id={`product-${draft.key}-price`}
                   inputMode="text"
-                  placeholder="Ej: $ 18.500"
+                  placeholder={`Ej: ${examples.price}`}
                   value={draft.price}
                   onChange={(event) => update(draft.key, { price: event.target.value })}
                 />
@@ -217,7 +214,7 @@ export function ProductsStep() {
           type="button"
           variant="ghost"
           size="lg"
-          className="h-13 border-[1.5px] border-dashed border-input text-primary hover:bg-card hover:text-primary"
+          className="h-13 rounded-full border-[1.5px] border-dashed border-input text-base font-bold text-primary hover:bg-card hover:text-primary"
           onClick={() => setDrafts((list) => [...list, draftOf(state)])}
         >
           <PlusIcon data-icon="inline-start" />

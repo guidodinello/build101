@@ -7,7 +7,7 @@ Priorities follow [ADR 0016](../decisions/0016-demo-scope-one-post.md): the onbo
 ## Principles
 
 1. **Mobile first, phone only in practice.** Design at 390×844; desktop is a centered 480 px column.
-2. **One question per screen** in the wizard. Big tap targets (≥ 48 px), sticky bottom primary button.
+2. **One question per screen** in the wizard, or one topic: steps 1 and 6 group a few short questions on one screen. Big tap targets (≥ 48 px), sticky bottom primary button.
 3. **Autosave** every step; returning to the link resumes where the owner left.
 4. **No jargon**: "Conectá tu Instagram", not "OAuth"; "Tu marca", not "Brand Brain"; "Tu catálogo", "Tus fotos y videos", "Promos", not "Catalog", "Brand assets", "Offers".
 5. **Always a way back to WhatsApp** (header link on every screen).
@@ -23,18 +23,22 @@ Priorities follow [ADR 0016](../decisions/0016-demo-scope-one-post.md): the onbo
 
 ## Visual language
 
+The web app and the landing page share one palette: the landing's `ld-*` colors in `frontend/app/globals.css`, also mapped onto the shadcn tokens below, so the wizard looks like the rest of the chat with Neitor. Screen titles are Neitor chat bubbles (the landing's `Bubble` and `Display` components), on the landing's ground with its dot grid.
+
 | Token | Value | Use |
 |---|---|---|
-| `--background` | `#FAF7F2` (warm off-white) | Page |
-| `--foreground` | `#1F1B16` | Text |
-| `--primary` | `#1F6F5C` (deep green, WhatsApp-adjacent but not WhatsApp green) | Primary buttons, progress |
-| `--primary-foreground` | `#FFFFFF` | |
-| `--accent` | `#F2B84B` (warm amber) | Highlights, "listo" states |
-| `--muted` | `#EFE9E0` | Cards, inputs background |
-| `--muted-foreground` | `#6B6257` | Helper text |
-| `--destructive` | `#C2410C` | Errors |
-| `--radius` | `14px` | Cards, buttons, inputs |
-| Heading font | Bricolage Grotesque 600/700 | Screen titles, section headings, the "¡Listo!" moment |
+| `--background` | `#F2F5F1` (`ld-ground`, with the dot grid) | Page |
+| `--foreground` | `#0B1F17` (`ld-ink`) | Text |
+| `--primary` | `#0E2A20` (`ld-forest`) | Selected chips, done progress segments, links, focus rings |
+| `--primary-foreground` | `#EEF5F0` | |
+| `--accent` | `#FF6A1A` (`ld-accent`, orange) | The main call to action (rounded-full, `shadow-cta`, ink text), the current progress segment |
+| `--muted` | `#F4F7F4` (`ld-mist`) | Summary blocks, image placeholders |
+| `--muted-foreground` | `#4D5F56` (`ld-muted`) | Helper text |
+| `--callout` | `#FFF1E8` (`ld-peach`) | Notes |
+| `--destructive` | `#B93A0A` | Errors |
+| `--border` | `#E2E9E4` | Hairline borders on white inputs and cards |
+| `--radius` | `16px` | Inputs; bubbles and cards use the landing's 22–26 px |
+| Heading font | Bricolage Grotesque 800, tracking -0.04em | Screen titles in Neitor bubbles, section headings |
 | Body font | Figtree 400–700 | Body copy, inputs, buttons, helper text |
 | Mono font | JetBrains Mono | Only the simulator's debug panel |
 
@@ -48,46 +52,43 @@ Tone of illustrations: none. Use the owner's own photos and logo as soon as they
 
 ### `/o/[token]`: onboarding wizard (Must)
 
-Six steps plus a closing screen, kept short on purpose: the demo shows it live. Header (steps 1–6): back arrow · "Paso 2 de 6" · progress bar · "WhatsApp" link back to the chat (wa.me).
+Six steps plus a closing screen, kept short on purpose: the demo shows it live. Neitor speaks in the first person ("Contame de tu negocio"). Header (steps 1–6): the landing's floating pill with a back arrow (from step 2), the Neitor avatar with its green dot, "Neitor AI · Paso 2 de 6" and a "WhatsApp" pill back to the chat (wa.me), then six progress segments (done in forest, current in orange). Each screen opens with its question in a Neitor bubble; the answers sit below on the page, and the orange "Siguiente" button is sticky at the bottom. Instagram comes second so it can answer for the Owner ([ADR 0032](../decisions/0032-instagram-first-onboarding.md)); per-category examples, audiences and brand words live in `frontend/lib/categories.ts`.
 
 ```text
 ┌──────────────────────────────┐
-│ ◀   Paso 1 de 6   ▓▓░░░░░░  │
-│                              │
-│ Contanos de tu negocio 🏪    │
-│                              │
+│ ╭ (N) Neitor AI   [WhatsApp]╮│
+│ ╰     Paso 1 de 6           ╯│
+│ ▬▬ ── ── ── ── ──            │
+│ ╭─────────────────────────╮  │
+│ │ Contame de tu negocio   │  │  ← Neitor bubble
+│ │ Son 5 minutos. Con esto │  │
+│ │ armo posts que suenen a │  │
+│ │ vos.                    │  │
+│ ╰─────────────────────────╯  │
 │ ¿Cómo se llama?              │
-│ ┌──────────────────────────┐ │
-│ │ Muebles Ramírez          │ │
-│ └──────────────────────────┘ │
+│ [Muebles Ramírez          ]  │
 │ ¿De qué rubro es?            │
-│ [Muebles y deco         ▾]   │
-│ Contalo en una frase         │
-│ ┌──────────────────────────┐ │
-│ │ Muebles de madera maciza │ │
-│ │ hechos a mano en Mvd     │ │
-│ └──────────────────────────┘ │
-│ ¿Dónde están?                │
-│ [Montevideo              ]   │
-│ Instagram (opcional)         │
-│ [@mueblesramirez         ]   │
+│ (Muebles y deco) (Gastro…)   │
+│ (Indumentaria) (Belleza) …   │
+│ ¿Qué hacés, en una frase?    │
+│ [Muebles de madera maciza  ] │
+│ ¿Dónde están? (opcional)     │
+│ [Montevideo               ]  │
 │                              │
-│ ┌──────────────────────────┐ │
-│ │       Siguiente →        │ │  ← sticky bottom
-│ └──────────────────────────┘ │
+│ (        Siguiente →       ) │  ← sticky, orange
 └──────────────────────────────┘
 ```
 
 | Step | Title | Content | Validation |
 |---|---|---|---|
-| 1 | Contanos de tu negocio 🏪 | name, category (Select), one-liner (Textarea, 120 chars), location, IG handle | name, category, one-liner required |
-| 2 | ¿Qué es lo que más vendés? | Up to 5 product cards: name, short description ("En pocas palabras"), price (optional), and "Fotos (opcional)": a row of up to 5 thumbnails with ✕, progress and "Reintentar" like step 4, a "Sumar" tile and a "2 de 5" counter. Removing a product archives its photos. Hint: "Hasta 5. Los que más te importa vender." "+ Agregar otro" hides at 5 | ≥ 1 product; "Siguiente" waits for the photos still uploading |
-| 3 | Tu marca | Logo dropzone → after upload shows the logo + **detected color swatches** ("Los sacamos de tu logo. Tocá uno para cambiarlo."; tap to edit with a color input, "+ Agregar" to add); "3 palabras que usarían tus clientes para describirte" (3 inputs). Could (F2.9): a "Todavía no tengo logo ni colores · Te ayudamos a elegirlos por WhatsApp" option that skips logo and colors and hands them to the chat (the `WA-Sin-marca` mockup); until then, no logo means default colors | colors ≥ 1 (defaults if no logo) |
-| 4 | Tus fotos | Grid uploader (camera roll multi-select, photos only). Thumbnails with ✕ and "Reintentar" on failure. Hint: "Productos, el taller, el equipo.", or "El taller, el equipo, tus trabajos." once step 2 has photos. Counter "7 de 15" (all photos, products' included) + "Mínimo 3", with "2 de tus productos ·" in front when there are some; the grid shows only the photos not linked to a product. Footer: "Usamos tus fotos reales en los posts. Nada se publica sin que lo apruebes." With feed import (F2.8, Could) the hint adds "Las de tu Instagram las traemos solas en el paso 6." | 3 to 15 photos |
-| 5 | ¿Cómo querés que suene? | Questionnaire, one card per question (see [../product/user-flows.md](../product/user-flows.md#flow-2--web-onboarding-form-must)): chips for options, sliders with labels at both ends | goal, posts/week, emoji required |
-| 6 | Conectá tu Instagram (reads the account for the Brand Brain, [ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md); publishing still goes to the demo account, [ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)) | Subtitle "Leemos tu feed para conocer tu estilo y publicamos solo lo que vos apruebes." Three reassurance lines: "Cada post te llega primero por WhatsApp para que lo apruebes." · "Iniciás sesión en la página de Instagram, nunca nos das tu contraseña." · "Traemos tus posts y fotos para aprender cómo hablás y qué le gusta a tu gente." Big button "Conectar Instagram" → Instagram's consent screen → back to the wizard (`?step=instagram&connected=1`), which re-reads the state and shows ✅ @handle; `connected=0` shows "No pudimos conectar tu Instagram. Probá de nuevo." Secondary: "Lo hago después" | none |
-| 6b | Trajimos tu feed (**not built**: the import is automatic, [ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)) | Kept as the design for a later review screen. Shown after a successful connect. "Fotos y videos de @handle. Destildá lo que no quieras que usemos." Progress "Importando… 32 de 58" while it runs. Filter chips **Todo · 58 / Fotos · 46 / Videos · 12**; a grid where every item starts ticked (videos show their duration); tap to untick. Footnote: "Lo usamos para entender tu estilo y armar posts con tu material." Button "Listo, seguir" | none |
-| 7 | ¡Listo! 🎉 | "Ya tenemos todo. En un minuto te escribimos por WhatsApp con lo que entendimos de tu marca." A summary card with the logo and name plus counts: Productos, Fotos (with F2.8: "7 + 46 de Instagram" and a Videos row), Posts por semana, Instagram @handle. Big "Volver a WhatsApp" button | calls `/complete` on mount (idempotent) |
+| 1 | Contame de tu negocio | Name, category as chips (Muebles y deco, Gastronomía, Indumentaria, Belleza, Servicios, Otro with a free-text "¿Qué rubro?"), one-liner (Textarea, 120 chars, example by category), location (optional). No Instagram handle: the connect fills it in | name, category, one-liner required |
+| 2 | ¿Tenés Instagram? Conectalo (reads the account for the Brand Brain, [ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md); publishing still goes to the demo account, [ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)) | Subtitle "Leo tus posts y tus fotos para aprender cómo hablás. Así te pregunto menos." Three reassurance lines: "Nunca publico nada sin que lo apruebes por WhatsApp." · "Entrás desde la página de Instagram. Nunca veo tu contraseña." · "Traigo tus fotos y tus textos para aprender tu estilo y lo que le gusta a tu gente." Button "Conectar Instagram" → Instagram's consent screen → back to the wizard (`?step=instagram&connected=1`), which re-reads the state and shows "✓ @handle conectado · Ya estoy trayendo tus fotos"; `connected=0` shows "No pude conectar tu Instagram. Probá de nuevo." Secondary: "No tengo, o lo hago después" | none |
+| 3 | ¿Qué es lo que más vendés? | Up to 5 product cards: name, "En pocas palabras" (optional), price (optional), with examples by category, and "Fotos (opcional)": a row of up to 5 thumbnails with ✕, progress and "Reintentar" like step 4, a "Sumar" tile and a "2 de 5" counter. Removing a product archives its photos. "+ Agregar otro" hides at 5 | ≥ 1 product with a name; "Siguiente" waits for the photos still uploading |
+| 4 | Mandame tus fotos | Grid uploader (camera roll multi-select, photos only) with ✕ and "Reintentar" on failure. Subtitle "Productos, el lugar, el equipo." (or "El taller, el equipo, tus trabajos." once step 3 has photos) + "Uso tus fotos reales, sin cambiar tu producto." Counter "7 fotos" (products' and Instagram's included) + "Mínimo 3", with "2 de tus productos ·" in front when there are some. With Instagram connected, a "De @handle" section shows the imported photos with ✕ to drop one; while the import runs it shows placeholders and "Las estoy trayendo, tarda un minuto", polling for up to 90 s | ≥ 3 photos in total (uploads + Instagram); up to 15 uploads |
+| 5 | Así se vería tu marca | A live "Ejemplo" post built from their photo (a product's first), logo, colors and one-liner, recoloring as they edit. "Todavía no tengo logo ni colores · Uso colores neutros. Los cambiamos cuando quieras por WhatsApp." (hides logo and colors). Logo upload → its colors become the swatches ("Los saqué de tu logo. Tocá uno para cambiarlo."; tap to edit, "+ Agregar"). "¿Cómo te describirían tus clientes? Elegí hasta 3.": word chips by category plus a custom word | colors ≥ 1 unless "no tengo"; 1 to 3 words |
+| 6 | Última: ¿cómo querés que suene? | One screen of short questions (see [../product/user-flows.md](../product/user-flows.md#flow-2--web-onboarding-form-must)): goal (chips), audiences (chips by category + Otro), tone sliders and emoji chips, "¿Hay algo que NO quieras que diga o muestre?" and the current promo (example by category). With Instagram connected the tone is replaced by "El tono lo aprendo de tu Instagram" and a "Prefiero elegirlo yo" link; untouched tone is sent as null. No posts-per-week question | goal; emoji when the tone is shown |
+| 6b | Trajimos tu feed (**not built**: the import is automatic and its photos show in step 4, [ADR 0032](../decisions/0032-instagram-first-onboarding.md)) | Kept as the design for a later review screen. "Fotos y videos de @handle. Destildá lo que no quieras que usemos." Progress "Importando… 32 de 58" while it runs. Filter chips **Todo · 58 / Fotos · 46 / Videos · 12**; a grid where every item starts ticked (videos show their duration); tap to untick. Footnote: "Lo usamos para entender tu estilo y armar posts con tu material." Button "Listo, seguir" | none |
+| 7 | ¡Listo, {name}! | "Ya tengo todo. Ahora estudio tu marca y en un minuto te escribo por WhatsApp con lo que entendí." A summary card with the logo, name, category and location, and rows Productos (names), Colores, Fotos ("4 (3 de Instagram)"), Instagram @handle; then a "Neitor está escribiendo" bubble. Orange "Volver a WhatsApp" button | calls `/complete` on mount (idempotent) |
 
 Back in WhatsApp the bot sends the brand summary; once the Owner confirms it, the chat opens with "¿En qué te puedo ayudar hoy?" instead of offering a weekly plan (see [../product/conversation-design.md](../product/conversation-design.md)).
 

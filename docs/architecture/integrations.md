@@ -215,7 +215,7 @@ Gotchas:
 
 ### Reading the Owner's Instagram (ADR 0028)
 
-The Owner connects their Instagram in wizard step 6, and we read it to build the Brand Brain: profile, captions, engagement and the newest images ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)). This uses **our own Meta app with Instagram Login**, not Zernio, and only reads: publishing stays on Zernio's single demo account ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). Code: `app/instagram/` behind `InstagramPort` (`MetaInstagram`, `MockInstagram`), the connect and callback in `app/api/instagram.py`, the job in `app/jobs/instagram.py`.
+The Owner connects their Instagram in wizard step 2 ([ADR 0032](../decisions/0032-instagram-first-onboarding.md)), and we read it to build the Brand Brain: profile, captions, engagement and the newest images ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)). This uses **our own Meta app with Instagram Login**, not Zernio, and only reads: publishing stays on Zernio's single demo account ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). Code: `app/instagram/` behind `InstagramPort` (`MetaInstagram`, `MockInstagram`), the connect and callback in `app/api/instagram.py`, the job in `app/jobs/instagram.py`.
 
 **Why not Zernio** (checked 2026-10-18, [Zernio OpenAPI spec](https://zernio.com/openapi.yaml) v1.292.0):
 

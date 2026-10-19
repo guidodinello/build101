@@ -1,4 +1,7 @@
 import "server-only";
+import oakTable from "@/components/landing/photos/oak-table.jpg";
+import workshopHands from "@/components/landing/photos/workshop-hands.jpg";
+import workshop from "@/components/landing/photos/workshop.jpg";
 import type {
   Asset,
   BrandInput,
@@ -14,6 +17,8 @@ const ANALYSIS_DELAY_MS = 4000;
 const MOCK_PALETTE = ["#4f5d2f", "#c89b6d", "#f3ebdd"];
 const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic"];
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+const INSTAGRAM_IMPORT_DELAY_MS = 6000;
+const INSTAGRAM_PHOTOS = [oakTable.src, workshop.src, workshopHands.src];
 
 type StoredAsset = Asset & { completedAt: number | null };
 type StoredFile = { bytes: ArrayBuffer; contentType: string };
@@ -77,6 +82,10 @@ function activePhotos(found: MockBusiness) {
   return found.assets.filter((asset) => asset.kind === "photo" && !asset.archived);
 }
 
+function webPhotos(found: MockBusiness) {
+  return activePhotos(found).filter((asset) => asset.source === "web");
+}
+
 export function getState(token: string) {
   return snapshot(business(token));
 }
@@ -85,10 +94,10 @@ export function saveBusiness(token: string, input: BusinessInput) {
   const found = business(token);
   found.business = {
     ...found.business,
-    ...input,
-    description: input.description ?? null,
-    website: input.website ?? null,
-    instagram_handle: input.instagram_handle ?? null,
+    name: input.name,
+    category: input.category,
+    one_liner: input.one_liner,
+    location: input.location ?? null,
   };
   return snapshot(found);
 }
@@ -147,7 +156,7 @@ export function requestUpload(token: string, input: UploadRequest) {
   if (input.size_bytes > MAX_PHOTO_BYTES) {
     throw new MockError(422, "unsupported_file", "Esta foto pesa más de 10 MB. Probá con otra.");
   }
-  if (input.kind === "photo" && activePhotos(found).length >= 15) {
+  if (input.kind === "photo" && webPhotos(found).length >= 15) {
     throw new MockError(422, "too_many_photos", "Ya tenés 15 fotos.");
   }
 
@@ -155,6 +164,7 @@ export function requestUpload(token: string, input: UploadRequest) {
   found.assets.push({
     id,
     kind: input.kind,
+    source: "web",
     status: "uploading",
     url: `/mock-api/storage/${id}`,
     thumbnail_url: null,
@@ -194,6 +204,7 @@ export function connectInstagram(token: string) {
     status: "connected",
     handle: found.business.instagram_handle ?? "tunegocio",
   };
+  setTimeout(() => importInstagram(found), INSTAGRAM_IMPORT_DELAY_MS);
   return { auth_url: `/o/${encodeURIComponent(token)}?step=instagram&connected=1` };
 }
 
@@ -201,12 +212,39 @@ export function complete(token: string) {
   const found = business(token);
   const { name, category } = found.business;
   const products = found.products.filter((product) => !product.archived).length;
-  const photos = activePhotos(found).filter((asset) => asset.status === "ready").length;
+  const ready = activePhotos(found).filter((asset) => asset.status === "ready");
+  const uploaded = ready.filter((asset) => asset.source === "web").length;
   if (!name || !category) throw new MockError(422, "missing_business", "Nos faltan los datos de tu negocio.");
   if (products < 1 || products > 5) throw new MockError(422, "missing_products", "Sumá entre 1 y 5 productos.");
-  if (photos < 3 || photos > 15) throw new MockError(422, "missing_photos", "Subí entre 3 y 15 fotos.");
+  if (ready.length < 3 || uploaded > 15) throw new MockError(422, "missing_photos", "Sumá al menos 3 fotos.");
   found.completed = true;
   return { status: "generating_brand" };
+}
+
+function importInstagram(found: MockBusiness) {
+  if (found.assets.some((asset) => asset.source === "instagram")) return;
+  const completedAt = Date.now();
+  for (const url of INSTAGRAM_PHOTOS) {
+    found.assets.push({
+      id: newId("asset"),
+      kind: "photo",
+      source: "instagram",
+      status: "ready",
+      url,
+      thumbnail_url: null,
+      width: null,
+      height: null,
+      duration_ms: null,
+      derived_from_asset_id: null,
+      owner_hint: null,
+      palette: null,
+      product_ids: [],
+      reel_suitable: null,
+      analyzed: false,
+      archived: false,
+      completedAt,
+    });
+  }
 }
 
 export function storeFile(assetId: string, file: StoredFile) {

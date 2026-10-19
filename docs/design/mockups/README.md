@@ -20,4 +20,5 @@ Second design pass of the MVP screens, drawn from [web-app.md](../web-app.md), [
 
 - **Dashboard:** the artboard is the read-only Inicio page (Should). The editable Catálogo, Contenido and Promos tabs (Could, ADR 0012) are only wireframed in [web-app.md](../web-app.md), not drawn.
 - **Out of scope in the mockups:** Chat-6 shows an Instagram story, which is Won't (F4.7). Wizard-6b feed import (F2.8) and WA-Sin-marca (F2.9) are Could; the wizard copy that mentions the feed only applies once F2.8 exists.
+- **Wizard order and look:** the built wizard connects Instagram at step 2, shows the imported photos in the photos step, drops the handle and posts-per-week questions ([ADR 0032](../../decisions/0032-instagram-first-onboarding.md)) and uses the landing page's palette and chat bubbles. The Wizard artboards still show the earlier order and the cream-and-teal palette; [web-app.md](../web-app.md) is the source of truth.
 - **Placeholders:** the product and assistant names are still `[Nombre]` and `[dominio]`; photos are drawn shapes, not real images.

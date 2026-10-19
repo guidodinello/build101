@@ -92,30 +92,31 @@ Trigger: a phone number with no `businesses` row sends any message (in the demo:
 
 ## Flow 2 — Web onboarding form (Must)
 
-Opened from the magic link on the owner's phone. Short, mobile-first wizard of 6 steps plus a closing screen; progress saved after each step (owner can close and come back). Details and wireframes in [../design/web-app.md](../design/web-app.md) and the [mockups](../design/mockups/README.md).
+Opened from the magic link on the owner's phone. Short, mobile-first wizard of 6 steps plus a closing screen; progress saved after each step (owner can close and come back). Instagram comes second so it can answer for the Owner ([ADR 0032](../decisions/0032-instagram-first-onboarding.md)). Details and wireframes in [../design/web-app.md](../design/web-app.md) and the [mockups](../design/mockups/README.md) (the mockups show the earlier order).
 
 | Step | Fields | Notes |
 |---|---|---|
-| 1. Tu negocio | Name (prefilled), category (select), one-line description, longer description (optional), city/zone, website or IG handle (optional) | Category list: Muebles y deco, Gastronomía, Indumentaria, Belleza, Servicios, Otro |
-| 2. Productos | Up to 5 products/services (≥ 1): name, short description, price (optional), and up to 5 photos of that product (optional) | "¿Qué es lo que más vendés? Hasta 5. Los que más te importa vender." A product's photos are linked to it (`asset_products`, `source = 'owner'`), so the agents know which photos show which product without guessing. More can be added later from the chat or the dashboard (Flows 11–12, Could) |
-| 3. Tu marca | Logo upload (optional); brand colors (auto-detected from logo, editable as swatches); "¿Cómo hablarían de tu marca tus clientes?" (3 words) | Colors are extracted server-side from the logo right after upload. "Todavía no tengo logo ni colores" skips the upload: the Brand Brain starts with neutral default colors, and Flow 13 (Could) builds them in the chat |
-| 4. Tus fotos | 3 to 15 photos in all, counting the products' photos from step 2; here the rest (workshop, team, finished work); no videos | Show thumbnails and upload progress, counter "7 de 15", "Mínimo 3" (plus "2 de tus productos" when step 2 has photos, which aren't repeated in the grid). "Usamos tus fotos reales en los posts" |
-| 5. Preferencias | Questionnaire (see below) | All single taps, no long text |
-| 6. Conectá Instagram | Button → Instagram's consent screen (our Meta app, Instagram Login, read only) → the backend callback → returns to the wizard with ✅ @handle | Reads the account for the Brand Brain ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)); publishing still goes to the demo account ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). Skippable ("Lo hago después"). Copy: they log in on Instagram's page, never give us their password, every Post comes to WhatsApp first for approval, and we read their posts to learn how they write. A refused consent comes back with an error and the button to retry |
-| 6b. Trajimos tu feed | Grid of the photos and videos imported from the connected Instagram feed; the owner unticks what not to use | **Not built**: the import runs automatically after step 6 and needs no screen ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)). Imported photos don't count toward step 4's 3 to 15 and don't show in its grid |
-| ¡Listo! | Summary (Products, photos, posts per week, Instagram handle) + "Volver a WhatsApp" (wa.me deep link) | Submitting triggers Flow 3 |
+| 1. Tu negocio | Name (prefilled), category (chips), one-line description, city/zone (optional) | Category list: Muebles y deco, Gastronomía, Indumentaria, Belleza, Servicios, Otro (free text). No Instagram handle: the connect in step 2 fills it in. Examples in later steps follow the category |
+| 2. Conectá Instagram | Button → Instagram's consent screen (our Meta app, Instagram Login, read only) → the backend callback → returns to the wizard with ✅ @handle | Reads the account for the Brand Brain ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)); publishing still goes to the demo account ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). Skippable ("No tengo, o lo hago después"). Copy: nothing is published without approval on WhatsApp, they log in on Instagram's page and we never see their password, and we bring their photos and captions to learn their style. A refused consent comes back with an error and the button to retry. The import runs while the owner goes on |
+| 3. Productos | Up to 5 products/services (≥ 1): name, short description (optional), price (optional), and up to 5 photos of that product (optional) | "¿Qué es lo que más vendés? Hasta 5, los que más te importa vender." A product's photos are linked to it (`asset_products`, `source = 'owner'`), so the agents know which photos show which product without guessing. More can be added later from the chat or the dashboard (Flows 11–12, Could) |
+| 4. Tus fotos | At least 3 photos in all, counting the products' photos from step 3 and the ones imported from Instagram; up to 15 uploads; here the rest (workshop, team, finished work); no videos | Show thumbnails and upload progress, a "7 fotos" counter and "Mínimo 3" (plus "2 de tus productos" when step 3 has photos, which aren't repeated in the grid). Imported photos show under "De @handle", with ✕ to drop one; the step polls for up to 90 s while the import runs. "Uso tus fotos reales, sin cambiar tu producto" |
+| 5. Tu marca | Live post preview; logo upload (optional); brand colors (auto-detected from logo, editable as swatches); "¿Cómo te describirían tus clientes?" (1 to 3 word chips, suggested by category, or their own) | Colors are extracted server-side from the logo right after upload. "Todavía no tengo logo ni colores" skips logo and colors: the Brand Brain starts with neutral default colors, and Flow 13 (Could) builds them in the chat |
+| 6. Preferencias | Questionnaire (see below) | All taps except the two optional texts. With Instagram connected, the tone questions are hidden behind "Prefiero elegirlo yo" and sent as null, so the Brand Strategist learns the tone from the captions |
+| 6b. Trajimos tu feed | Grid of the photos and videos imported from the connected Instagram feed; the owner unticks what not to use | **Not built**: the import runs automatically after step 2 and its photos show in step 4's grid, where the owner can drop them ([ADR 0032](../decisions/0032-instagram-first-onboarding.md)) |
+| ¡Listo! | Summary (Products, colors, photos with how many came from Instagram, Instagram handle) + "Volver a WhatsApp" (wa.me deep link) | Submitting triggers Flow 3 |
 
-Questionnaire (step 5):
+Questionnaire (step 6):
 
 | Question | Type | Options |
 |---|---|---|
-| ¿Qué querés lograr con tus redes? | single | Más consultas y ventas · Que me conozca más gente · Lanzar algo nuevo · Fidelizar a mis clientes |
-| ¿A quién le vendés? | multi | Familias · Parejas jóvenes · Empresas/oficinas · Arquitectos/decoradores · Otro (texto) |
-| ¿Cómo querés sonar? | 2 sliders | Formal ↔ Cercano · Serio ↔ Divertido |
-| ¿Cuántas publicaciones por semana? | single | 2 · 3 · 5 |
-| ¿Usamos emojis? | single | Sí, bastantes · Pocos · Ninguno |
-| ¿Hay algo que NO quieras que digamos o mostremos? | short text (optional) | e.g. "no hablar de precios" |
+| ¿Qué querés lograr con tus redes? | single | Más consultas y ventas · Que me conozca más gente · Lanzar algo nuevo · Que vuelvan mis clientes |
+| ¿A quién le vendés? | multi | Four audiences by category (furniture: Familias · Parejas jóvenes · Empresas y oficinas · Arquitectos y decoradores) · Otro (texto) |
+| El tono | 2 sliders | Formal ↔ Cercano · Serio ↔ Divertido. Hidden and sent as null when Instagram is connected, unless the owner taps "Prefiero elegirlo yo" |
+| ¿Usamos emojis? | single | Sí, bastantes · Pocos · Ninguno. Shown with the tone |
+| ¿Hay algo que NO quieras que diga o muestre? | short text (optional) | e.g. "no hablar de precios" |
 | ¿Tenés alguna promo o novedad ahora? | short text (optional) | Passed to the agents with the onboarding answers and shown in the brand summary; becomes a draft Offer once F8.6 (Could) is built |
+
+Posts per week is no longer asked: nothing schedules yet (T30), and the Brand Brain defaults to 3.
 
 On submit: `POST /api/o/{token}/complete` → state `generating_brand` → Flow 3 starts in the background.
 
@@ -134,7 +135,7 @@ Target time from form submit to summary: **< 60 s**.
 Trigger: only on request, free text like "armame el plan de la semana" (orchestrator → `plan_week`). The bot never offers the plan unprompted.
 
 1. Bot sends `plan_generating`.
-2. *Content Strategist generates N items (N = posts per week from onboarding; demo default 3) from the Brand Brain, the Catalog, the active Offers and the Brand assets. Each item: date, pillar, format, idea, angle, Product and Offer IDs (optional), suggested asset IDs. Reels (`format = reel`) only once F4.8 is built: at most one per plan, and only when a reel-suitable video exists.*
+2. *Content Strategist generates N items (N = posts per week from the Brand Brain, 3 by default) from the Brand Brain, the Catalog, the active Offers and the Brand assets. Each item: date, pillar, format, idea, angle, Product and Offer IDs (optional), suggested asset IDs. Reels (`format = reel`) only once F4.8 is built: at most one per plan, and only when a reel-suitable video exists.*
 3. Bot sends the plan as one message:
 
    ```text
@@ -303,7 +304,7 @@ Trigger: free text like "agregá la silla Oslo a $4500" or "este finde hay 15% e
 
 ## Flow 13 — Brand without a logo or colors (Could)
 
-Trigger: the owner ticked "Todavía no tengo logo ni colores" in the wizard (Flow 2, step 3). Runs right after `[Sí, es mi marca]`, instead of `ready_open_chat`.
+Trigger: the owner ticked "Todavía no tengo logo ni colores" in the wizard (Flow 2, step 5). Runs right after `[Sí, es mi marca]`, instead of `ready_open_chat`.
 
 1. Bot: "Vi que todavía no tenés logo ni colores definidos. ¡No pasa nada, lo armamos acá! ¿Me mandás una foto de algo que te represente? Tu local, un producto, o una marca que te guste."
 2. Owner sends a photo ("esto es el taller, me gusta así natural").

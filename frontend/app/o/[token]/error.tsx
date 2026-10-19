@@ -7,17 +7,14 @@ import { ScreenLayout } from "@/components/onboarding/screen-layout";
 export default function OnboardingError({ retry }: { error: unknown; retry: () => void }) {
   return (
     <ScreenLayout
-      title="No pudimos cargar tus datos"
+      title="No pude cargar tus datos"
+      subtitle="Puede ser la conexión. Probá de nuevo en un ratito."
       footer={
-        <Button size="xl" className="w-full" onClick={() => retry()}>
+        <Button variant="cta" size="xl" className="w-full" onClick={() => retry()}>
           <RotateCwIcon data-icon="inline-start" />
           Probar de nuevo
         </Button>
       }
-    >
-      <p className="text-[17px] leading-relaxed text-muted-foreground">
-        Puede ser la conexión. Probá de nuevo en un ratito.
-      </p>
-    </ScreenLayout>
+    />
   );
 }

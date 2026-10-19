@@ -23,7 +23,7 @@ export function PhotoTile({
       <button
         type="button"
         aria-label={`Quitar ${label.toLowerCase()}`}
-        className="absolute top-0.5 right-0.5 flex size-8 items-center justify-center rounded-full bg-foreground/60 text-background"
+        className="absolute top-1 right-1 flex size-8 items-center justify-center rounded-full bg-primary/70 text-primary-foreground backdrop-blur-sm"
         onClick={onRemove}
       >
         <XIcon className="size-3.5" aria-hidden />

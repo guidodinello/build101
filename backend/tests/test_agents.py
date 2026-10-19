@@ -75,6 +75,16 @@ async def test_brand_brain_is_held_to_the_owner_facts() -> None:
     assert brain.visual_identity.logo_asset_id == "logo-1"
 
 
+async def test_without_a_posting_answer_the_brand_posts_three_times_a_week() -> None:
+    model = SequenceModel([brand_brain()])
+
+    brain = await write_brand_brain(
+        model, inputs(questionnaire={"goal": "sales", "posts_per_week": None, "formality": None})
+    )
+
+    assert brain.posting.posts_per_week == 3
+
+
 async def test_without_colors_the_brand_gets_the_neutral_palette() -> None:
     model = SequenceModel([brand_brain()])
 

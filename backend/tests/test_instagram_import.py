@@ -248,7 +248,7 @@ async def test_without_a_connected_account_the_import_does_nothing(
     }
 
 
-async def test_imported_photos_stay_out_of_the_wizard(
+async def test_imported_photos_show_in_the_wizard_without_taking_upload_slots(
     client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
 ) -> None:
     token = await new_link(client)
@@ -258,4 +258,6 @@ async def test_imported_photos_stay_out_of_the_wizard(
 
     state = (await client.get(f"/api/o/{token}")).json()
 
-    assert [asset["kind"] for asset in state["assets"]] == ["photo"]
+    sources = [asset["source"] for asset in state["assets"]]
+    assert sorted(sources) == ["instagram"] * 5 + ["web"]
+    assert {asset["kind"] for asset in state["assets"]} == {"photo"}

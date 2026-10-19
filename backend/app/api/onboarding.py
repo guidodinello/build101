@@ -61,7 +61,7 @@ ASSET_NOT_FOUND = "No encontramos ese archivo."
 UPLOAD_MISSING = "El archivo no terminó de subir. Probá de nuevo."
 MISSING_BUSINESS = "Nos faltan los datos de tu negocio."
 MISSING_PRODUCTS = f"Sumá entre 1 y {schemas.MAX_PRODUCTS} productos."
-MISSING_PHOTOS = f"Subí entre {MIN_PHOTOS} y {MAX_PHOTOS} fotos."
+MISSING_PHOTOS = f"Sumá al menos {MIN_PHOTOS} fotos."
 
 
 def file_too_big(max_mb: int) -> str:
@@ -127,10 +127,14 @@ async def save_business(
     business.name = body.name
     business.category = body.category
     business.one_liner = body.one_liner
-    business.description = body.description or None
-    business.location = body.location
-    business.website = body.website or None
-    business.instagram_handle = (body.instagram_handle or "").lstrip("@") or None
+    business.location = body.location or None
+    # Left out, these keep what the Instagram import filled in.
+    if body.description is not None:
+        business.description = body.description or None
+    if body.website is not None:
+        business.website = body.website or None
+    if body.instagram_handle is not None:
+        business.instagram_handle = body.instagram_handle.lstrip("@") or None
     await session.commit()
     return await _state(onboarding, session, storage, settings)
 
@@ -432,16 +436,20 @@ async def _check_complete(session: AsyncSession, business: Business) -> None:
     )
     if not 1 <= (products or 0) <= schemas.MAX_PRODUCTS:
         raise ApiError(422, "missing_products", MISSING_PRODUCTS)
-    photos = await session.scalar(
-        select(func.count()).where(
-            BrandAsset.business_id == business.id,
-            BrandAsset.kind == "photo",
-            BrandAsset.source == "web",
-            BrandAsset.status == "ready",
-            BrandAsset.archived_at.is_(None),
-        )
+    photos = Counter(
+        (
+            await session.scalars(
+                select(BrandAsset.source).where(
+                    BrandAsset.business_id == business.id,
+                    BrandAsset.kind == "photo",
+                    BrandAsset.status == "ready",
+                    BrandAsset.archived_at.is_(None),
+                )
+            )
+        ).all()
     )
-    if not MIN_PHOTOS <= (photos or 0) <= MAX_PHOTOS:
+    # Photos imported from Instagram count toward the minimum; the cap is on uploads only.
+    if photos["web"] + photos["instagram"] < MIN_PHOTOS or photos["web"] > MAX_PHOTOS:
         raise ApiError(422, "missing_photos", MISSING_PHOTOS)
 
 
@@ -468,7 +476,8 @@ async def _state(
             select(BrandAsset)
             .where(
                 BrandAsset.business_id == business.id,
-                BrandAsset.source == "web",
+                (BrandAsset.source == "web")
+                | ((BrandAsset.source == "instagram") & (BrandAsset.kind == "photo")),
                 BrandAsset.status == "ready",
                 BrandAsset.archived_at.is_(None),
             )
@@ -550,6 +559,7 @@ def _to_asset(asset: BrandAsset, url: str, product_ids: list[str]) -> schemas.As
     return schemas.Asset(
         id=str(asset.id),
         kind=asset.kind,
+        source=asset.source,
         status=asset.status,
         url=url,
         thumbnail_url=None,

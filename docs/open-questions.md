@@ -92,6 +92,8 @@ From [ADR 0028](decisions/0028-read-instagram-with-our-meta-app.md); calls and l
 - [ ] **Serving real businesses:** our Meta app reads only Instagram testers in development mode. Reading any Owner's account needs Advanced Access for `instagram_business_basic`, App Review and Business Verification. When to start it, and how long it takes.
 - [ ] **Token refresh:** the long-lived token lasts 60 days and is not refreshed. Needed once we re-import, or read comments and DMs ([ADR 0015](decisions/0015-instagram-login.md)).
 - [ ] **One connection instead of two:** should publishing move from Zernio to our Meta app (`instagram_business_content_publish`), so the Owner connects once and posts go to their own account instead of the demo one ([ADR 0024](decisions/0024-mvp-single-demo-instagram-account.md))?
+- [ ] **A slow import and the wizard:** the photos step waits up to 90 s for the import ([ADR 0032](decisions/0032-instagram-first-onboarding.md)). An import that finishes later still reaches the Brand assets, but the Owner may not see its photos in the wizard and may upload 3 anyway. Is 90 s right, and should the wizard keep checking on later steps?
+- [ ] **Tone without captions:** with Instagram connected the wizard sends the tone as null for the Brand Strategist to read from the captions ([ADR 0032](decisions/0032-instagram-first-onboarding.md)). If Instagram Login returns no captions, the tone falls back to the neutral defaults; should the wizard then ask the tone questions?
 - [ ] **Re-import and the Brand Brain:** an Owner who connects after finishing the wizard gets the import, but the Brand Brain is not regenerated from it. Should it be, or should the import be offered in the chat?
 
 ## Catalog, content and Reels (Could)

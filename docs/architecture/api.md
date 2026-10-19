@@ -41,15 +41,15 @@ All under `/api/o/{token}`. The token is the onboarding magic link. The Instagra
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/api/o/{token}` | — | `OnboardingState` (below) |
-| PUT | `/api/o/{token}/business` | `{name, category, one_liner, description?, location, website?, instagram_handle?}` | `OnboardingState` |
+| PUT | `/api/o/{token}/business` | `{name, category, one_liner, location?, description?, website?, instagram_handle?}` | `OnboardingState`. `description`, `website` and `instagram_handle` left out keep their value, so a save doesn't erase what the Instagram import filled in; the wizard no longer asks for the handle (the connect fills it) |
 | PUT | `/api/o/{token}/products` | `{products: [{id?, name, description, price?, category?, asset_ids?}]}` (1–5) | `OnboardingState`: upserts `products` rows in the given order; rows left out are archived. `asset_ids` (≤ 5, ready photos of this Business) replaces the Owner's links of that Product in `asset_products` (`source = 'owner'`; the Asset Analyst's links stay); left out, the links don't change. More than 5 Products → `422 too_many_products`; more than 5 photos → `422 too_many_product_photos`; an id that isn't a ready photo of the Business → `422 unknown_asset` |
-| PUT | `/api/o/{token}/brand` | `{three_words: [str, str, str], colors: [hex...], no_brand_yet?: bool}` | `OnboardingState`. `no_brand_yet = true` ("Todavía no tengo logo ni colores") allows an empty `colors` list; the Brand Strategist uses the neutral default palette, and the colors are chosen later in the chat (F2.9, Could) |
+| PUT | `/api/o/{token}/brand` | `{three_words: [str] (1–3), colors: [hex...], no_brand_yet?: bool}` | `OnboardingState`. `no_brand_yet = true` ("Todavía no tengo logo ni colores") allows an empty `colors` list; the Brand Strategist uses the neutral default palette, and the colors are chosen later in the chat (F2.9, Could) |
 | POST | `/api/o/{token}/uploads` | `UploadRequest` (below) | `UploadTicket`: see [Uploads](#uploads). The wizard accepts `logo` and `photo` only, at most 15 photos (`422 too_many_photos`) |
 | POST | `/api/o/{token}/assets/{asset_id}/complete` | — | `Asset` (logo includes `palette`) |
 | DELETE | `/api/o/{token}/assets/{asset_id}` | — | `204`: archives the asset (the ✕ on a wizard thumbnail) |
 | PUT | `/api/o/{token}/preferences` | `Questionnaire` (below) | `OnboardingState` |
 | POST | `/api/o/{token}/instagram/connect` | `{}` | `{"auth_url": "..."}`: Instagram's authorize URL for our Meta app (scope `instagram_business_basic`), with `redirect_uri = {PUBLIC_BACKEND_URL}/oauth/instagram/callback` and a signed `state` valid 15 minutes. With `INSTAGRAM=mock` the URL points straight at the callback with a fake code. `409 onboarding_completed` after `/complete` |
-| POST | `/api/o/{token}/complete` | — | `202 {"status": "generating_brand"}`. Validates required fields (name, category, 1–5 products, 3–15 photos, logo optional but recommended), sets state, enqueues `generate_brand`, sends `brand_generating` on WhatsApp. Calling it again after it succeeded returns `202` and does nothing |
+| POST | `/api/o/{token}/complete` | — | `202 {"status": "generating_brand"}`. Validates required fields (name, category, 1–5 products, at least 3 ready photos counting the ones imported from Instagram, at most 15 uploaded from the web; logo optional but recommended), sets state, enqueues `generate_brand`, sends `brand_generating` on WhatsApp. Calling it again after it succeeded returns `202` and does nothing |
 
 The Instagram callback is not under `/api/o/{token}`: Meta redirects the browser to one fixed URL, registered in the app.
 
@@ -57,7 +57,7 @@ The Instagram callback is not under `/api/o/{token}`: Meta redirects the browser
 |---|---|---|---|
 | GET | `/oauth/instagram/callback` | `code`, `state`, or `error` when the Owner refused | `303` to `{FRONTEND_URL}/o/{token}?step=instagram&connected=1` after exchanging the code for a long-lived token, upserting `social_accounts` (`provider = 'meta'`, `status = 'connected'`, `handle`), filling `businesses.instagram_handle` if empty and enqueuing `import_instagram`. `connected=0` when the Owner refused or Meta failed. A forged or expired `state` is `400 invalid_state`; the link's own errors (`404`, `410`) as below |
 
-The wizard's `assets` list only the Owner's uploads (`source = 'web'`); imported Instagram photos are Brand assets too, but they don't count toward the 3 to 15 photos and don't show in the grid. `instagram` in `OnboardingState` is the Business's latest `social_accounts` row for Instagram (`not_connected` when there is none).
+The wizard's `assets` list the Owner's uploads (`source = 'web'`) and the photos imported from Instagram (`source = 'instagram'`, photos only). Imported photos show in the wizard's photo step, where the Owner can drop any of them (`DELETE …/assets/{id}`), and count toward the minimum of 3; the cap of 15 applies to web uploads only. `instagram` in `OnboardingState` is the Business's latest `social_accounts` row for Instagram (`not_connected` when there is none).
 
 Link errors: an unknown token is `404 link_not_found`, an expired one `410 link_expired`, and every write after `/complete` succeeded is `409 onboarding_completed` (`GET` still works and shows `completed: true`). A body that doesn't validate is `422 invalid_request`; a Supabase Storage failure is `502 storage_unavailable`.
 
@@ -77,6 +77,7 @@ type OnboardingState = {
 type Asset = {
   id: string;
   kind: "logo" | "photo" | "video";
+  source: "web" | "instagram";      // uploaded in the wizard, or imported from Instagram (ADR 0028)
   status: "uploading" | "ready" | "failed";
   url: string;                      // signed, 1h
   thumbnail_url: string | null;     // videos: the cover frame, or the first frame until analyzed
@@ -98,10 +99,12 @@ type Offer = { id: string; kind: "pack" | "promo"; title: string; conditions: st
 type Questionnaire = {
   goal: "sales" | "awareness" | "launch" | "loyalty";
   audiences: string[];              // from fixed options + free "otro"
-  formality: 1 | 2 | 3 | 4 | 5;     // slider
-  humor: 1 | 2 | 3 | 4 | 5;         // slider
-  posts_per_week: 2 | 3 | 5;
-  emoji_policy: "many" | "few" | "none";
+  // null: left to us. The wizard sends null tone when the Owner connected Instagram and kept
+  // its voice, so the Brand Strategist infers it from the captions (3, 3, "few" without them)
+  formality: 1 | 2 | 3 | 4 | 5 | null;   // slider
+  humor: 1 | 2 | 3 | 4 | 5 | null;       // slider
+  posts_per_week: 2 | 3 | 5 | null;      // not asked by the wizard (no scheduler yet, T30); 3 when null
+  emoji_policy: "many" | "few" | "none" | null;
   avoid: string | null;
   current_offer: string | null;
 };

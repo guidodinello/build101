@@ -211,6 +211,34 @@ async def test_business_is_saved(client: httpx.AsyncClient) -> None:
     }
 
 
+async def test_location_is_optional(client: httpx.AsyncClient) -> None:
+    token = await new_link(client)
+    body = {key: value for key, value in BUSINESS.items() if key != "location"}
+
+    response = await client.put(f"/api/o/{token}/business", json=body)
+
+    assert response.status_code == 200
+    assert response.json()["business"]["location"] is None
+
+
+async def test_saving_the_business_keeps_what_instagram_filled_in(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    async with sessions() as db:
+        business = await db.scalar(select(Business))
+        assert business
+        business.website = "https://roble.uy"
+        business.instagram_handle = "roble.taller"
+        await db.commit()
+    body = {key: value for key, value in BUSINESS.items() if key != "instagram_handle"}
+
+    response = await client.put(f"/api/o/{token}/business", json=body)
+
+    saved = response.json()["business"]
+    assert (saved["website"], saved["instagram_handle"]) == ("https://roble.uy", "roble.taller")
+
+
 async def test_business_needs_its_required_fields(client: httpx.AsyncClient) -> None:
     token = await new_link(client)
 
@@ -284,6 +312,39 @@ async def test_brand_needs_colors_unless_there_is_no_brand_yet(client: httpx.Asy
     assert error_code(missing) == "missing_colors"
     assert no_brand.json()["brand"] == {"three_words": words, "colors": []}
     assert with_colors.json()["brand"] == {"three_words": words, "colors": ["#2f3e2c"]}
+
+
+@pytest.mark.parametrize(
+    ("words", "status"), [([], 422), (["cálido"], 200), (["a", "b", "c", "d"], 422)]
+)
+async def test_brand_takes_one_to_three_words(
+    client: httpx.AsyncClient, words: list[str], status: int
+) -> None:
+    token = await new_link(client)
+
+    response = await client.put(
+        f"/api/o/{token}/brand", json={"three_words": words, "colors": ["#2f3e2c"]}
+    )
+
+    assert response.status_code == status
+
+
+async def test_preferences_can_leave_the_tone_and_frequency_to_us(
+    client: httpx.AsyncClient,
+) -> None:
+    token = await new_link(client)
+    left_out = {"goal": "sales", "audiences": [], "avoid": None, "current_offer": None}
+
+    await client.put(f"/api/o/{token}/preferences", json=left_out)
+    response = await client.get(f"/api/o/{token}")
+
+    assert response.json()["preferences"] == {
+        **left_out,
+        "formality": None,
+        "humor": None,
+        "posts_per_week": None,
+        "emoji_policy": None,
+    }
 
 
 async def test_preferences_round_trip(client: httpx.AsyncClient) -> None:
@@ -488,6 +549,62 @@ async def test_complete_checks_the_required_steps(
     assert error_code(no_business) == "missing_business"
     assert error_code(no_products) == "missing_products"
     assert error_code(two_photos) == "missing_photos"
+
+
+async def add_instagram_photo(
+    sessions: async_sessionmaker[AsyncSession], kind: str = "photo"
+) -> uuid.UUID:
+    async with sessions() as db:
+        business = await db.scalar(select(Business))
+        assert business
+        asset = BrandAsset(
+            business_id=business.id,
+            kind=kind,
+            source="instagram",
+            status="ready",
+            storage_path=f"{business.id}/{uuid.uuid4()}.jpg",
+            mime_type="image/jpeg",
+        )
+        db.add(asset)
+        await db.commit()
+        return asset.id
+
+
+async def test_state_lists_the_photos_imported_from_instagram(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    uploaded = await upload(client, storage, token)
+    imported = await add_instagram_photo(sessions)
+    await add_instagram_photo(sessions, kind="logo")
+
+    assets = (await client.get(f"/api/o/{token}")).json()["assets"]
+    archived = await client.delete(f"/api/o/{token}/assets/{imported}")
+    after = (await client.get(f"/api/o/{token}")).json()["assets"]
+
+    assert [(asset["id"], asset["source"]) for asset in assets] == [
+        (uploaded["id"], "web"),
+        (str(imported), "instagram"),
+    ]
+    assert archived.status_code == 204
+    assert [asset["id"] for asset in after] == [uploaded["id"]]
+
+
+async def test_photos_from_instagram_count_toward_the_minimum(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    await client.put(f"/api/o/{token}/business", json=BUSINESS)
+    await client.put(
+        f"/api/o/{token}/products", json={"products": [{"name": "Mesa", "description": ""}]}
+    )
+    await upload(client, storage, token)
+    await add_instagram_photo(sessions)
+    await add_instagram_photo(sessions)
+
+    response = await client.post(f"/api/o/{token}/complete")
+
+    assert response.status_code == 202
 
 
 async def test_complete_starts_the_brand_and_tells_the_owner_once(
