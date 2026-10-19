@@ -1,7 +1,8 @@
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import httpx
@@ -270,6 +271,108 @@ async def test_the_import_does_not_run_twice_on_one_token(
     assert await run_import(sessions, storage, MockInstagram()) == {
         "skipped": "no connected instagram"
     }
+
+
+async def test_a_job_on_the_old_token_does_not_clear_the_reconnects_token(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
+) -> None:
+    class ReconnectsMidImport(MockInstagram):
+        """The Owner reconnects while this job is reading Instagram: the callback overwrites the
+        token on the same row and queues a second import."""
+
+        async def profile(self, access_token: str) -> InstagramProfile:
+            async with sessions() as db:
+                account = await db.scalar(select(SocialAccount))
+                assert account is not None
+                account.access_token = "fresh-token"
+                await db.commit()
+            return await super().profile(access_token)
+
+    token = await new_link(client)
+    await connect(client, token)
+
+    await run_import(sessions, storage, ReconnectsMidImport())
+
+    assert await stored_token(sessions) == "fresh-token"
+    second = await run_import(sessions, storage, MockInstagram())
+    assert second["posts"] == 3  # the second import ran; it was not skipped for want of a token
+    assert await stored_token(sessions) is None
+
+
+async def test_a_cancelled_import_still_deletes_the_token(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
+) -> None:
+    started = asyncio.Event()
+
+    class Hangs(MockInstagram):
+        async def profile(self, access_token: str) -> InstagramProfile:
+            started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    token = await new_link(client)
+    await connect(client, token)
+    business = await business_of(sessions)
+    job = import_instagram_job(Hangs(), max_posts=100, max_images=24)
+    task = asyncio.create_task(job(job_context(sessions, storage, business.id), {}))
+    await started.wait()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert await stored_token(sessions) is None
+
+
+def failing_sessions(
+    sessions: async_sessionmaker[AsyncSession], fail_on: set[int]
+) -> async_sessionmaker[AsyncSession]:
+    """The job's database sessions, where the numbered calls (1 = the first) raise."""
+    calls = 0
+
+    def factory() -> AsyncSession:
+        nonlocal calls
+        calls += 1
+        if calls in fail_on:
+            raise RuntimeError(f"database unavailable (session {calls})")
+        return sessions()
+
+    return cast(async_sessionmaker[AsyncSession], factory)
+
+
+async def test_a_failure_right_after_reading_the_token_still_deletes_it(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    await connect(client, token)
+    business = await business_of(sessions)
+    job = import_instagram_job(MockInstagram(), max_posts=100, max_images=24)
+    # session 2 is the read of the images imported before, right after the token's read
+    context = job_context(failing_sessions(sessions, {2}), storage, business.id)
+
+    with pytest.raises(RuntimeError, match="session 2"):
+        await job(context, {})
+
+    assert await stored_token(sessions) is None
+
+
+async def test_a_failed_cleanup_is_logged_and_the_original_error_is_raised(
+    client: httpx.AsyncClient,
+    sessions: async_sessionmaker[AsyncSession],
+    storage: FakeStorage,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    token = await new_link(client)
+    await connect(client, token)
+    business = await business_of(sessions)
+    job = import_instagram_job(MockInstagram(), max_posts=100, max_images=24)
+    context = job_context(failing_sessions(sessions, {2, 3}), storage, business.id)
+
+    with pytest.raises(RuntimeError, match="session 2"):
+        await job(context, {})
+
+    assert "could not clear the instagram token" in caplog.text
+    assert await stored_token(sessions) == "mock-token-mock-code"
 
 
 async def test_a_reconnect_stores_a_fresh_token_and_only_adds_what_is_new(
