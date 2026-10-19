@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from urllib.parse import urlsplit
 
@@ -18,8 +18,8 @@ from app.instagram.base import InstagramError, InstagramImage, InstagramMedia, I
 from app.instagram.factory import get_instagram
 from app.instagram.mock import MockInstagram
 from app.instagram.oauth_state import sign_state
-from app.jobs.instagram import import_instagram_job
-from app.jobs.runner import JobContext
+from app.jobs.instagram import clear_stale_token, import_instagram_job
+from app.jobs.runner import JobContext, JobRunner
 from app.main import app
 from app.storage import get_storage
 from tests.conftest import requires_db
@@ -373,6 +373,105 @@ async def test_a_failed_cleanup_is_logged_and_the_original_error_is_raised(
 
     assert "could not clear the instagram token" in caplog.text
     assert await stored_token(sessions) == "mock-token-mock-code"
+
+
+STALE = datetime.now(UTC) - timedelta(minutes=10)
+
+
+async def seed_account(
+    sessions: async_sessionmaker[AsyncSession], phone: str, token: str
+) -> Business:
+    async with sessions() as db:
+        business = Business(owner_phone=phone)
+        db.add(business)
+        await db.flush()
+        db.add(
+            SocialAccount(
+                business_id=business.id,
+                platform="instagram",
+                provider="meta",
+                status="connected",
+                access_token=token,
+            )
+        )
+        await db.commit()
+        return business
+
+
+async def add_job(
+    sessions: async_sessionmaker[AsyncSession],
+    business: Business,
+    kind: str = "import_instagram",
+    status: str = "running",
+    started_at: datetime | None = STALE,
+) -> Job:
+    async with sessions() as db:
+        job = Job(business_id=business.id, kind=kind, status=status, started_at=started_at)
+        db.add(job)
+        await db.commit()
+        return job
+
+
+async def tokens_by_business(
+    sessions: async_sessionmaker[AsyncSession],
+) -> dict[uuid.UUID, str | None]:
+    async with sessions() as db:
+        rows = await db.execute(select(SocialAccount.business_id, SocialAccount.access_token))
+        return {business_id: token for business_id, token in rows}
+
+
+def stale_runner(sessions: async_sessionmaker[AsyncSession]) -> JobRunner:
+    return JobRunner(
+        sessions,
+        {},
+        FakeStorage(),
+        FakeChannel(),
+        SequenceModel([]),
+        on_stale={"import_instagram": clear_stale_token},
+    )
+
+
+async def test_an_import_killed_mid_run_loses_its_token_when_the_runner_fails_it(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    killed = await seed_account(sessions, "59800000001", "token-of-the-killed-import")
+    other = await seed_account(sessions, "59800000002", "token-of-another-business")
+    job = await add_job(sessions, killed)
+
+    assert await stale_runner(sessions).fail_stale() == 1
+
+    assert await tokens_by_business(sessions) == {
+        killed.id: None,
+        other.id: "token-of-another-business",
+    }
+    async with sessions() as db:
+        assert (await db.get_one(Job, job.id)).status == "failed"
+        statuses = (await db.scalars(select(SocialAccount.status))).all()
+    assert statuses == ["connected", "connected"]  # only the token goes, not the connection
+
+
+async def test_a_reconnect_after_the_killed_import_keeps_its_token_for_its_own_import(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business = await seed_account(sessions, "59800000001", "fresh-token-of-the-reconnect")
+    await add_job(sessions, business)  # the stale import, from the process that was killed
+    await add_job(sessions, business, status="queued", started_at=None)  # the reconnect's import
+
+    await stale_runner(sessions).fail_stale()
+
+    assert await tokens_by_business(sessions) == {business.id: "fresh-token-of-the-reconnect"}
+
+
+async def test_only_a_stale_import_job_clears_a_token(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business = await seed_account(sessions, "59800000001", "some-token")
+    await add_job(sessions, business, kind="analyze_asset")  # stale, but not an import
+    await add_job(sessions, business, started_at=datetime.now(UTC))  # an import still alive
+
+    await stale_runner(sessions).fail_stale()
+
+    assert await tokens_by_business(sessions) == {business.id: "some-token"}
 
 
 async def test_a_reconnect_stores_a_fresh_token_and_only_adds_what_is_new(

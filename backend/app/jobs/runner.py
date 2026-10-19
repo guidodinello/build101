@@ -7,7 +7,7 @@ transaction that queued it commits, and the jobs queued before a restart still r
 import asyncio
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -42,6 +42,9 @@ class JobContext:
 
 
 JobFunction = Callable[[JobContext, dict[str, Any]], Awaitable[dict[str, Any] | None]]
+# Cleanup for a job a dead process left behind: gets the session of the `fail_stale` transaction
+# and the job's Business
+StaleHook = Callable[[AsyncSession, uuid.UUID], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +75,7 @@ class JobRunner:
         max_concurrent: int = MAX_CONCURRENT_JOBS,
         poll_interval_s: float = POLL_INTERVAL_S,
         checks: tuple[PeriodicCheck, ...] = (),
+        on_stale: Mapping[str, StaleHook] | None = None,
     ) -> None:
         self._sessions = sessions
         self._jobs = jobs
@@ -82,6 +86,7 @@ class JobRunner:
         self._max_concurrent = max_concurrent
         self._poll_interval_s = poll_interval_s
         self._checks = checks
+        self._on_stale = on_stale or {}
         self._running: set[asyncio.Task[None]] = set()
         self._running_ids: set[uuid.UUID] = set()
         self._poller: asyncio.Task[None] | None = None
@@ -100,25 +105,35 @@ class JobRunner:
     async def fail_stale(self, older_than: timedelta = STALE_AFTER) -> int:
         """Mark as failed the jobs a previous process left `running` (no retries in the MVP).
 
-        This process's own jobs are skipped however long they take: they are alive.
+        This process's own jobs are skipped however long they take: they are alive. A failed job
+        whose kind has an `on_stale` hook gets it called, in the same transaction, with its
+        Business: the job died without cleaning up after itself.
         """
         cutoff = datetime.now(UTC) - older_than
         async with self._sessions() as db:
-            result = await db.execute(
-                update(Job)
-                .where(
-                    Job.status == "running",
-                    Job.started_at < cutoff,
-                    Job.id.not_in(self._running_ids),
+            stale = (
+                await db.execute(
+                    update(Job)
+                    .where(
+                        Job.status == "running",
+                        Job.started_at < cutoff,
+                        Job.id.not_in(self._running_ids),
+                    )
+                    .values(
+                        status="failed",
+                        error="interrupted by a restart",
+                        finished_at=datetime.now(UTC),
+                    )
+                    .returning(Job.kind, Job.business_id)
                 )
-                .values(
-                    status="failed", error="interrupted by a restart", finished_at=datetime.now(UTC)
-                )
-            )
+            ).all()
+            for kind, business_id in stale:
+                if business_id is not None and kind in self._on_stale:
+                    await self._on_stale[kind](db, business_id)
             await db.commit()
-        if result.rowcount:
-            logger.warning("marked %d stale running jobs as failed", result.rowcount)
-        return result.rowcount
+        if stale:
+            logger.warning("marked %d stale running jobs as failed", len(stale))
+        return len(stale)
 
     async def run_due(self) -> int:
         """Claim as many queued jobs as there are free slots and start them."""

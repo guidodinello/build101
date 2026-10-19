@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import exists, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import BrandAsset, Business, SocialAccount
+from app.db.models import BrandAsset, Business, Job, SocialAccount
 from app.instagram.base import (
     InstagramError,
     InstagramImage,
@@ -57,7 +57,8 @@ def import_instagram_job(instagram: InstagramPort, max_posts: int, max_images: i
         imported before are skipped, so a reconnect only adds what is new.
 
         The Owner's token is used here once and then deleted: when the import ends, fails or is
-        cancelled, the job clears the token it read. Nothing else reads it, and a reconnect
+        cancelled, the job clears the token it read (a killed process is covered by the runner's
+        `fail_stale`, see `clear_stale_token`). Nothing else reads it, and a reconnect
         stores a fresh one, which a job still running on the old one must not clear (#102).
         """
         if context.business_id is None:
@@ -144,6 +145,33 @@ async def _clear_token(db: AsyncSession, account_id: uuid.UUID, token: str) -> N
     await db.execute(
         update(SocialAccount)
         .where(SocialAccount.id == account_id, SocialAccount.access_token == token)
+        .values(access_token=None)
+    )
+
+
+async def clear_stale_token(db: AsyncSession, business_id: uuid.UUID) -> None:
+    """The runner's `on_stale` hook: an import that a killed process (SIGKILL, OOM) left behind
+    never cleared the token it read, so clear the Business's.
+
+    `fail_stale` runs at startup and then every minute, and a job from a process killed less
+    than `STALE_AFTER` before the restart is only caught by a later pass, so the Owner may have
+    reconnected since. The token is left alone while another import of the Business is queued or
+    running: that job owns it (it reads, then clears it). The failed job is already marked
+    failed in this transaction, so it doesn't count.
+    """
+    another_import = exists().where(
+        Job.kind == "import_instagram",
+        Job.business_id == SocialAccount.business_id,
+        Job.status.in_(("queued", "running")),
+    )
+    await db.execute(
+        update(SocialAccount)
+        .where(
+            SocialAccount.business_id == business_id,
+            SocialAccount.platform == "instagram",
+            SocialAccount.access_token.is_not(None),
+            ~another_import,
+        )
         .values(access_token=None)
     )
 
