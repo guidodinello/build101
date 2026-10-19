@@ -30,9 +30,14 @@ Tone = Literal["light", "dark"]
 
 def prepare_reference(data: bytes) -> bytes:
     with Image.open(BytesIO(data), formats=ACCEPTED_FORMATS) as source:
-        image = ImageOps.exif_transpose(source).convert("RGB")
-    image.thumbnail((REFERENCE_MAX_SIDE, REFERENCE_MAX_SIDE), Image.Resampling.LANCZOS)
-    return _to_jpeg(image)
+        return reference_from(ImageOps.exif_transpose(source))
+
+
+def reference_from(image: Image.Image) -> bytes:
+    """The agents' copy of an already decoded image; `image` itself is left as it was."""
+    reference = image.convert("RGB")  # a copy, so the thumbnail below doesn't touch `image`
+    reference.thumbnail((REFERENCE_MAX_SIDE, REFERENCE_MAX_SIDE), Image.Resampling.LANCZOS)
+    return _to_jpeg(reference)
 
 
 def to_post_image(data: bytes) -> bytes:

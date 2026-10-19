@@ -17,7 +17,7 @@ from app.channels.base import Button, ChannelError
 from app.imagegen.base import GeneratedImage
 from app.llm.client import Content, FunctionCall, LLMError, Reply, Step, Tool
 from app.publishing.base import PublishMedia, PublishResult
-from app.storage import SignedUpload
+from app.storage import ObjectTooLarge, SignedUpload
 from tests.conftest import make_image
 
 
@@ -202,8 +202,13 @@ class FakeStorage:
     async def create_signed_upload_url(self, bucket: str, path: str) -> SignedUpload:
         return SignedUpload(url=f"https://storage.test/upload/{bucket}/{path}?token=t", token="t")
 
-    async def download(self, bucket: str, path: str) -> bytes | None:
-        return self.objects.get(f"{bucket}/{path}")
+    async def download(
+        self, bucket: str, path: str, *, max_bytes: int | None = None
+    ) -> bytes | None:
+        data = self.objects.get(f"{bucket}/{path}")
+        if data is not None and max_bytes is not None and len(data) > max_bytes:
+            raise ObjectTooLarge(f"object is over {max_bytes} bytes")
+        return data
 
     async def upload(self, bucket: str, path: str, data: bytes, content_type: str) -> None:
         self.objects[f"{bucket}/{path}"] = data
@@ -217,6 +222,18 @@ class FakeStorage:
             for path in paths
             if f"{bucket}/{path}" in self.objects
         }
+
+
+class CountingStorage(FakeStorage):
+    """FakeStorage that counts the downloads asked of it."""
+
+    downloads: int = 0
+
+    async def download(
+        self, bucket: str, path: str, *, max_bytes: int | None = None
+    ) -> bytes | None:
+        self.downloads += 1
+        return await super().download(bucket, path, max_bytes=max_bytes)
 
 
 def brand_brain(**changes: Any) -> BrandBrain:

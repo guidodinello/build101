@@ -1,9 +1,10 @@
+import threading
 from dataclasses import dataclass
 from io import BytesIO
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from app.media.images import prepare_reference
+from app.media.images import reference_from
 
 HEIC = "image/heic"
 EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", HEIC: "heic"}
@@ -14,12 +15,20 @@ PALETTE_SIZE = 5
 PALETTE_SAMPLE_SIDE = 128
 OPAQUE_ALPHA = 128
 JPEG_QUALITY = 90
-# A 50 MP phone photo fits. Checked before decoding: a small PNG can expand to hundreds of MB.
-MAX_PIXELS = 60_000_000
+# Checked before decoding: a small PNG can expand to hundreds of MB. A decoded 25 MP image takes
+# 75-100 MB, so a few of them at once stay inside the one backend instance's memory (ADR 0005).
+MAX_PIXELS = 25_000_000
+# Decodes running at once across the wizard and the Instagram import; the rest wait their turn.
+MAX_CONCURRENT_DECODES = 2
+_decode_slots = threading.BoundedSemaphore(MAX_CONCURRENT_DECODES)
 
 
 class UnreadableImage(Exception):
     pass
+
+
+class ImageTooLarge(UnreadableImage):
+    """Readable, but over MAX_PIXELS."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,21 +51,22 @@ def llm_copy_path(business_id: object, asset_id: object) -> str:
 
 def process_upload(data: bytes, content_type: str, kind: str) -> ProcessedUpload:
     """Read an uploaded photo or logo once it is in Storage. CPU-bound: run it in a thread."""
-    try:
-        with Image.open(BytesIO(data), formats=[PIL_FORMATS[content_type]]) as source:
-            if source.width * source.height > MAX_PIXELS:
-                raise UnreadableImage(f"{source.width}x{source.height} is over {MAX_PIXELS} px")
-            image = ImageOps.exif_transpose(source)
-            image.load()
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-        raise UnreadableImage(str(exc)) from exc
-    return ProcessedUpload(
-        width=image.width,
-        height=image.height,
-        llm_copy=prepare_reference(data),
-        jpeg=_to_jpeg(image) if content_type == HEIC else None,
-        palette=logo_palette(image) if kind == "logo" else None,
-    )
+    with _decode_slots:
+        try:
+            with Image.open(BytesIO(data), formats=[PIL_FORMATS[content_type]]) as source:
+                if source.width * source.height > MAX_PIXELS:
+                    raise ImageTooLarge(f"{source.width}x{source.height} is over {MAX_PIXELS} px")
+                image = ImageOps.exif_transpose(source)
+                image.load()
+        except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+            raise UnreadableImage(str(exc)) from exc
+        return ProcessedUpload(
+            width=image.width,
+            height=image.height,
+            llm_copy=reference_from(image),
+            jpeg=_to_jpeg(image) if content_type == HEIC else None,
+            palette=logo_palette(image) if kind == "logo" else None,
+        )
 
 
 def logo_palette(image: Image.Image) -> list[str]:

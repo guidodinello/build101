@@ -27,12 +27,13 @@ from app.onboarding import schemas
 from app.onboarding.links import hash_token
 from app.onboarding.uploads import (
     EXTENSIONS,
+    ImageTooLarge,
     UnreadableImage,
     asset_path,
     llm_copy_path,
     process_upload,
 )
-from app.storage import ASSETS_BUCKET, StoragePort, get_storage
+from app.storage import ASSETS_BUCKET, ObjectTooLarge, StoragePort, get_storage
 
 from .errors import ApiError
 
@@ -56,6 +57,7 @@ UNKNOWN_ASSET = "No encontramos una de las fotos. Recargá la página y probá d
 MISSING_COLORS = 'Sumá al menos un color, o elegí "Todavía no tengo logo ni colores".'
 UNSUPPORTED_FILE = "Este archivo no lo podemos usar. Subí fotos."
 UNREADABLE_FILE = "No pudimos abrir esta foto. Probá con otra."
+IMAGE_TOO_LARGE = "Esta foto es demasiado grande. Probá con una de menos resolución."
 TOO_MANY_PHOTOS = f"Ya tenés {MAX_PHOTOS} fotos."
 ASSET_NOT_FOUND = "No encontramos ese archivo."
 UPLOAD_MISSING = "El archivo no terminó de subir. Probá de nuevo."
@@ -318,6 +320,9 @@ async def complete_upload(
 ) -> schemas.Asset:
     business = onboarding.business
     asset = await _active_asset(session, business.id, asset_id)
+    if asset.status == "failed":
+        # Already read and refused once: don't download and decode it again.
+        raise ApiError(422, "unsupported_file", UNREADABLE_FILE)
     if asset.status != "ready":
         await _finish_upload(asset, business, session, storage, settings)
     urls = await storage.create_signed_urls(ASSETS_BUCKET, [asset.storage_path], SIGNED_URL_TTL_S)
@@ -369,15 +374,21 @@ async def _finish_upload(
     storage: StoragePort,
     settings: Settings,
 ) -> None:
-    data = await storage.download(ASSETS_BUCKET, asset.storage_path)
+    try:
+        # The signed URL doesn't enforce the size the browser declared: stop reading past the cap.
+        data = await storage.download(
+            ASSETS_BUCKET, asset.storage_path, max_bytes=settings.max_photo_mb * BYTES_PER_MB
+        )
+    except ObjectTooLarge:
+        await _fail(asset, session)
+        raise ApiError(422, "unsupported_file", file_too_big(settings.max_photo_mb)) from None
     if data is None:
         raise ApiError(409, "upload_missing", UPLOAD_MISSING)
-    # The signed URL doesn't enforce the size the browser declared.
-    if len(data) > settings.max_photo_mb * BYTES_PER_MB:
-        await _fail(asset, session)
-        raise ApiError(422, "unsupported_file", file_too_big(settings.max_photo_mb))
     try:
         processed = await asyncio.to_thread(process_upload, data, asset.mime_type, asset.kind)
+    except ImageTooLarge:
+        await _fail(asset, session)
+        raise ApiError(422, "image_too_large", IMAGE_TOO_LARGE) from None
     except UnreadableImage:
         await _fail(asset, session)
         raise ApiError(422, "unsupported_file", UNREADABLE_FILE) from None

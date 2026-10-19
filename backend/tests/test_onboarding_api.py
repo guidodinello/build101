@@ -8,15 +8,17 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.api import onboarding
 from app.channels.router import get_channel
 from app.config import Settings, get_settings
 from app.copy import messages_es
 from app.db.models import BrandAsset, Business, Job, MagicLink
 from app.db.session import get_session
 from app.main import app
+from app.onboarding import uploads
 from app.storage import get_storage
 from tests.conftest import make_image, requires_db
-from tests.fakes import FakeChannel, FakeStorage
+from tests.fakes import CountingStorage, FakeChannel, FakeStorage
 
 DEV_TOKEN = "dev-secret"
 PHONE = "59899123456"
@@ -834,8 +836,11 @@ async def ticket_with_object(
     data: bytes,
     kind: str = "photo",
     content_type: str = "image/png",
+    declared_bytes: int | None = None,
 ) -> str:
-    """A ticket whose object the browser already put in Storage; returns the asset id."""
+    """A ticket whose object the browser already put in Storage; returns the asset id.
+
+    `declared_bytes` is the size the browser claims; the signed URL doesn't enforce it."""
     ticket = (
         await client.post(
             f"/api/o/{token}/uploads",
@@ -843,7 +848,7 @@ async def ticket_with_object(
                 "kind": kind,
                 "filename": "x.png",
                 "content_type": content_type,
-                "size_bytes": len(data),
+                "size_bytes": declared_bytes or len(data),
             },
         )
     ).json()
@@ -884,3 +889,67 @@ async def test_jpeg_png_and_webp_uploads_still_pass(
     )
 
     assert asset["status"] == "ready"
+
+
+async def test_an_object_over_the_size_limit_is_refused_and_fails_the_asset(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    token = await new_link(client)
+    asset_id = await ticket_with_object(
+        client,
+        storage,
+        token,
+        b"x" * (10 * 1024 * 1024 + 1),
+        content_type="image/jpeg",
+        declared_bytes=1024,
+    )
+
+    response = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+
+    assert response.status_code == 422
+    assert error_code(response) == "unsupported_file"
+    async with sessions() as db:
+        asset = await db.get(BrandAsset, uuid.UUID(asset_id))
+    assert asset and asset.status == "failed"
+
+
+async def test_a_failed_asset_is_refused_again_without_downloading_it(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    counting = CountingStorage()
+    app.dependency_overrides[get_storage] = lambda: counting
+    token = await new_link(client)
+    asset_id = await ticket_with_object(client, counting, token, b"not an image")
+    first = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+    assert first.status_code == 422
+    downloads = counting.downloads
+
+    again = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+
+    assert again.status_code == 422
+    assert error_code(again) == "unsupported_file"
+    assert counting.downloads == downloads
+
+
+async def test_an_image_over_the_pixel_cap_gets_its_own_error(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(uploads, "MAX_PIXELS", 100 * 100)
+    token = await new_link(client)
+    asset_id = await ticket_with_object(
+        client, storage, token, make_image((101, 100)), content_type="image/jpeg"
+    )
+
+    response = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+
+    assert response.status_code == 422
+    assert error_code(response) == "image_too_large"
+    assert response.json()["error"]["message"] == onboarding.IMAGE_TOO_LARGE
+    async with sessions() as db:
+        asset = await db.get(BrandAsset, uuid.UUID(asset_id))
+    assert asset and asset.status == "failed"

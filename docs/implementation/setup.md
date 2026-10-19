@@ -85,6 +85,7 @@ Plan B only (Meta Cloud API direct, if Kapso fails its first-hour test; [integra
 - **Free** plan is enough for the Must scope ([ADR 0016](../decisions/0016-demo-scope-one-post.md)): the wizard and the chat only store photos and logos (≤ 10 MB each).
 - Only if the Could video work starts: switch to **Pro** (Free caps files at 50 MB, [research/media-uploads.md](../research/media-uploads.md#storage-supabase)) and set Storage settings → global file size limit **300 MB** (same as `MAX_VIDEO_MB`).
 - Buckets: `assets` (private; photos and logos, plus videos and derived frames later) and `renders` (public; the generated post images). The browser uploads straight to `assets` with signed upload URLs issued by the backend; photos and logos (≤ 10 MB) go in a single request, and only videos (Could) would need resumable (TUS) uploads. Create both buckets by hand in the dashboard (Storage → New bucket) before the first upload.
+- **Required bucket config (`assets`).** Set a `file_size_limit` of **10 MB** (same as `MAX_PHOTO_MB`) and `allowed_mime_types` = `image/jpeg, image/png, image/webp, image/heic`. The backend re-checks both when the browser calls `/complete` (it stops reading an object past `MAX_PHOTO_MB` and opens it only as its declared type), but the signed upload URL doesn't enforce the size the browser declared, so the bucket is the first line of defense and keeps oversized or foreign files out of storage altogether. If the Could video work starts, the limit has to allow `MAX_VIDEO_MB` and `video/mp4, video/quicktime` as well.
 
 ## Run locally
 

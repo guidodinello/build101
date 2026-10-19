@@ -18,6 +18,10 @@ class StorageError(Exception):
     pass
 
 
+class ObjectTooLarge(StorageError):
+    """The object is bigger than the `max_bytes` the caller allowed."""
+
+
 @dataclass(frozen=True, slots=True)
 class SignedUpload:
     url: str
@@ -27,8 +31,11 @@ class SignedUpload:
 class StoragePort(Protocol):
     async def create_signed_upload_url(self, bucket: str, path: str) -> SignedUpload: ...
 
-    async def download(self, bucket: str, path: str) -> bytes | None:
-        """The object's bytes, or None when it doesn't exist."""
+    async def download(
+        self, bucket: str, path: str, *, max_bytes: int | None = None
+    ) -> bytes | None:
+        """The object's bytes, or None when it doesn't exist. Past `max_bytes` it stops reading
+        and raises ObjectTooLarge, so an oversized object is never held whole in memory."""
         ...
 
     async def upload(self, bucket: str, path: str, data: bytes, content_type: str) -> None: ...
@@ -74,16 +81,20 @@ class SupabaseStorage:
             raise StorageError("supabase returned a signed upload url without a token")
         return SignedUpload(url=signed, token=token[0])
 
-    async def download(self, bucket: str, path: str) -> bytes | None:
+    async def download(
+        self, bucket: str, path: str, *, max_bytes: int | None = None
+    ) -> bytes | None:
         try:
-            response = await self._client.get(f"/object/{bucket}/{path}")
+            async with self._client.stream("GET", f"/object/{bucket}/{path}") as response:
+                # Storage answers a missing object with 400 or 404 depending on the version.
+                if response.status_code in (HTTP_NOT_FOUND, HTTP_BAD_REQUEST):
+                    return None
+                if response.is_error:
+                    await response.aread()
+                    _raise_for_status(response)
+                return await _read_capped(response, max_bytes)
         except httpx.HTTPError as exc:
             raise StorageError(f"supabase download failed: {exc!r}") from exc
-        # Storage answers a missing object with 400 or 404 depending on the version.
-        if response.status_code in (HTTP_NOT_FOUND, HTTP_BAD_REQUEST):
-            return None
-        _raise_for_status(response)
-        return response.content
 
     async def upload(self, bucket: str, path: str, data: bytes, content_type: str) -> None:
         await self._request(
@@ -117,6 +128,21 @@ class SupabaseStorage:
             raise StorageError(f"supabase {method} {url} failed: {exc!r}") from exc
         _raise_for_status(response)
         return response
+
+
+async def _read_capped(response: httpx.Response, max_bytes: int | None) -> bytes:
+    """The body, read chunk by chunk; leaving early closes the connection with the rest unread."""
+    declared = response.headers.get("content-length", "")
+    if max_bytes is not None and declared.isdigit() and int(declared) > max_bytes:
+        raise ObjectTooLarge(f"object is {declared} bytes, over {max_bytes}")
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in response.aiter_bytes():
+        total += len(chunk)
+        if max_bytes is not None and total > max_bytes:
+            raise ObjectTooLarge(f"object is over {max_bytes} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _raise_for_status(response: httpx.Response) -> None:

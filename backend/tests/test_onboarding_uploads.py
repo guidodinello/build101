@@ -1,3 +1,6 @@
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
 import pytest
@@ -5,6 +8,7 @@ from PIL import Image
 
 from app.onboarding import uploads
 from app.onboarding.uploads import (
+    ImageTooLarge,
     UnreadableImage,
     asset_path,
     llm_copy_path,
@@ -65,7 +69,7 @@ def test_an_image_over_the_pixel_cap_is_rejected_before_decoding(
 ) -> None:
     monkeypatch.setattr(uploads, "MAX_PIXELS", 100 * 100)
 
-    with pytest.raises(UnreadableImage, match="101x100"):
+    with pytest.raises(ImageTooLarge, match="101x100"):
         process_upload(make_image((101, 100)), "image/jpeg", "photo")
 
 
@@ -105,3 +109,35 @@ def test_a_file_of_another_format_is_unreadable_whatever_it_declares(format: str
 def test_a_file_must_match_its_declared_type() -> None:
     with pytest.raises(UnreadableImage):
         process_upload(make_image((50, 50), format="PNG"), "image/jpeg", "photo")
+
+
+def test_the_pixel_cap_is_25_megapixels() -> None:
+    assert uploads.MAX_PIXELS == 25_000_000
+
+
+def test_decodes_run_at_most_as_many_at_once_as_the_semaphore_allows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(uploads, "_decode_slots", threading.BoundedSemaphore(1))
+    running = 0
+    peak = 0
+    lock = threading.Lock()
+    reference_from = uploads.reference_from
+
+    def slow_reference(image: Image.Image) -> bytes:
+        nonlocal running, peak
+        with lock:
+            running += 1
+            peak = max(peak, running)
+        time.sleep(0.05)
+        with lock:
+            running -= 1
+        return reference_from(image)
+
+    monkeypatch.setattr(uploads, "reference_from", slow_reference)
+    data = make_image((100, 80))
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(lambda _: process_upload(data, "image/jpeg", "photo"), range(4)))
+
+    assert peak == 1

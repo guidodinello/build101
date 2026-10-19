@@ -1,9 +1,10 @@
 import json
+from collections.abc import AsyncIterator
 
 import httpx
 import pytest
 
-from app.storage import StorageError, SupabaseStorage
+from app.storage import ObjectTooLarge, StorageError, SupabaseStorage
 
 SUPABASE_URL = "https://project.supabase.co"
 KEY = "service-role-key"
@@ -47,6 +48,54 @@ async def test_download_returns_the_bytes() -> None:
     transport = httpx.MockTransport(lambda _: httpx.Response(200, content=b"jpeg"))
 
     assert await storage(transport).download("assets", "b1/a1.jpg") == b"jpeg"
+
+
+class CountingStream(httpx.AsyncByteStream):
+    """A body of `chunks` 1 KiB chunks that records how many were actually read."""
+
+    def __init__(self, chunks: int) -> None:
+        self.chunks = chunks
+        self.read = 0
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for _ in range(self.chunks):
+            self.read += 1
+            yield b"x" * 1024
+
+
+async def test_download_stops_reading_past_max_bytes() -> None:
+    body = CountingStream(chunks=1000)
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, stream=body))
+
+    with pytest.raises(ObjectTooLarge):
+        await storage(transport).download("assets", "b1/a1.jpg", max_bytes=10 * 1024)
+
+    assert body.read == 11  # the chunk that crossed the cap, not the other 989
+
+
+async def test_download_refuses_a_declared_size_over_max_bytes_without_reading() -> None:
+    body = CountingStream(chunks=1000)
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(200, headers={"content-length": str(1000 * 1024)}, stream=body)
+    )
+
+    with pytest.raises(ObjectTooLarge):
+        await storage(transport).download("assets", "b1/a1.jpg", max_bytes=10 * 1024)
+
+    assert body.read == 0
+
+
+async def test_download_under_max_bytes_returns_everything() -> None:
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, content=b"jpeg"))
+
+    assert await storage(transport).download("assets", "b1/a1.jpg", max_bytes=4) == b"jpeg"
+
+
+async def test_download_error_status_raises_storage_error() -> None:
+    transport = httpx.MockTransport(lambda _: httpx.Response(500, text="boom"))
+
+    with pytest.raises(StorageError, match="500"):
+        await storage(transport).download("assets", "b1/a1.jpg")
 
 
 async def test_upload_overwrites_with_the_content_type() -> None:
