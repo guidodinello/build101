@@ -34,8 +34,8 @@ Messages for the Owner. Since [ADR 0026](../decisions/0026-owner-messages-from-t
 | `welcome` | Flow 1, first message | ¡Hola! 👋 Soy {assistant_name}, tu agencia de marketing en WhatsApp. Te ayudo a planear, crear y publicar contenido para tus redes, y *nada se publica sin que vos lo apruebes*. ¿Cómo se llama tu negocio? | — |
 | `name_ack_link` | Flow 1, name received | ¡Buenísimo, {business_name}! Para conocer tu marca necesito unos datos y algunas fotos. Son 5 minutos desde el celu 👇 {onboarding_url} | — |
 | `link_reminder` | Message while `awaiting_web_form` | Para arrancar me falta que completes esto (5 min) 👇 {onboarding_url} | — |
-| `brand_generating` *(fixed until T23 routes onboarding through the orchestrator)* | Form submitted | ¡Gracias! Estoy estudiando tu marca, en un minuto te cuento lo que entendí ⏳ | — |
-| `brand_summary` | Flow 3, sent by the `generate_brand` job | Esto es lo que entendí de *{business_name}* 👇 {summary} ¿Es así? (`{summary}` is the Brand Strategist's own text, so this stays a fixed frame: the job has no chat handler, like `brand_generating` in ADR 0026) | `brand_ok` "Sí, es mi marca" · `brand_fix` "Corregir algo" |
+| `brand_generating` *(verbatim event `BrandGenerating`: fixed text, no model turn)* | Form submitted | ¡Gracias! Estoy estudiando tu marca, en un minuto te cuento lo que entendí ⏳ | — |
+| `brand_summary` | Flow 3, sent by the `generate_brand` job | Esto es lo que entendí de *{business_name}* 👇 {summary} ¿Es así? (`{summary}` is the Brand Strategist's own text, so this is a verbatim event, `BrandSummaryReady`: a fixed frame, no model turn, ADR 0026) | `brand_ok` "Sí, es mi marca" · `brand_fix` "Corregir algo" |
 | `brand_fix_prompt` **(event** `brand_fix_asked`**)** | `[Corregir algo]` | Contame qué cambio, con tus palabras. | — |
 | `ready_open_chat` **(event** `brand_confirmed`**)** | Brand confirmed (F1.10) | ¡Listo, ya conozco tu marca! ¿En qué te puedo ayudar hoy? | — |
 | `plan_generating` | Plan requested | Dale, armo el plan de la semana ⏳ | — |
@@ -68,7 +68,7 @@ Messages for the Owner. Since [ADR 0026](../decisions/0026-owner-messages-from-t
 | `scheduled` | Schedule success | ¡Genial! Sale {when_label} ✅ | — |
 | `publish_failed` **(event)** | Publish error | Uy, Instagram no me dejó publicarlo 🙈 ¿Lo intento de nuevo? (no `{reason}`: Zernio's errors aren't Owner-facing) | `post_retry:{id}` "Reintentar": publishes again under a new idempotency key |
 | `need_ig` | Publish without IG connected (not reached in the MVP, [ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)) | Para publicar necesito que conectes tu Instagram, es un toque 👇 {connect_url} | — |
-| `job_failed` | A failed `generate_brand` job (sent by the job runner, which has no chat handler: fixed text like `brand_generating`) | Uy, se me trabó algo armando esto. ¿Lo intento de nuevo? | `retry:{job_id}` "Reintentar" |
+| `job_failed` | A failed `generate_brand` job (the `JobFailed` event, raised by the job runner: a verbatim event, fixed text like `brand_generating`) | Uy, se me trabó algo armando esto. ¿Lo intento de nuevo? | `retry:{job_id}` "Reintentar" |
 | `stale_button` **(event)** | Button no longer valid for the current state | Ese botón ya no está activo 🙂 | — |
 | `unsupported_media` **(event)** | Sticker/doc/location | Por ahora solo entiendo texto, audios, fotos y videos 🙏 ¿Me lo escribís o me mandás un audio? | — |
 | `audio_unclear` **(event)** | Voice note with no usable transcript | No te llegué a entender el audio 🙈 ¿Me lo mandás de nuevo o me lo escribís? | — |
