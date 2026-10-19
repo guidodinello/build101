@@ -1,22 +1,23 @@
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from http.cookies import SimpleCookie
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.api.instagram import DEV_STATE_SECRET
+from app.api.instagram import BINDING_COOKIE, DEV_STATE_SECRET
 from app.config import Settings, get_settings
 from app.db.models import BrandAsset, Business, Job, MagicLink, SocialAccount
 from app.db.session import get_session
 from app.instagram.base import InstagramError, InstagramImage, InstagramMedia
 from app.instagram.factory import get_instagram
 from app.instagram.mock import MockInstagram
-from app.instagram.oauth_state import sign_state
+from app.instagram.oauth_state import sign_ticket
 from app.jobs.instagram import import_instagram_job
 from app.jobs.runner import JobContext
 from app.main import app
@@ -74,15 +75,43 @@ async def client(
     app.dependency_overrides.clear()
 
 
-async def connect(client: httpx.AsyncClient, token: str) -> httpx.Response:
-    """Connect, then follow the mock's consent screen straight to the callback."""
+async def start(client: httpx.AsyncClient, token: str) -> httpx.Response:
+    """POST /connect, then navigate to the `auth_url` it returns, as the wizard does."""
     response = await client.post(f"/api/o/{token}/instagram/connect")
     assert response.status_code == 200, response.text
     auth_url = urlsplit(response.json()["auth_url"])
     assert f"{auth_url.scheme}://{auth_url.netloc}{auth_url.path}" == (
-        "https://api.test/oauth/instagram/callback"
+        f"https://api.test/api/o/{token}/instagram/start"
     )
     return await client.get(f"{auth_url.path}?{auth_url.query}")
+
+
+def binding_cookie(started: httpx.Response) -> dict[str, str]:
+    """The browser's side of the start hop: the cookie it sends back to the callback."""
+    cookie = SimpleCookie(started.headers["set-cookie"])
+    return {"Cookie": f"{BINDING_COOKIE}={cookie[BINDING_COOKIE].value}"}
+
+
+def assert_cookie_cleared(response: httpx.Response) -> None:
+    cleared = response.headers["set-cookie"].lower()
+    assert f"{BINDING_COOKIE}=" in cleared and "max-age=0" in cleared
+
+
+def callback_params(started: httpx.Response, **extra: str) -> dict[str, str]:
+    """What the consent screen sends back: our `state`, plus the `code` (or `error`) it adds."""
+    query = parse_qs(urlsplit(started.headers["location"]).query)
+    return {"state": query["state"][0], **extra}
+
+
+async def connect(client: httpx.AsyncClient, token: str) -> httpx.Response:
+    """The whole flow with the mock adapter: start hop, consent screen, callback."""
+    started = await start(client, token)
+    assert started.status_code == 303
+    location = urlsplit(started.headers["location"])
+    assert f"{location.scheme}://{location.netloc}{location.path}" == (
+        "https://api.test/oauth/instagram/callback"
+    )
+    return await client.get(f"{location.path}?{location.query}", headers=binding_cookie(started))
 
 
 async def business_of(sessions: async_sessionmaker[AsyncSession]) -> Business:
@@ -130,10 +159,12 @@ async def test_a_refused_consent_returns_to_the_wizard_without_connecting(
     client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
 ) -> None:
     token = await new_link(client)
-    state = sign_state(token, DEV_STATE_SECRET)
+    started = await start(client, token)
 
     response = await client.get(
-        "/oauth/instagram/callback", params={"error": "access_denied", "state": state}
+        "/oauth/instagram/callback",
+        params=callback_params(started, error="access_denied"),
+        headers=binding_cookie(started),
     )
 
     assert response.headers["location"].endswith("?step=instagram&connected=0")
@@ -145,15 +176,18 @@ async def test_a_callback_after_the_onboarding_was_completed_changes_nothing(
     client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
 ) -> None:
     token = await new_link(client)
-    response = await client.post(f"/api/o/{token}/instagram/connect")
-    auth_url = urlsplit(response.json()["auth_url"])
+    started = await start(client, token)
     async with sessions() as db:
         link = await db.scalar(select(MagicLink))
         assert link is not None
         link.completed_at = datetime.now(UTC)
         await db.commit()
 
-    response = await client.get(f"{auth_url.path}?{auth_url.query}")
+    response = await client.get(
+        urlsplit(started.headers["location"]).path,
+        params=callback_params(started, code="c"),
+        headers=binding_cookie(started),
+    )
 
     assert response.status_code == 303
     assert response.headers["location"] == f"{FRONTEND}/o/{token}"
@@ -162,16 +196,169 @@ async def test_a_callback_after_the_onboarding_was_completed_changes_nothing(
         assert (await db.scalars(select(Job.kind))).all() == []
 
 
-async def test_a_forged_state_is_rejected(client: httpx.AsyncClient) -> None:
+async def test_the_oauth_state_carries_no_magic_link_token(client: httpx.AsyncClient) -> None:
     token = await new_link(client)
 
+    started = await start(client, token)
+
+    assert started.status_code == 303
+    assert token not in started.headers["location"]
+    assert token not in started.headers["location"].lower()
+
+
+async def test_the_start_hop_sets_a_browser_bound_cookie_for_the_callback_only(
+    client: httpx.AsyncClient,
+) -> None:
+    token = await new_link(client)
+
+    started = await start(client, token)
+
+    attributes = started.headers["set-cookie"].lower()
+    assert f"{BINDING_COOKIE}=" in attributes
+    for attribute in ("httponly", "secure", "samesite=lax", "path=/oauth/instagram", "max-age=900"):
+        assert attribute in attributes
+
+
+async def test_the_cookie_is_cleared_once_the_callback_ran(client: httpx.AsyncClient) -> None:
+    token = await new_link(client)
+
+    response = await connect(client, token)
+
+    assert_cookie_cleared(response)
+
+
+async def test_a_callback_without_the_cookie_is_refused(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    started = await start(client, token)
+
     response = await client.get(
-        "/oauth/instagram/callback",
-        params={"code": "c", "state": sign_state(token, "not-our-secret")},
+        "/oauth/instagram/callback", params=callback_params(started, code="c")
     )
 
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_state"
+    async with sessions() as db:
+        assert await db.scalar(select(SocialAccount)) is None
+
+
+async def test_a_callback_with_another_browsers_cookie_is_refused(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    """Login CSRF: the attacker's `state` reaches the victim, whose cookie is for another nonce."""
+    attacker_token = await new_link(client)
+    attacker = await start(client, attacker_token)
+    victim_token = await new_link(client)
+    victim = await start(client, victim_token)
+
+    response = await client.get(
+        "/oauth/instagram/callback",
+        params=callback_params(attacker, code="c"),
+        headers=binding_cookie(victim),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_state"
+    assert_cookie_cleared(response)
+    async with sessions() as db:
+        assert await db.scalar(select(SocialAccount)) is None
+
+
+async def test_a_callback_for_a_link_that_is_gone_clears_the_cookie(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    started = await start(client, token)
+    async with sessions() as db:
+        link = await db.scalar(select(MagicLink))
+        assert link is not None
+        link.expires_at = datetime.now(UTC)
+        await db.commit()
+
+    response = await client.get(
+        "/oauth/instagram/callback",
+        params=callback_params(started, code="c"),
+        headers=binding_cookie(started),
+    )
+
+    assert response.status_code == 410
+    assert_cookie_cleared(response)
+
+
+async def test_an_unexpected_failure_in_the_callback_clears_the_cookie(
+    client: httpx.AsyncClient,
+) -> None:
+    class Crashing(MockInstagram):
+        async def exchange_code(self, code: str, redirect_uri: str) -> Any:
+            raise RuntimeError("boom")
+
+    token = await new_link(client)
+    started = await start(client, token)
+    app.dependency_overrides[get_instagram] = Crashing
+
+    response = await client.get(
+        "/oauth/instagram/callback",
+        params=callback_params(started, code="c"),
+        headers=binding_cookie(started),
+    )
+
+    assert response.status_code == 500
+    assert_cookie_cleared(response)
+
+
+async def test_a_forged_cookie_is_refused(client: httpx.AsyncClient) -> None:
+    token = await new_link(client)
+    started = await start(client, token)
+
+    response = await client.get(
+        "/oauth/instagram/callback",
+        params=callback_params(started, code="c"),
+        headers={"Cookie": f"{BINDING_COOKIE}={token}.nonce.9999999999.forged"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_state"
+
+
+async def test_an_expired_or_forged_ticket_does_not_start_a_connect(
+    client: httpx.AsyncClient,
+) -> None:
+    token = await new_link(client)
+    expired = sign_ticket(token, DEV_STATE_SECRET, now=1)
+    forged = sign_ticket(token, "not-our-secret")
+
+    for ticket in (expired, forged, ""):
+        response = await client.get(f"/api/o/{token}/instagram/start", params={"ticket": ticket})
+
+        assert response.status_code in (400, 422)
+        assert "set-cookie" not in response.headers
+
+
+async def test_a_ticket_for_one_link_does_not_start_another(client: httpx.AsyncClient) -> None:
+    token, other = await new_link(client), await new_link(client)
+    ticket = sign_ticket(token, DEV_STATE_SECRET)
+
+    response = await client.get(f"/api/o/{other}/instagram/start", params={"ticket": ticket})
+
+    assert response.status_code == 400
+    assert "set-cookie" not in response.headers
+
+
+async def test_the_start_hop_refuses_a_completed_onboarding(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    ticket = sign_ticket(token, DEV_STATE_SECRET)
+    async with sessions() as db:
+        link = await db.scalar(select(MagicLink))
+        assert link is not None
+        link.completed_at = datetime.now(UTC)
+        await db.commit()
+
+    response = await client.get(f"/api/o/{token}/instagram/start", params={"ticket": ticket})
+
+    assert response.status_code == 409
 
 
 def job_context(
