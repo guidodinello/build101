@@ -25,7 +25,8 @@ from app.rendering.base import RendererPort
 from app.rendering.slides import render_slides
 
 from .drafts import PostDrafter, PreviousPost
-from .store import APPROVABLE, InMemoryPosts, Post, PostImage
+from .lifecycle import PostLifecycle
+from .store import Post, PostImage
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ class PostMaker:
         renderer: RendererPort,
         photos: InMemoryPhotos,
         images: PublicImages,
-        posts: InMemoryPosts,
+        posts: PostLifecycle,
         public_base_url: str,
         max_posts_per_day: int,
         knowledge: Knowledge | None = None,
@@ -135,11 +136,9 @@ class PostMaker:
             args = RevisePostArgs.model_validate(arguments)
         except ValidationError as exc:
             return {"error": "invalid_arguments", "detail": str(exc)}
-        old = self._posts.get(sender, args.post_id)
-        if old is None:
-            return {"error": "unknown_post"}
-        if old.status not in APPROVABLE:
-            return {"error": "post_not_pending", "status": old.status}
+        old = self._posts.approvable_post(sender, args.post_id)
+        if isinstance(old, dict):
+            return old
         if old.video is not None:
             # A caption-only remake would drop the clip; another take is a new `create_video`.
             return {"error": "video_post"}
@@ -365,13 +364,10 @@ class PostMaker:
         )
         if args.replaces is None:
             return
-        old = self._posts.get(sender, args.replaces)
-        if old is None or old.status not in APPROVABLE:
+        if not self._posts.retire(sender, args.replaces):
             logger.info(
                 "post %s replaces %s, which is not pending: ignored", post_id, args.replaces
             )
-            return
-        old.status = "replaced"
 
     async def _send(
         self, sender: str, images: list[bytes], caption: str, channel: ChannelPort

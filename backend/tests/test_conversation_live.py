@@ -22,9 +22,10 @@ from app.knowledge.base import BusinessKnowledge, CatalogItem
 from app.llm.client import GeminiChat
 from app.media.public import PublicImages
 from app.posts.drafts import PostDrafter
+from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
-from app.posts.store import InMemoryPosts, Post, PostImage
+from app.posts.store import Post, PostImage
 from app.publishing.mock import MOCK_ACCOUNT_ID, MockPublisher
 from app.rendering.mock import MockRenderer
 from tests.conftest import make_image
@@ -50,7 +51,7 @@ class Rig:
     chat: ChatHandler
     history: InMemoryHistory
     notes: InMemoryNotes
-    store: InMemoryPosts
+    store: PostLifecycle
     photos: InMemoryPhotos
     image_gen: CountingImageGen
     channel: FakeChannel
@@ -85,7 +86,7 @@ def rig(compactor_budget: tuple[int, int] | None = None) -> Rig:
     if not settings.gemini_api_key:
         pytest.skip("GEMINI_API_KEY is not set")
     model = GeminiChat.from_api_key(settings.gemini_api_key, settings.gemini_chat_model)
-    history, notes, store = InMemoryHistory(), InMemoryNotes(), InMemoryPosts()
+    history, notes, store = InMemoryHistory(), InMemoryNotes(), PostLifecycle()
     photos = InMemoryPhotos()
     images, image_gen = PublicImages(), CountingImageGen()
     posts = PostMaker(

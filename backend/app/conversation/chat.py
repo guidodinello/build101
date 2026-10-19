@@ -26,14 +26,15 @@ from app.llm.client import (
     user_step,
 )
 from app.media.images import prepare_reference
+from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
-from app.posts.store import InMemoryPosts, Post
+from app.posts.store import Post
 from app.posts.video_maker import VideoMaker
 from app.prompts import load_prompt
 from app.storage import StorageError
 
-from .approval import CAPTION_START_CHARS, Approval, asks_to_publish, decide
+from .approval import CAPTION_START_CHARS, Approval
 from .button_router import ButtonRouter
 from .context import render
 from .events import (
@@ -113,7 +114,7 @@ class ChatHandler:
         photos: InMemoryPhotos,
         posts: PostMaker,
         publisher: PostPublisher,
-        store: InMemoryPosts,
+        lifecycle: PostLifecycle,
         buttons: ButtonRouter,
         library: BrandLibrary | None,
         assistant_name: str,
@@ -133,7 +134,7 @@ class ChatHandler:
         self._photos = photos
         self._posts = posts
         self._publisher = publisher
-        self._store = store
+        self._lifecycle = lifecycle
         self._buttons = buttons
         self._library = library
         self._videos = videos
@@ -285,7 +286,9 @@ class ChatHandler:
         attached: bool,
     ) -> str:
         """`text` is what the model reads; `words`, the Owner's own text, decides approval."""
-        approval = self._approval(sender, words, attached)
+        approval = self._lifecycle.approval_for(
+            sender, words, attached=attached, recent_photos=self._photos.recent(sender)
+        )
         user = user_step(text)
         await self._refresh_library(sender)
         recent = self._photos.recent(sender)
@@ -316,7 +319,7 @@ class ChatHandler:
             photo.seen = True
         # Only a completed turn enters the history, so a failure leaves no dangling user step.
         await self._remember_turn(sender, past, [user, *turn])
-        self._offer(sender, text)
+        self._lifecycle.note_reply(sender, text)
         log_reply(sender, text)
         return text
 
@@ -347,8 +350,8 @@ class ChatHandler:
         step = user_step(note)
         past = await self._history.get(sender)
         if isinstance(event, PostSent | VideoSent):
-            post = self._store.get(sender, event.post_id)
-            if post is None or post.status != "pending_approval":
+            post = self._lifecycle.get(sender, event.post_id)
+            if post is None or not self._lifecycle.awaiting_approval(post):
                 # Already approved or replaced while this waited for the lock: nothing to ask.
                 await self._remember_turn(sender, past, [step])
                 return
@@ -393,7 +396,7 @@ class ChatHandler:
             # The link is data, not copy: it reaches the Owner exactly, whatever the model wrote.
             text = f"{text}\n{event.permalink}"
         await self._remember_turn(sender, past, [step, *turn])
-        self._offer(sender, text, offered_post(event))
+        self._lifecycle.note_reply(sender, text, offered_post(event))
         log_reply(sender, text)
         await send_with_buttons(sender, text, buttons(event), channel, header_video_url(event))
 
@@ -409,7 +412,7 @@ class ChatHandler:
             return
         told = user_step(f'{event.note()}\nThe Owner was told: "{text}"')
         await self._remember_turn(sender, past, [told])
-        self._offer(sender, text, offered_post(event))
+        self._lifecycle.note_reply(sender, text, offered_post(event))
         await send_with_buttons(sender, text, buttons(event), channel, header_video_url(event))
 
     async def _converse(
@@ -484,33 +487,6 @@ class ChatHandler:
             await mark_read(message_id, channel)
             await asyncio.sleep(self._keep_alive_s)
 
-    def _approval(self, sender: str, words: str, attached: bool) -> Approval:
-        """What this turn's message allows `approve_post` to publish, computed in code (ADR 0007).
-
-        Photos came with it, or arrived after the pending posts: the Owner is asking for a post,
-        not approving one.
-        """
-        pending = self._store.pending(sender)
-        approval, listed = decide(
-            words,
-            pending,
-            self._store.listed(sender),
-            has_photos=attached or bool(photos_after(self._photos.recent(sender), pending)),
-            offered=self._store.offered(sender),
-        )
-        self._store.set_listed(sender, listed)
-        return approval
-
-    def _offer(self, sender: str, text: str, post_id: str | None = None) -> None:
-        """Remember which post the reply asked to publish, so the next "sí" approves it.
-
-        `post_id` is the post an event was about; otherwise it is the only pending post.
-        """
-        pending = [post.id for post in self._store.pending(sender)]
-        target = post_id or (pending[0] if len(pending) == 1 else None)
-        asked = target in pending and asks_to_publish(text)
-        self._store.set_offered(sender, target if asked else None)
-
     async def _run_tool(
         self,
         call: FunctionCall,
@@ -550,7 +526,7 @@ class ChatHandler:
             case "approve_post":
                 return self._publisher.approve(sender, arguments, approval, channel)
             case "list_posts":
-                return {"posts": [describe_post(post) for post in self._store.all(sender)]}
+                return {"posts": [describe_post(post) for post in self._lifecycle.all(sender)]}
             case "remember":
                 text = str(arguments.get("note", "")).strip()
                 if not text:
@@ -608,12 +584,6 @@ def offered_post(event: Event) -> str | None:
             return post_id
         case _:
             return None
-
-
-def photos_after(photos: list[Photo], pending: list[Post]) -> list[Photo]:
-    """The photos sent after every pending post: with them, "subilas" asks for a new post."""
-    latest = max((post.created_at for post in pending), default=None)
-    return [photo for photo in photos if latest is None or photo.received_at > latest]
 
 
 def describe_post(post: Post) -> dict[str, Any]:

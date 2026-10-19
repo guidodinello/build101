@@ -33,11 +33,16 @@ def tool_result(model: ScriptedModel, call: int) -> dict[str, object]:
     return json.loads(model.calls[call][-1]["result"])
 
 
+def yes_names(chat: ChatHandler) -> str | None:
+    """The post a bare "sí" would approve now: the one the last reply asked to publish."""
+    return chat._lifecycle.approval_for(SENDER, "sí", attached=False, recent_photos=[]).post_id
+
+
 def add_pending_post(chat: ChatHandler, created_at: datetime | None = None) -> Post:
     post = Post(POST_ID, SENDER, [PostImage("/media/x.jpg", b"jpeg")], "Mesa de roble")
     if created_at:
         post.created_at = created_at
-    chat._store.add(post)
+    chat._lifecycle.add(post)
     return post
 
 
@@ -60,7 +65,7 @@ async def test_a_yes_to_the_publish_question_publishes(monkeypatch: pytest.Monke
     await chat.handle(message("text", text="sí"), channel)
 
     assert tool_result(model, 4)["status"] == "publishing"
-    assert chat._store.get(SENDER, POST_ID).status != "pending_approval"
+    assert chat._lifecycle.get(SENDER, POST_ID).status != "pending_approval"
 
 
 async def test_a_yes_to_another_question_publishes_nothing(
@@ -83,7 +88,7 @@ async def test_a_yes_to_another_question_publishes_nothing(
     await chat.handle(message("text", text="sí"), channel)
 
     assert tool_result(model, 4) == {"error": "approval_not_explicit"}
-    assert chat._store.get(SENDER, POST_ID).status == "pending_approval"
+    assert chat._lifecycle.get(SENDER, POST_ID).status == "pending_approval"
 
 
 async def test_a_fallback_publish_question_counts_too() -> None:
@@ -94,9 +99,9 @@ async def test_a_fallback_publish_question_counts_too() -> None:
     sent = PostSent(POST_ID, 1, "photos", ("f1",), (), "Texto")
 
     await chat.notify(SENDER, sent, FakeChannel())  # "¿Lo subo o le cambio algo?"
-    assert chat._store.offered(SENDER) == POST_ID
+    assert yes_names(chat) == POST_ID
     await chat.notify(SENDER, StaleButton(), FakeChannel())  # a newer message asks nothing
-    assert chat._store.offered(SENDER) is None
+    assert yes_names(chat) is None
 
 
 async def test_older_unused_photos_do_not_block_an_approval() -> None:

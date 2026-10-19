@@ -71,18 +71,16 @@ class Post:
 
 
 class InMemoryPosts:
-    """Posts sent to the Owner, per sender, until T19 moves them onto `posts` (ADR 0005)."""
+    """Posts sent to the Owner, per sender, until T19 moves them onto `posts` (ADR 0005).
+
+    Storage only: `PostLifecycle` is the interface the rest of the app uses.
+    """
 
     def __init__(self, max_per_sender: int = MAX_POSTS_PER_SENDER) -> None:
         self._max_per_sender = max_per_sender
         self._posts: defaultdict[str, list[Post]] = defaultdict(list)
         # Video Posts by clip path, so the public route's cache miss is one lookup, not a scan.
         self._by_video_path: dict[str, Post] = {}
-        # Set when "subilo" met several pending posts: the ids of the numbered list the Owner was
-        # shown, which the next turn may name by number.
-        self._listed: dict[str, list[str]] = {}
-        # The post the assistant's last message asked to publish, which a bare "sí" approves.
-        self._offered: dict[str, str] = {}
 
     def add(self, post: Post) -> None:
         posts = self._posts[post.sender]
@@ -108,25 +106,3 @@ class InMemoryPosts:
         """The clip served at `path`, if a Post still in the store holds it."""
         post = self._by_video_path.get(path)
         return post.video.data if post and post.video else None
-
-    def pending(self, sender: str) -> list[Post]:
-        """The posts "subilo" can publish, oldest first: the numbering the Owner sees."""
-        return [post for post in self._posts[sender] if post.status in APPROVABLE]
-
-    def listed(self, sender: str) -> list[str] | None:
-        return self._listed.get(sender)
-
-    def set_listed(self, sender: str, post_ids: list[str] | None) -> None:
-        if post_ids:
-            self._listed[sender] = post_ids
-        else:
-            self._listed.pop(sender, None)
-
-    def offered(self, sender: str) -> str | None:
-        return self._offered.get(sender)
-
-    def set_offered(self, sender: str, post_id: str | None) -> None:
-        if post_id:
-            self._offered[sender] = post_id
-        else:
-            self._offered.pop(sender, None)
