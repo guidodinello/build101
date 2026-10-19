@@ -28,8 +28,13 @@ def _error_body(code: str, message: str, **extra: Any) -> dict[str, dict[str, An
     return {"error": {"code": code, "message": message, **extra}}
 
 
-async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
+def error_response(exc: ApiError) -> JSONResponse:
+    """The response of an ApiError, for a handler that must add to it (e.g. clear a cookie)."""
     return JSONResponse(_error_body(exc.code, exc.message), status_code=exc.status)
+
+
+async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
+    return error_response(exc)
 
 
 async def _validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
