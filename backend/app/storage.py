@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from functools import cache
 from typing import Any, Protocol, Self
 from urllib.parse import parse_qs, urlparse
@@ -13,6 +14,9 @@ HTTP_NOT_FOUND = 404
 HTTP_BAD_REQUEST = 400
 ERROR_BODY_CHARS = 300
 MAX_REMOVE_PATHS = 1000
+LIST_PAGE_SIZE = 100
+# Supabase signed upload URLs last 2 h: an object older than this can no longer be PUT again.
+SIGNED_UPLOAD_URL_TTL = timedelta(hours=2)
 
 
 class StorageError(Exception):
@@ -27,6 +31,12 @@ class ObjectTooLarge(StorageError):
 class SignedUpload:
     url: str
     token: str
+
+
+@dataclass(frozen=True, slots=True)
+class StoredObject:
+    name: str  # relative to the listed prefix
+    created_at: datetime
 
 
 class StoragePort(Protocol):
@@ -49,6 +59,10 @@ class StoragePort(Protocol):
 
     async def remove(self, bucket: str, paths: list[str]) -> None:
         """Delete the objects; a path that doesn't exist is not an error."""
+        ...
+
+    async def list_objects(self, bucket: str, prefix: str) -> list[StoredObject]:
+        """The objects directly under `prefix` (a folder, no trailing slash)."""
         ...
 
 
@@ -137,6 +151,33 @@ class SupabaseStorage:
                 f"/object/{bucket}",
                 json={"prefixes": paths[start : start + MAX_REMOVE_PATHS]},
             )
+
+    async def list_objects(self, bucket: str, prefix: str) -> list[StoredObject]:
+        # POST /object/list/{bucket} with {prefix, limit, offset, sortBy}: what storage-js's `list`
+        # sends (src/packages/StorageFileApi.ts), items shaped like its `FileObject`
+        # (src/lib/types.ts). Sub-folders come back without an `id`; they are skipped.
+        objects: list[StoredObject] = []
+        offset = 0
+        while True:
+            response = await self._request(
+                "POST",
+                f"/object/list/{bucket}",
+                json={
+                    "prefix": prefix,
+                    "limit": LIST_PAGE_SIZE,
+                    "offset": offset,
+                    "sortBy": {"column": "name", "order": "asc"},
+                },
+            )
+            page = response.json()
+            objects.extend(
+                StoredObject(item["name"], datetime.fromisoformat(item["created_at"]))
+                for item in page
+                if item.get("id") and item.get("created_at")
+            )
+            if len(page) < LIST_PAGE_SIZE:
+                return objects
+            offset += LIST_PAGE_SIZE
 
     async def aclose(self) -> None:
         await self._client.aclose()

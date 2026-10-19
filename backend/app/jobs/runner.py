@@ -47,7 +47,8 @@ JobFunction = Callable[[JobContext, dict[str, Any]], Awaitable[dict[str, Any] | 
 @dataclass(frozen=True, slots=True)
 class PeriodicCheck:
     """Work the poller runs on its first round and then every `every`, e.g. queueing the
-    weekly jobs. It only queues: the jobs themselves run in the runner's slots."""
+    weekly jobs. It mostly queues (the jobs run in the runner's slots); small bounded
+    housekeeping that needs no row of its own, like the orphaned-upload sweep, runs inline."""
 
     name: str
     every: timedelta

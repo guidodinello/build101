@@ -15,6 +15,7 @@ from app.config import Settings, get_settings
 from app.copy import messages_es
 from app.db.models import BrandAsset, Business, Job, MagicLink
 from app.db.session import get_session
+from app.jobs.uploads import sweep_orphaned_uploads
 from app.main import app
 from app.onboarding import uploads
 from app.onboarding.links import hash_token
@@ -540,6 +541,7 @@ async def test_unreadable_upload_fails(
     async with sessions() as db:
         asset = await db.get(BrandAsset, uuid.UUID(ticket["asset_id"]))
     assert asset and asset.status == "failed"
+    assert storage.objects == {}
 
 
 async def test_deleted_asset_leaves_the_state(
@@ -892,6 +894,7 @@ async def test_a_tiff_declared_as_png_is_unsupported(
     async with sessions() as db:
         asset = await db.get(BrandAsset, uuid.UUID(asset_id))
     assert asset and asset.status == "failed"
+    assert storage.objects == {}
 
 
 @pytest.mark.parametrize(
@@ -936,6 +939,7 @@ async def test_an_object_over_the_size_limit_is_refused_and_fails_the_asset(
     async with sessions() as db:
         asset = await db.get(BrandAsset, uuid.UUID(asset_id))
     assert asset and asset.status == "failed"
+    assert storage.objects == {}
 
 
 async def test_a_failed_asset_is_refused_again_without_downloading_it(
@@ -976,6 +980,7 @@ async def test_an_image_over_the_pixel_cap_gets_its_own_error(
     async with sessions() as db:
         asset = await db.get(BrandAsset, uuid.UUID(asset_id))
     assert asset and asset.status == "failed"
+    assert storage.objects == {}
 
 
 async def upload_complete_delete(
@@ -1175,3 +1180,20 @@ async def test_a_photo_being_read_does_not_hold_the_business(
 
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "ready"
+
+
+async def test_an_object_put_after_its_asset_was_archived_is_swept(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    ticket = (await request_upload(client, token, "photo")).json()
+    deleted = await client.delete(f"/api/o/{token}/assets/{ticket['asset_id']}")
+    assert deleted.status_code == 204
+    # The signed URL is still valid: the browser's PUT lands after the DELETE.
+    path = ticket["upload_url"].split("/upload/assets/")[1].split("?")[0]
+    storage.put("assets", path, make_image((120, 80)))
+    assert storage.objects
+
+    await sweep_orphaned_uploads(sessions, storage)
+
+    assert storage.objects == {}

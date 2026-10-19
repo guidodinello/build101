@@ -187,6 +187,8 @@ Hackathon implementation (`app/jobs/runner.py`, T16): a small in-process `JobRun
 
 `running` jobs older than 5 minutes were left by a process that died (a deploy, a dev reload) and are marked `failed`, at startup and then every minute (no automatic retries in the demo). Only `generate_brand` sends `job_failed` (with `retry:{job_id}`); a failed photo analysis is only logged, since the brand is generated without it. `retry:{job_id}` queues a copy and records `retried_by` on the failed row, so a second tap does nothing.
 
+Besides queueing jobs, the poller runs small periodic checks on its first round and then every so often (`PeriodicCheck`). One is the **orphaned-upload sweep** (`app/jobs/uploads.py`, hourly): per Business it removes Storage objects whose asset is archived or `failed`, and objects with no asset row once older than the signed upload URL lifetime (2 h; rows can trail their object, and after that the URL can no longer be used). An object is protected by the asset id in its name, so the converted-HEIC original and the `-llm` copy of an active asset stay. Assets still `uploading` and names the sweep doesn't recognise are never touched. `/complete` also removes the files of an asset it marks `failed`; the sweep only catches what that missed.
+
 **Production path (post-hackathon):** replace `JobRunner` with a real queue (arq on Redis, or Postgres-based like `procrastinate`) without changing job functions. That's why jobs are plain `async def job(ctx, payload)` functions.
 
 The single-process assumption (in-memory locks, in-process jobs) is deliberate for the demo: **run exactly one backend instance**.
