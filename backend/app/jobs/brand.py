@@ -12,7 +12,8 @@ from app.agents.schemas import BrandBrain
 from app.channels.base import Button, ChannelPort
 from app.conversation.history import record_note
 from app.copy import messages_es
-from app.db.models import BrandAsset, BrandBrainVersion, Business, Job, Product
+from app.db.models import BrandAsset, BrandBrainVersion, Business, Job
+from app.knowledge.db import active_products, latest_brand_brain
 from app.onboarding.state import brand_brain_written, resume_after_failed_revision
 
 from .runner import JobContext
@@ -133,26 +134,10 @@ async def _wait_for_analyses(context: JobContext, business_id: uuid.UUID) -> Non
         await asyncio.sleep(ANALYSES_POLL_S)
 
 
-async def latest_brand_brain(db: AsyncSession, business_id: uuid.UUID) -> BrandBrain | None:
-    row = await db.scalar(
-        select(BrandBrainVersion)
-        .where(BrandBrainVersion.business_id == business_id)
-        .order_by(BrandBrainVersion.version.desc())
-        .limit(1)
-    )
-    return BrandBrain.model_validate(row.data) if row else None
-
-
 async def _inputs(
     db: AsyncSession, business: Business, previous: BrandBrain | None, correction: str | None
 ) -> BrandInputs:
-    products = (
-        await db.scalars(
-            select(Product)
-            .where(Product.business_id == business.id, Product.archived_at.is_(None))
-            .order_by(Product.position)
-        )
-    ).all()
+    products = await active_products(db, business.id)
     assets = (
         await db.scalars(
             select(BrandAsset)

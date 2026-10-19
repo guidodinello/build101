@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime
 from functools import cache
 from pathlib import Path
@@ -12,6 +12,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.channels.base import Button, ChannelError, ChannelPort, InboundMedia, InboundMessage
 from app.channels.inbound import mask
 from app.copy import messages_es
+from app.knowledge.base import Knowledge
+from app.knowledge.local import LocalKnowledge
 from app.llm.client import (
     ChatModel,
     FunctionCall,
@@ -32,7 +34,7 @@ from app.storage import StorageError
 
 from .approval import CAPTION_START_CHARS, Approval, asks_to_publish, decide
 from .button_router import ButtonRouter
-from .context import BusinessContexts, OwnerContext, render
+from .context import render
 from .events import (
     AudioUnclear,
     Event,
@@ -111,10 +113,9 @@ class ChatHandler:
         keep_alive_s: float = KEEP_ALIVE_S,
         *,
         notes: OwnerNotes | None = None,
-        contexts: BusinessContexts | None = None,
+        knowledge: Knowledge | None = None,
         keeper: PhotoKeeper | None = None,
         compactor: Compactor | None = None,
-        trend_notes: str | None = None,
         now: Callable[[], datetime] = local_now,
     ) -> None:
         self._model = model
@@ -130,10 +131,9 @@ class ChatHandler:
         self._photo_debounce_s = photo_debounce_s
         self._keep_alive_s = keep_alive_s
         self._notes = notes or InMemoryNotes()
-        self._contexts = contexts
         self._keeper = keeper
         self._compactor = compactor or Compactor(history, model)
-        self._trend_notes = trend_notes
+        self._knowledge = knowledge or LocalKnowledge(self._notes, history)
         self._now = now
         self._batches: dict[str, _PhotoBatch] = {}
         self._tasks: set[asyncio.Task[None]] = set()
@@ -428,19 +428,7 @@ class ChatHandler:
 
     async def _system_for(self, sender: str) -> str:
         """The instructions, then what the model knows about this Business (ADR 0030)."""
-        context = OwnerContext()
-        try:
-            if self._contexts:
-                context = await self._contexts.load(sender)
-            context = replace(
-                context,
-                notes=await self._notes.list(sender),
-                summary=await self._history.summary(sender),
-            )
-        except SQLAlchemyError:
-            # Answer with what was loaded rather than not at all.
-            logger.warning("loading the context failed for %s", mask(sender), exc_info=True)
-        known = render(context, self._trend_notes)
+        known = render(await self._knowledge.of(sender))
         return f"{self._system}\n\n{known}" if known else self._system
 
     async def _remember_turn(self, sender: str, past: list[Step], steps: list[Step]) -> None:

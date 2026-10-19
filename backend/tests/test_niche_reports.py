@@ -19,20 +19,18 @@ from app.agents.niche_analyst import (
     trend_notes,
     week_start,
 )
-from app.conversation.context import BusinessContexts
-from app.conversation.library import NicheTrends
 from app.db.models import Business, Job, NicheReportRow
 from app.jobs.niche import (
     KIND,
     attempt_due,
     enqueue_due_niche_reports,
-    latest_niche_report,
     local_today,
     niche_report_job,
     save_report,
     week_began_at,
 )
 from app.jobs.runner import JobContext, JobRunner, PeriodicCheck
+from app.knowledge.db import DbKnowledge, latest_niche_report
 from app.llm.client import Content, Grounded, Tool
 from tests.conftest import requires_db
 from tests.fakes import FakeChannel, FakeStorage, SequenceModel
@@ -253,11 +251,10 @@ async def test_readers_get_the_latest_report_of_the_businesss_niche(
         await db.commit()
     expected = trend_notes(report(MONDAY, "Nueva."))
 
-    context = await BusinessContexts(sessions).load("59899000001")
+    knowledge = DbKnowledge(sessions)
 
-    assert context.trend_notes == expected
-    assert await NicheTrends(sessions).latest("59899000001") == expected
-    assert await NicheTrends(sessions).latest("59899000009") is None
+    assert (await knowledge.of("59899000001")).trend_notes == expected
+    assert (await knowledge.of("59899000009")).trend_notes is None
 
 
 @requires_db
@@ -266,8 +263,7 @@ async def test_before_the_first_report_there_are_no_trend_notes(
 ) -> None:
     await add_business(sessions, "59899000001")
 
-    assert (await BusinessContexts(sessions).load("59899000001")).trend_notes is None
-    assert await NicheTrends(sessions).latest("59899000001") is None
+    assert (await DbKnowledge(sessions).of("59899000001")).trend_notes is None
 
 
 @requires_db

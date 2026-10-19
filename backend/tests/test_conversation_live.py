@@ -14,11 +14,11 @@ from app.channels.base import InboundMessage
 from app.config import get_settings
 from app.conversation.button_router import ButtonRouter
 from app.conversation.chat import ChatHandler
-from app.conversation.context import CatalogItem, OwnerContext
 from app.conversation.events import PostSent
 from app.conversation.history import Compactor, InMemoryHistory
 from app.conversation.notes import InMemoryNotes
 from app.conversation.photos import InMemoryPhotos
+from app.knowledge.base import BusinessKnowledge, CatalogItem
 from app.llm.client import GeminiChat
 from app.media.public import PublicImages
 from app.posts.drafts import PostDrafter
@@ -37,12 +37,12 @@ POST_ID = "live0001"
 
 
 @dataclass
-class FixedContexts:
+class FixedKnowledge:
     brand: BrandBrain
     catalog: list[CatalogItem] = field(default_factory=list)
 
-    async def load(self, sender: str) -> OwnerContext:
-        return OwnerContext(brand=self.brand, catalog=self.catalog)
+    async def of(self, sender: str) -> BusinessKnowledge:
+        return BusinessKnowledge(brand=self.brand, catalog=self.catalog)
 
 
 @dataclass
@@ -114,7 +114,7 @@ def rig(compactor_budget: tuple[int, int] | None = None) -> Rig:
         assistant_name="Neitor",
         max_photo_mb=10,
         notes=notes,
-        contexts=FixedContexts(  # type: ignore[arg-type]
+        knowledge=FixedKnowledge(
             brand_brain(),
             [CatalogItem("Mesa nórdica de roble", "$U 18.500", "Mesa de comedor para 6")],
         ),

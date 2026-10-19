@@ -226,6 +226,7 @@ build101/
 │   │   ├── conversation/     # onboarding.py (OnboardingGate: Flow 1 before the web form, wraps chat.py), chat.py (orchestrator loop),
 │   │   │                     # tools.py, approval.py, button_router.py, brand.py, history.py, photos.py, factory.py,
 │   │   │                     # prompts/ (orchestrator.md + making_posts.md, publishing.md, rules.md); planned: state.py
+│   │   ├── knowledge/        # base.py (Knowledge: what the Agency knows about a Business), db.py (DbKnowledge + readers), local.py (LocalKnowledge, no database)
 │   │   ├── agents/           # asset_analyst.py, brand_strategist.py, content_strategist.py,
 │   │   │                     # copywriter.py, art_director.py, text_checker.py, schemas.py, prompts/*.md
 │   │   ├── carousel/         # schemas.py (CarouselCopy, CarouselBrief, TextCheck), prompts.py (build_slide_prompt), generator.py (CarouselGenerator)

@@ -1,22 +1,15 @@
 import itertools
-import uuid
 from collections import defaultdict
-from dataclasses import dataclass
 from typing import Protocol
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import Business, OwnerNote
+from app.db.models import OwnerNote
+from app.knowledge.base import Note, short_id
+from app.knowledge.db import business_of
 
 MAX_NOTE_CHARS = 300
-NOTE_ID_CHARS = 8
-
-
-@dataclass(frozen=True, slots=True)
-class Note:
-    id: str  # short, so the model can copy it into `forget`
-    text: str
 
 
 class OwnerNotes(Protocol):
@@ -61,31 +54,36 @@ class DbNotes:
 
     async def list(self, sender: str) -> list[Note]:
         async with self._sessions() as db:
+            business = await business_of(db, sender)
+            if business is None:
+                return []
             rows = await db.scalars(
                 select(OwnerNote)
-                .join(Business, Business.id == OwnerNote.business_id)
-                .where(Business.owner_phone == sender, OwnerNote.archived_at.is_(None))
+                .where(OwnerNote.business_id == business.id, OwnerNote.archived_at.is_(None))
                 .order_by(OwnerNote.created_at, OwnerNote.id)
             )
             return [Note(short_id(row.id), row.text) for row in rows]
 
     async def add(self, sender: str, text: str) -> Note | None:
         async with self._sessions() as db:
-            business_id = await db.scalar(select(Business.id).where(Business.owner_phone == sender))
-            if business_id is None:
+            business = await business_of(db, sender)
+            if business is None:
                 return None
-            row = OwnerNote(business_id=business_id, text=text[:MAX_NOTE_CHARS])
+            row = OwnerNote(business_id=business.id, text=text[:MAX_NOTE_CHARS])
             db.add(row)
             await db.commit()
             return Note(short_id(row.id), row.text)
 
     async def archive(self, sender: str, note_id: str) -> bool:
         async with self._sessions() as db:
+            business = await business_of(db, sender)
+            if business is None:
+                return False
             rows = (
                 await db.scalars(
-                    select(OwnerNote)
-                    .join(Business, Business.id == OwnerNote.business_id)
-                    .where(Business.owner_phone == sender, OwnerNote.archived_at.is_(None))
+                    select(OwnerNote).where(
+                        OwnerNote.business_id == business.id, OwnerNote.archived_at.is_(None)
+                    )
                 )
             ).all()
             matches = [row for row in rows if short_id(row.id) == note_id]
@@ -93,7 +91,3 @@ class DbNotes:
                 row.archived_at = func.now()
             await db.commit()
             return bool(matches)
-
-
-def short_id(note_id: uuid.UUID) -> str:
-    return f"n{note_id.hex[:NOTE_ID_CHARS]}"

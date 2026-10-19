@@ -5,10 +5,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.schemas import BrandBrain
-from app.db.models import AssetProduct, BrandAsset, Business, Product
-from app.jobs.brand import latest_brand_brain
-from app.jobs.niche import latest_trend_notes
+from app.db.models import AssetProduct, BrandAsset, Product
+from app.knowledge.db import business_of
 from app.onboarding.uploads import llm_copy_path
 from app.storage import ASSETS_BUCKET, StorageError, StoragePort
 
@@ -34,7 +32,7 @@ class BrandLibrary:
 
     async def photos(self, sender: str) -> list[Photo]:
         async with self._sessions() as db:
-            business = await db.scalar(select(Business).where(Business.owner_phone == sender))
+            business = await business_of(db, sender)
             if business is None:
                 return []
             assets = (
@@ -75,11 +73,13 @@ class BrandLibrary:
     async def logo(self, sender: str) -> bytes | None:
         """The latest logo as uploaded, not the agents' JPEG copy, which drops transparency."""
         async with self._sessions() as db:
+            business = await business_of(db, sender)
+            if business is None:
+                return None
             asset = await db.scalar(
                 select(BrandAsset)
-                .join(Business, Business.id == BrandAsset.business_id)
                 .where(
-                    Business.owner_phone == sender,
+                    BrandAsset.business_id == business.id,
                     BrandAsset.kind == "logo",
                     BrandAsset.status == "ready",
                     BrandAsset.archived_at.is_(None),
@@ -107,39 +107,6 @@ class BrandLibrary:
             logger.warning("the agents' copy of asset %s is missing", asset.id)
             return
         self._images[asset.id] = data
-
-
-class BrandBrains:
-    """The latest Brand Brain of the Owner's Business, for the posts made in the chat.
-
-    Until T19 moves the chat onto the database. Read on every post, so a correction applies to
-    the next one.
-    """
-
-    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
-        self._sessions = sessions
-
-    async def latest(self, sender: str) -> BrandBrain | None:
-        async with self._sessions() as db:
-            business_id = await db.scalar(select(Business.id).where(Business.owner_phone == sender))
-            if business_id is None:
-                return None
-            return await latest_brand_brain(db, business_id)
-
-
-class NicheTrends:
-    """The trend notes of the Owner's Business's niche (ADR 0025), for the posts made in the
-    chat. Read on every post, so a new week's report applies to the next one."""
-
-    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
-        self._sessions = sessions
-
-    async def latest(self, sender: str) -> str | None:
-        async with self._sessions() as db:
-            business = await db.scalar(select(Business).where(Business.owner_phone == sender))
-            if business is None:
-                return None
-            return await latest_trend_notes(db, business)
 
 
 def describe(asset: BrandAsset, product: str | None) -> str:

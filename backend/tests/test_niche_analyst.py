@@ -18,7 +18,7 @@ from app.agents.niche_analyst import (
     reference_websites,
     trend_notes,
 )
-from app.conversation.factory import load_trend_notes
+from app.knowledge.local import load_trend_notes
 from app.llm.client import Content, Grounded, LLMError, Tool, WebSource
 
 REDIRECT = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AbC123"

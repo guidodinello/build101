@@ -3,12 +3,12 @@ import uuid
 from io import BytesIO
 
 from PIL import Image
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.schemas import AssetAnalysis
 from app.assets.analysis import analyze_brand_photo
-from app.db.models import AssetProduct, BrandAsset, Business
+from app.db.models import AssetProduct, BrandAsset
+from app.knowledge.db import business_of
 from app.llm.client import ChatModel
 from app.onboarding.uploads import asset_path, llm_copy_path
 from app.storage import ASSETS_BUCKET, StoragePort
@@ -52,7 +52,8 @@ class PhotoKeeper:
         if self._sessions is None or self._storage is None:
             return None
         async with self._sessions() as db:
-            return await db.scalar(select(Business.id).where(Business.owner_phone == sender))
+            business = await business_of(db, sender)
+            return business.id if business else None
 
 
 async def store_photo(
