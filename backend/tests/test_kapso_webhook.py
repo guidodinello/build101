@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from app.channels.base import ChannelError
 from app.channels.kapso_webhook import parse_message, verify_signature
 from tests.conftest import FIXTURES, sign
 
@@ -82,7 +83,7 @@ def test_missing_message_id_falls_back_to_the_idempotency_key() -> None:
     del payload["message"]["id"]
 
     assert parse_message(payload, fallback_id="key-1").message_id == "key-1"
-    with pytest.raises(KeyError):
+    with pytest.raises(ChannelError):
         parse_message(payload)
 
 
@@ -106,3 +107,52 @@ def test_an_album_header_is_its_own_kind() -> None:
     }
 
     assert parse_message(payload).kind == "album"
+
+
+def test_a_payload_without_what_its_kind_needs_raises_the_channel_error() -> None:
+    no_phone_number = body("text")
+    del no_phone_number["phone_number_id"]
+    no_text_block = body("text")
+    del no_text_block["message"]["text"]
+    no_sender = body("text")
+    del no_sender["message"]["from"]
+
+    for payload in (no_phone_number, no_text_block, no_sender, {"unexpected": True}):
+        with pytest.raises(ChannelError):
+            parse_message(payload)
+
+
+def test_null_optional_blocks_are_treated_as_absent() -> None:
+    payload = body("image")
+    payload["message"]["kapso"] = None
+    payload["message"]["timestamp"] = "not a number"
+
+    message = parse_message(payload)
+
+    assert message.kind == "image"
+    assert message.media is not None
+    assert message.media.url is None
+    assert message.timestamp is None
+
+
+@pytest.mark.parametrize("byte_size", ["12.7", None, {"n": 1}, [1]])
+def test_an_odd_byte_size_degrades_to_absent(byte_size: object) -> None:
+    payload = body("audio")
+    payload["message"]["kapso"]["media_data"] = {"byte_size": byte_size}
+
+    message = parse_message(payload)
+
+    assert message.kind == "audio"
+    assert message.audio is not None
+    assert message.audio.byte_size is None
+    assert message.media is not None
+    assert message.media.byte_size is None
+
+
+def test_a_block_that_does_not_belong_to_the_kind_is_never_validated() -> None:
+    payload = body("text")
+    payload["message"]["image"] = {"caption": 5}
+    payload["message"]["audio"] = "junk"
+    payload["message"]["interactive"] = {"button_reply": {"id": 1}}
+
+    assert parse_message(payload).kind == "text"

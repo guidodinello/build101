@@ -1,12 +1,31 @@
-from typing import Any, Self
+from typing import Annotated, Any, Self
 
 import httpx
+from pydantic import BaseModel, BeforeValidator, Field, ValidationError
 
 from .base import Button, ChannelError
 from .whatsapp_format import to_whatsapp
 
 REQUEST_TIMEOUT_S = 30.0
 MAX_BUTTONS = 3
+
+
+# Kapso's answers, as far as we read them; unknown fields are ignored
+def _str_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+class _MediaInfo(BaseModel):
+    download_url: Annotated[str | None, BeforeValidator(_str_or_none)] = None
+    mime_type: Annotated[str | None, BeforeValidator(_str_or_none)] = None
+
+
+class _SentMessage(BaseModel):
+    id: str
+
+
+class _SendResponse(BaseModel):
+    messages: list[_SentMessage] = Field(min_length=1)
 
 
 class KapsoChannel:
@@ -104,12 +123,11 @@ class KapsoChannel:
             f"/{media_id}",
             params={"phone_number_id": self._phone_number_id},
         )
-        info = info_response.json()
-        download_url = info.get("download_url")
-        if not download_url:
+        info = _parse(info_response, _MediaInfo, f"kapso media {media_id} has no download_url")
+        if not info.download_url:
             raise ChannelError(f"kapso media {media_id} has no download_url")
-        response = await self._request(self._download_client, "GET", download_url)
-        return response.content, info.get("mime_type") or response.headers.get("content-type", "")
+        response = await self._request(self._download_client, "GET", info.download_url)
+        return response.content, info.mime_type or response.headers.get("content-type", "")
 
     async def _send(self, to: str, message: dict[str, Any]) -> str:
         payload = {
@@ -119,10 +137,8 @@ class KapsoChannel:
             **message,
         }
         response = await self._post_messages(payload)
-        try:
-            return response.json()["messages"][0]["id"]
-        except (KeyError, IndexError, ValueError) as exc:
-            raise ChannelError("kapso send response has no message id") from exc
+        sent = _parse(response, _SendResponse, "kapso send response has no message id")
+        return sent.messages[0].id
 
     async def _post_messages(self, payload: dict[str, Any]) -> httpx.Response:
         return await self._request(
@@ -140,3 +156,10 @@ class KapsoChannel:
         if response.is_error:
             raise ChannelError(f"kapso {response.status_code}: {response.text[:300]}")
         return response
+
+
+def _parse[M: BaseModel](response: httpx.Response, model: type[M], error: str) -> M:
+    try:
+        return model.model_validate_json(response.content)
+    except ValidationError as exc:
+        raise ChannelError(error) from exc

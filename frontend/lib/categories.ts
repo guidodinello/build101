@@ -8,7 +8,7 @@ export type CategoryCopy = {
 
 export const OTHER_CATEGORY = "Otro";
 
-const CATEGORY_COPY: Record<string, CategoryCopy> = {
+const CATEGORY_COPY = {
   "Muebles y deco": {
     oneLiner: "Muebles de madera maciza hechos a mano en Montevideo",
     product: { name: "Mesa Nórdica", description: "hecha a mano, en roble macizo", price: "$ 18.500" },
@@ -44,7 +44,9 @@ const CATEGORY_COPY: Record<string, CategoryCopy> = {
     words: ["Confiables", "Puntuales", "Prolijos", "Rápidos", "Honestos", "Profesionales"],
     offer: "Visita técnica gratis este mes",
   },
-};
+} satisfies Record<string, CategoryCopy>;
+
+type ListedCategory = keyof typeof CATEGORY_COPY;
 
 const FALLBACK_COPY: CategoryCopy = {
   oneLiner: "Qué hacés, para quién y dónde, en una frase",
@@ -60,6 +62,7 @@ export function copyFor(category: string | null | undefined): CategoryCopy {
   return category && isListedCategory(category) ? CATEGORY_COPY[category] : FALLBACK_COPY;
 }
 
-export function isListedCategory(category: string) {
+// hasOwn, not `in`: the category is Owner free text and "constructor" must not hit Object.prototype.
+export function isListedCategory(category: string): category is ListedCategory {
   return Object.hasOwn(CATEGORY_COPY, category);
 }

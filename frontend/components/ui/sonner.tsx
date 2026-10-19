@@ -9,7 +9,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
 
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      // Patched for exactOptionalPropertyTypes (re-apply if `shadcn add sonner --overwrite` reverts it).
+      theme={theme as NonNullable<ToasterProps["theme"]>}
       className="toaster group"
       icons={{
         success: (
