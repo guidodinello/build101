@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -517,3 +518,38 @@ async def test_the_start_hop_through_a_sibling_link_is_refused_after_submitting(
     assert started.status_code == 409
     assert started.json()["error"]["code"] == "onboarding_completed"
     assert "set-cookie" not in started.headers
+
+
+async def test_a_callback_waiting_on_the_submit_imports_nothing_once_it_commits(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    """A callback that reaches the check while `/complete` holds the Business waits for the lock,
+    then sees the submit: no import is queued after the Brand Brain started."""
+    first = await new_link(client)
+    second = await new_link(client)
+    started = await start(client, second)
+    async with sessions() as db:
+        business = await db.scalar(select(Business))
+        assert business is not None
+        await db.refresh(business, with_for_update=True)  # what /complete holds while it stamps
+        callback = asyncio.create_task(
+            client.get(
+                urlsplit(started.headers["location"]).path,
+                params=callback_params(started, code="c"),
+                headers=binding_cookie(started),
+            )
+        )
+        await asyncio.sleep(0.3)
+        assert not callback.done()
+        link = await db.scalar(select(MagicLink).where(MagicLink.token_hash == hash_token(first)))
+        assert link is not None
+        link.completed_at = datetime.now(UTC)
+        await db.commit()
+
+    response = await asyncio.wait_for(callback, timeout=5)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"{FRONTEND}/o/{second}"
+    async with sessions() as db:
+        assert await db.scalar(select(SocialAccount)) is None
+        assert (await db.scalars(select(Job.kind))).all() == []

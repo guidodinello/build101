@@ -150,6 +150,8 @@ async def _finish_connect(
     onboarding = await get_onboarding(token, session)
     business = onboarding.business
     wizard = onboarding_url(settings.frontend_url, token)
+    # Locked before the check, as in get_open_onboarding: a submit in flight finishes first.
+    await session.refresh(business, with_for_update=True)
     if await is_submitted(session, business.id):
         # Same rule as the connect endpoint: a submitted form takes no more answers, and the
         # Brand Brain it started would never see this import (ADR 0032).
