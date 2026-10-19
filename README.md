@@ -8,7 +8,7 @@ An AI marketing agency that lives in the small business owner's WhatsApp. The ow
 
 | What | Where |
 |---|---|
-| Frontend (Vercel) | <https://build101-khaki.vercel.app> |
+| Frontend (Vercel) | <https://neitorai.vercel.app> |
 | Backend (Railway) | <https://backend-production-6e67.up.railway.app> |
 | WhatsApp bot (Kapso sandbox) | <https://wa.me/56920403095> |
 

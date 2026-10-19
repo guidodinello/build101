@@ -29,7 +29,7 @@ Until the backend serves the onboarding endpoints (T24), set `ENABLE_MOCK_API=tr
 
 ## Deploy
 
-The frontend runs on Vercel ([ADR 0004](../docs/decisions/0004-frontend-nextjs-vercel.md)): project `build101` in the `guidodinellos-projects` team (Hobby), production at `https://build101-khaki.vercel.app` (`build101.vercel.app` belongs to someone else). Operate it with the Vercel CLI (`npm i -g vercel`, `vercel login`) or the [`vercel-cli`](../.claude/skills/vercel-cli/SKILL.md) skill.
+The frontend runs on Vercel ([ADR 0004](../docs/decisions/0004-frontend-nextjs-vercel.md)): project `neitorai` in the `guidodinellos-projects` team (Hobby), production at `https://neitorai.vercel.app` (the old `https://build101-khaki.vercel.app` still points at it). Operate it with the Vercel CLI (`npm i -g vercel`, `vercel login`) or the [`vercel-cli`](../.claude/skills/vercel-cli/SKILL.md) skill.
 
 ### How it deploys
 
