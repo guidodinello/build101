@@ -1,6 +1,7 @@
-import threading
+import asyncio
 from dataclasses import dataclass
 from io import BytesIO
+from weakref import WeakKeyDictionary
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -20,7 +21,9 @@ JPEG_QUALITY = 90
 MAX_PIXELS = 25_000_000
 # Decodes running at once across the wizard and the Instagram import; the rest wait their turn.
 MAX_CONCURRENT_DECODES = 2
-_decode_slots = threading.BoundedSemaphore(MAX_CONCURRENT_DECODES)
+# A semaphore binds to the event loop it first waits on, so each loop gets its own (the app has
+# one; tests run one loop each).
+_decode_slots: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = WeakKeyDictionary()
 
 
 class UnreadableImage(Exception):
@@ -49,24 +52,32 @@ def llm_copy_path(business_id: object, asset_id: object) -> str:
     return f"{business_id}/{asset_id}-llm.jpg"
 
 
+async def read_upload(data: bytes, content_type: str, kind: str) -> ProcessedUpload:
+    """`process_upload` in a thread, at most MAX_CONCURRENT_DECODES at a time. The others wait on
+    the event loop, not in a thread, so they don't hold the pool other work needs."""
+    loop = asyncio.get_running_loop()
+    slots = _decode_slots.setdefault(loop, asyncio.Semaphore(MAX_CONCURRENT_DECODES))
+    async with slots:
+        return await asyncio.to_thread(process_upload, data, content_type, kind)
+
+
 def process_upload(data: bytes, content_type: str, kind: str) -> ProcessedUpload:
-    """Read an uploaded photo or logo once it is in Storage. CPU-bound: run it in a thread."""
-    with _decode_slots:
-        try:
-            with Image.open(BytesIO(data), formats=[PIL_FORMATS[content_type]]) as source:
-                if source.width * source.height > MAX_PIXELS:
-                    raise ImageTooLarge(f"{source.width}x{source.height} is over {MAX_PIXELS} px")
-                image = ImageOps.exif_transpose(source)
-                image.load()
-        except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-            raise UnreadableImage(str(exc)) from exc
-        return ProcessedUpload(
-            width=image.width,
-            height=image.height,
-            llm_copy=reference_from(image),
-            jpeg=_to_jpeg(image) if content_type == HEIC else None,
-            palette=logo_palette(image) if kind == "logo" else None,
-        )
+    """Read an uploaded photo or logo once it is in Storage. CPU-bound: use `read_upload`."""
+    try:
+        with Image.open(BytesIO(data), formats=[PIL_FORMATS[content_type]]) as source:
+            if source.width * source.height > MAX_PIXELS:
+                raise ImageTooLarge(f"{source.width}x{source.height} is over {MAX_PIXELS} px")
+            image = ImageOps.exif_transpose(source)
+            image.load()
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+        raise UnreadableImage(str(exc)) from exc
+    return ProcessedUpload(
+        width=image.width,
+        height=image.height,
+        llm_copy=reference_from(image),
+        jpeg=_to_jpeg(image) if content_type == HEIC else None,
+        palette=logo_palette(image) if kind == "logo" else None,
+    )
 
 
 def logo_palette(image: Image.Image) -> list[str]:

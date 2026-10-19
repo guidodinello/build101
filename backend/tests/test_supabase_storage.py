@@ -85,6 +85,31 @@ async def test_download_refuses_a_declared_size_over_max_bytes_without_reading()
     assert body.read == 0
 
 
+async def test_download_asks_for_the_object_as_it_is_not_compressed() -> None:
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, content=b"jpeg")
+
+    await storage(httpx.MockTransport(handle)).download("assets", "b1/a1.jpg", max_bytes=10)
+
+    assert seen[0].headers["accept-encoding"] == "identity"
+
+
+async def test_download_refuses_a_response_that_is_compressed_anyway() -> None:
+    """A compressed body could expand past the cap before the byte count sees it."""
+    body = CountingStream(chunks=10)
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(200, headers={"content-encoding": "gzip"}, stream=body)
+    )
+
+    with pytest.raises(StorageError, match="content-encoding"):
+        await storage(transport).download("assets", "b1/a1.jpg", max_bytes=10 * 1024)
+
+    assert body.read == 0
+
+
 async def test_download_under_max_bytes_returns_everything() -> None:
     transport = httpx.MockTransport(lambda _: httpx.Response(200, content=b"jpeg"))
 

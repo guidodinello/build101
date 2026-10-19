@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -16,6 +17,7 @@ from app.db.models import BrandAsset, Business, Job, MagicLink
 from app.db.session import get_session
 from app.main import app
 from app.onboarding import uploads
+from app.onboarding.links import hash_token
 from app.storage import StorageError, get_storage
 from tests.conftest import make_image, requires_db
 from tests.fakes import CountingStorage, FakeChannel, FakeStorage
@@ -1077,3 +1079,30 @@ async def test_archiving_still_answers_204_when_storage_fails(
     async with sessions() as db:
         row = await db.get(BrandAsset, uuid.UUID(asset["id"]))
     assert row and row.archived_at is not None
+
+
+async def test_an_edit_waiting_on_the_submit_is_refused_once_it_commits(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    """A sibling write that reaches the check while `/complete` holds the Business can't slip in
+    after the form was submitted: it waits for the lock, then sees the submit."""
+    first = await new_link(client)
+    second = await new_link(client)
+    async with sessions() as db:
+        business = await db.scalar(select(Business))
+        assert business is not None
+        await db.refresh(business, with_for_update=True)  # what /complete holds while it stamps
+        edit = asyncio.create_task(client.put(f"/api/o/{second}/business", json=BUSINESS))
+        await asyncio.sleep(0.3)
+        assert not edit.done()
+        link = await db.scalar(select(MagicLink).where(MagicLink.token_hash == hash_token(first)))
+        assert link is not None
+        link.completed_at = datetime.now(UTC)
+        await db.commit()
+
+    response = await asyncio.wait_for(edit, timeout=5)
+
+    assert response.status_code == 409
+    assert error_code(response) == "onboarding_completed"
+    async with sessions() as db:
+        assert (await db.scalar(select(Business.name))) != BUSINESS["name"]

@@ -1,6 +1,6 @@
+import asyncio
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
 import pytest
@@ -9,11 +9,13 @@ from PIL import Image
 from app.onboarding import uploads
 from app.onboarding.uploads import (
     ImageTooLarge,
+    ProcessedUpload,
     UnreadableImage,
     asset_path,
     llm_copy_path,
     logo_palette,
     process_upload,
+    read_upload,
 )
 from tests.conftest import make_image
 
@@ -115,10 +117,10 @@ def test_the_pixel_cap_is_25_megapixels() -> None:
     assert uploads.MAX_PIXELS == 25_000_000
 
 
-def test_decodes_run_at_most_as_many_at_once_as_the_semaphore_allows(
+async def test_decodes_run_at_most_as_many_at_once_as_the_limit_allows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(uploads, "_decode_slots", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(uploads, "MAX_CONCURRENT_DECODES", 2)
     running = 0
     peak = 0
     lock = threading.Lock()
@@ -137,7 +139,36 @@ def test_decodes_run_at_most_as_many_at_once_as_the_semaphore_allows(
     monkeypatch.setattr(uploads, "reference_from", slow_reference)
     data = make_image((100, 80))
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        list(pool.map(lambda _: process_upload(data, "image/jpeg", "photo"), range(4)))
+    await asyncio.gather(*(read_upload(data, "image/jpeg", "photo") for _ in range(6)))
+
+    assert peak == 2
+
+
+async def test_decodes_waiting_for_a_slot_leave_the_thread_pool_free(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Waiting happens on the event loop: one decode runs in a thread, the rest hold none."""
+    monkeypatch.setattr(uploads, "MAX_CONCURRENT_DECODES", 1)
+    in_threads = 0
+    peak = 0
+    lock = threading.Lock()
+    process = uploads.process_upload
+
+    def counting(data: bytes, content_type: str, kind: str) -> ProcessedUpload:
+        nonlocal in_threads, peak
+        with lock:
+            in_threads += 1
+            peak = max(peak, in_threads)
+        try:
+            time.sleep(0.05)
+            return process(data, content_type, kind)
+        finally:
+            with lock:
+                in_threads -= 1
+
+    monkeypatch.setattr(uploads, "process_upload", counting)
+    data = make_image((100, 80))
+
+    await asyncio.gather(*(read_upload(data, "image/jpeg", "photo") for _ in range(5)))
 
     assert peak == 1

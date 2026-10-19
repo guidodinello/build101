@@ -4,7 +4,6 @@ Files go from the browser straight to Supabase Storage through a signed upload U
 only issues the URL, then reads the file back once the browser says it finished.
 """
 
-import asyncio
 import logging
 import uuid
 from collections import Counter
@@ -31,7 +30,7 @@ from app.onboarding.uploads import (
     UnreadableImage,
     asset_path,
     llm_copy_path,
-    process_upload,
+    read_upload,
 )
 from app.storage import ASSETS_BUCKET, ObjectTooLarge, StorageError, StoragePort, get_storage
 
@@ -146,7 +145,13 @@ async def is_submitted(session: AsyncSession, business_id: uuid.UUID) -> bool:
 async def get_open_onboarding(
     onboarding: Annotated[Onboarding, Depends(get_onboarding)], session: SessionDep
 ) -> Onboarding:
-    """The link is reusable until the form is submitted (user-flows.md, Flow 1)."""
+    """The link is reusable until the form is submitted (user-flows.md, Flow 1).
+
+    The Business row is locked before the check, like `/complete` does before stamping a link: a
+    write that passed the check waits there and can't commit after the form was submitted (the
+    brand job would not see it). The lock lasts until the request's transaction ends.
+    """
+    await session.refresh(onboarding.business, with_for_update=True)
     if await is_submitted(session, onboarding.business.id):
         raise ApiError(409, "onboarding_completed", ALREADY_COMPLETED)
     return onboarding
@@ -314,8 +319,8 @@ async def request_upload(
     if body.size_bytes > settings.max_photo_mb * BYTES_PER_MB:
         raise ApiError(422, "unsupported_file", file_too_big(settings.max_photo_mb))
     business = onboarding.business
-    # The wizard uploads several files at once; the row lock makes the caps hold for all.
-    await session.refresh(business, with_for_update=True)
+    # The wizard uploads several files at once; the Business lock taken by OpenOnboardingDep
+    # makes the caps hold for all.
     await _check_upload_caps(session, business.id, body.kind)
 
     asset_id = uuid.uuid4()
@@ -417,7 +422,7 @@ async def _finish_upload(
     if data is None:
         raise ApiError(409, "upload_missing", UPLOAD_MISSING)
     try:
-        processed = await asyncio.to_thread(process_upload, data, asset.mime_type, asset.kind)
+        processed = await read_upload(data, asset.mime_type, asset.kind)
     except ImageTooLarge:
         await _fail(asset, session)
         raise ApiError(422, "image_too_large", IMAGE_TOO_LARGE) from None

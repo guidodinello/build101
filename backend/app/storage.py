@@ -90,7 +90,11 @@ class SupabaseStorage:
         self, bucket: str, path: str, *, max_bytes: int | None = None
     ) -> bytes | None:
         try:
-            async with self._client.stream("GET", f"/object/{bucket}/{path}") as response:
+            # Identity: the byte count must be the object's own, not what a compressed body
+            # expands to; a response that is encoded anyway is refused in _read_capped.
+            async with self._client.stream(
+                "GET", f"/object/{bucket}/{path}", headers={"Accept-Encoding": "identity"}
+            ) as response:
                 # Storage answers a missing object with 400 or 404 depending on the version.
                 if response.status_code in (HTTP_NOT_FOUND, HTTP_BAD_REQUEST):
                     return None
@@ -148,6 +152,9 @@ class SupabaseStorage:
 
 async def _read_capped(response: httpx.Response, max_bytes: int | None) -> bytes:
     """The body, read chunk by chunk; leaving early closes the connection with the rest unread."""
+    encoding = response.headers.get("content-encoding", "identity").lower()
+    if encoding != "identity":
+        raise StorageError(f"supabase answered with content-encoding {encoding!r}")
     declared = response.headers.get("content-length", "")
     if max_bytes is not None and declared.isdigit() and int(declared) > max_bytes:
         raise ObjectTooLarge(f"object is {declared} bytes, over {max_bytes}")
