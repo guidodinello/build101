@@ -3,9 +3,9 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import cache
-from typing import Annotated, Any
+from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 
 from app.config import Settings, get_settings
 from app.conversation.factory import build_inbound_handler
@@ -36,7 +36,7 @@ def get_inbound_handler() -> InboundHandler:
 
 
 @asynccontextmanager
-async def lifespan(app: Any) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Built at boot so a missing GEMINI_API_KEY or PUBLIC_BACKEND_URL stops the app, instead of
     # turning every webhook into a 500. Tests swap the handler through dependency_overrides.
     app.dependency_overrides.get(get_inbound_handler, get_inbound_handler)()

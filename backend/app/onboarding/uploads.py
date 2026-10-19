@@ -67,6 +67,8 @@ def logo_palette(image: Image.Image) -> list[str]:
     used = sorted(quantized.getcolors() or [], reverse=True)
     colors: list[str] = []
     for _, index in used:
+        if not isinstance(index, int):  # a P-mode image's getcolors yields palette indexes
+            continue
         r, g, b, a = rgba[index * 4 : index * 4 + 4]
         color = f"#{r:02x}{g:02x}{b:02x}"
         if a >= OPAQUE_ALPHA and color not in colors:

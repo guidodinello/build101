@@ -24,6 +24,10 @@ const GOALS: { value: Goal; label: string }[] = [
 const OTHER_AUDIENCE = "Otro";
 const DEFAULT_SCALE: Scale = 3;
 
+function isScale(value: unknown): value is Scale {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 5;
+}
+
 const EMOJI_POLICIES: { value: EmojiPolicy; label: string }[] = [
   { value: "many", label: "Sí, bastantes" },
   { value: "few", label: "Pocos" },
@@ -101,7 +105,7 @@ export function PreferencesStep() {
           aria-labelledby="goal"
           options={GOALS}
           value={goal ? [goal] : []}
-          onChange={(value) => setGoal((value[0] as Goal) ?? null)}
+          onChange={(value) => setGoal(GOALS.find((option) => option.value === value[0])?.value ?? null)}
           invalid={!!show(errors.goal)}
         />
       </Question>
@@ -143,7 +147,7 @@ export function PreferencesStep() {
               aria-labelledby="emoji"
               options={EMOJI_POLICIES}
               value={emoji ? [emoji] : []}
-              onChange={(value) => setEmoji((value[0] as EmojiPolicy) ?? null)}
+              onChange={(value) => setEmoji(EMOJI_POLICIES.find((option) => option.value === value[0])?.value ?? null)}
               invalid={!!show(errors.emoji)}
             />
           </Question>
@@ -246,7 +250,9 @@ function ToneSlider({
         max={5}
         step={1}
         value={value}
-        onValueChange={(next) => onChange(next as Scale)}
+        onValueChange={(next) => {
+          if (isScale(next)) onChange(next);
+        }}
       />
       <div className="flex justify-between text-[13px] text-muted-foreground" aria-hidden>
         <span>{start}</span>

@@ -241,7 +241,7 @@ def _json(response: httpx.Response) -> dict[str, Any]:
     return body
 
 
-def _field(obj: Any, key: str) -> str:
+def _field(obj: object, key: str) -> str:
     value = obj.get(key) if isinstance(obj, dict) else None
     if not isinstance(value, str) or not value:
         raise PublisherError(f"zernio response has no {key}")
