@@ -349,7 +349,8 @@ class VideoGenPort(Protocol):
 class PublicVideos:
     def add(self, data: bytes) -> str: ...            # "/media/{token}.mp4", relative to the public URL
     def keep(self, path: str, data: bytes) -> None: ... # serve again as the newest; cap 20 clips
-    def get(self, token: str) -> bytes | None: ...
+    def serve_from(self, lookup: Callable[[str], bytes | None]) -> None: ...  # wired with InMemoryPosts.video
+    def get(self, token: str) -> bytes | None: ...    # cache, else the clip of a Post still in the store
 # GET | HEAD /media/{token}.mp4 -> video/mp4 (no Range support yet)
 
 # app/media/images.py

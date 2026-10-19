@@ -23,7 +23,12 @@ import pytest
 
 from app.config import get_settings
 from app.posts.publish import MAX_RETRY_AFTER_S
-from app.publishing.base import PublishInProgress, PublishMedia, PublishRetryable
+from app.publishing.base import (
+    PublishInProgress,
+    PublishMedia,
+    PublishResult,
+    PublishRetryable,
+)
 from app.publishing.zernio import ZernioPublisher
 
 pytestmark = pytest.mark.live
@@ -41,6 +46,33 @@ def live_publisher() -> ZernioPublisher:
     )
 
 
+async def publish_live(
+    publisher: ZernioPublisher, account_id: str, caption: str, media: PublishMedia
+) -> PublishResult:
+    """Publish and close the publisher, retrying with one idempotency key.
+
+    Zernio's create call can time out even when the post goes live; the same key makes the
+    retry replay that post instead of publishing a second one (integrations.md § Zernio)
+    """
+    idempotency_key = f"live-test-{uuid.uuid4()}"
+    try:
+        for attempt in range(1, LIVE_PUBLISH_ATTEMPTS + 1):
+            try:
+                return await publisher.publish(
+                    account_id, caption, media, idempotency_key=idempotency_key
+                )
+            except PublishInProgress as exc:
+                if attempt == LIVE_PUBLISH_ATTEMPTS:
+                    raise
+                await asyncio.sleep(min(exc.retry_after_s or 5.0, MAX_RETRY_AFTER_S))
+            except PublishRetryable:
+                if attempt == LIVE_PUBLISH_ATTEMPTS:
+                    raise
+        raise AssertionError("unreachable")
+    finally:
+        await publisher.aclose()
+
+
 async def test_publish_one_image_to_the_demo_account() -> None:
     settings = get_settings()
     image_url = os.environ.get("ZERNIO_TEST_IMAGE_URL")
@@ -50,26 +82,8 @@ async def test_publish_one_image_to_the_demo_account() -> None:
     stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     caption = f"[test] build101 Zernio live publish {stamp}. Delete me."
     media = PublishMedia(format="image", url=image_url)
-    # Zernio's create call can time out even when the post goes live; the same key makes the
-    # retry replay that post instead of publishing a second one (integrations.md § Zernio)
-    idempotency_key = f"live-test-{uuid.uuid4()}"
     publisher = live_publisher()
-    try:
-        for attempt in range(1, LIVE_PUBLISH_ATTEMPTS + 1):
-            try:
-                result = await publisher.publish(
-                    settings.zernio_account_id, caption, media, idempotency_key=idempotency_key
-                )
-                break
-            except PublishInProgress as exc:
-                if attempt == LIVE_PUBLISH_ATTEMPTS:
-                    raise
-                await asyncio.sleep(min(exc.retry_after_s or 5.0, MAX_RETRY_AFTER_S))
-            except PublishRetryable:
-                if attempt == LIVE_PUBLISH_ATTEMPTS:
-                    raise
-    finally:
-        await publisher.aclose()
+    result = await publish_live(publisher, settings.zernio_account_id, caption, media)
 
     assert result.status == "published", result.error
     assert result.permalink is not None
@@ -85,17 +99,12 @@ async def test_publish_one_reel_to_the_demo_account() -> None:
     stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     caption = f"[test] build101 Zernio live reel {stamp}. Delete me."
     media = PublishMedia(format="reel", url=video_url, cover_offset_ms=1000)
-    publisher = live_publisher()
-    try:
-        result = await publisher.publish(
-            settings.zernio_account_id, caption, media, idempotency_key=f"live-test-{uuid.uuid4()}"
-        )
-    finally:
-        await publisher.aclose()
+    result = await publish_live(live_publisher(), settings.zernio_account_id, caption, media)
 
     # A Reel can still be processing when the poll window ends: that is `pending`, not a failure
     assert result.status in {"published", "pending"}, result.error
-    warnings.warn(f"delete this test reel by hand in Instagram: {result.permalink}", stacklevel=1)
+    where = result.permalink or "its link is not known yet: look for the caption on the account"
+    warnings.warn(f"delete this test reel by hand in Instagram: {where}", stacklevel=1)
 
 
 async def test_connect_url_for_the_demo_profile() -> None:

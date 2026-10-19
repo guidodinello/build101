@@ -69,3 +69,38 @@ def test_keep_serves_an_evicted_video_again_and_makes_it_the_newest() -> None:
 
     assert videos.get(first.removeprefix("/media/").removesuffix(".mp4")) == b"1"
     assert videos.get(second.removeprefix("/media/").removesuffix(".mp4")) is None
+
+
+def test_an_evicted_clip_is_still_served_while_its_post_holds_it() -> None:
+    videos = PublicVideos(max_videos=1)
+    held = {"clip": b"1"}
+    path = videos.add(held["clip"])
+    videos.serve_from(lambda p: held["clip"] if p == path else None)
+    videos.add(b"2")  # evicts the first from the LRU
+    try:
+        with serve(videos) as client:
+            got, head = client.get(path), client.head(path)
+            missing = client.get("/media/not-a-token.mp4")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert got.status_code == 200
+    assert got.content == b"1"
+    assert head.status_code == 200
+    assert head.headers["content-length"] == "1"
+    assert missing.status_code == 404
+
+
+def test_the_store_finds_a_clip_by_path_until_its_post_is_dropped() -> None:
+    from app.posts.store import InMemoryPosts, Post, PostVideo
+
+    store = InMemoryPosts(max_per_sender=1)
+    store.add(Post("a", "s", [], "c", video=PostVideo("/media/a.mp4", b"A")))
+
+    assert store.video("/media/a.mp4") == b"A"
+    assert store.video("/media/other.mp4") is None
+
+    store.add(Post("b", "s", [], "c", video=PostVideo("/media/b.mp4", b"B")))  # drops "a"
+
+    assert store.video("/media/a.mp4") is None
+    assert store.video("/media/b.mp4") == b"B"
