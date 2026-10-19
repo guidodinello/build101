@@ -54,6 +54,9 @@ def import_instagram_job(instagram: InstagramPort, max_posts: int, max_images: i
         The profile and the captions go to `onboarding_data["instagram"]`; the newest images
         become Brand assets (`source = 'instagram'`) with an Asset Analyst job each. Images
         imported before are skipped, so a reconnect only adds what is new.
+
+        The Owner's token is used here once and then deleted, whether the import worked or not:
+        nothing else reads it, and a reconnect stores a fresh one.
         """
         if context.business_id is None:
             raise ValueError("import_instagram needs a business")
@@ -69,6 +72,7 @@ def import_instagram_job(instagram: InstagramPort, max_posts: int, max_images: i
             )
             if account is None:
                 return {"skipped": "no connected instagram"}
+            account_id = account.id
             access_token = account.access_token or ""
             imported = set(
                 (
@@ -82,47 +86,61 @@ def import_instagram_job(instagram: InstagramPort, max_posts: int, max_images: i
                 ).all()
             )
 
-        profile = await instagram.profile(access_token)
-        media = await instagram.recent_media(access_token, max_posts)
-        wanted = _images_to_import(media, imported, max_images)
-        limit = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
+        try:
+            profile = await instagram.profile(access_token)
+            media = await instagram.recent_media(access_token, max_posts)
+            wanted = _images_to_import(media, imported, max_images)
+            limit = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
-        async def fetch(item: tuple[InstagramImage, str | None]) -> ImportedImage | None:
-            async with limit:
-                return await _store_image(context, instagram, business_id, *item)
+            async def fetch(item: tuple[InstagramImage, str | None]) -> ImportedImage | None:
+                async with limit:
+                    return await _store_image(context, instagram, business_id, *item)
 
-        images = [image for image in await asyncio.gather(*map(fetch, wanted)) if image]
+            images = [image for image in await asyncio.gather(*map(fetch, wanted)) if image]
 
-        async with context.sessions() as db:
-            business = await db.get_one(Business, business_id)
-            business.onboarding_data = {
-                **business.onboarding_data,
-                "instagram": _summary(profile, media),
-            }
-            business.instagram_handle = business.instagram_handle or profile.username
-            business.website = business.website or profile.website
-            for image in images:
-                db.add(
-                    BrandAsset(
-                        id=image.asset_id,
-                        business_id=business_id,
-                        kind="photo",
-                        source="instagram",
-                        status="ready",
-                        storage_path=image.storage_path,
-                        mime_type=image.mime_type,
-                        size_bytes=image.size_bytes,
-                        width=image.processed.width,
-                        height=image.processed.height,
-                        owner_hint=(image.caption or "")[:MAX_HINT_CHARS] or None,
-                        external_id=image.external_id,
+            async with context.sessions() as db:
+                business = await db.get_one(Business, business_id)
+                business.onboarding_data = {
+                    **business.onboarding_data,
+                    "instagram": _summary(profile, media),
+                }
+                business.instagram_handle = business.instagram_handle or profile.username
+                business.website = business.website or profile.website
+                for image in images:
+                    db.add(
+                        BrandAsset(
+                            id=image.asset_id,
+                            business_id=business_id,
+                            kind="photo",
+                            source="instagram",
+                            status="ready",
+                            storage_path=image.storage_path,
+                            mime_type=image.mime_type,
+                            size_bytes=image.size_bytes,
+                            width=image.processed.width,
+                            height=image.processed.height,
+                            owner_hint=(image.caption or "")[:MAX_HINT_CHARS] or None,
+                            external_id=image.external_id,
+                        )
                     )
-                )
-                enqueue(db, "analyze_asset", business_id, {"asset_id": str(image.asset_id)})
-            await db.commit()
+                    enqueue(db, "analyze_asset", business_id, {"asset_id": str(image.asset_id)})
+                (await db.get_one(SocialAccount, account_id)).access_token = None
+                await db.commit()
+        except Exception:
+            await _drop_token(context, account_id)
+            raise
         return {"posts": len(media), "images": len(images), "skipped": len(wanted) - len(images)}
 
     return import_instagram
+
+
+async def _drop_token(context: JobContext, account_id: uuid.UUID) -> None:
+    """The token is read once, by this job (#102); a failed import must not leave it behind."""
+    async with context.sessions() as db:
+        account = await db.get(SocialAccount, account_id)
+        if account is not None and account.access_token is not None:
+            account.access_token = None
+            await db.commit()
 
 
 def _images_to_import(

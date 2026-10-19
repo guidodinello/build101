@@ -126,6 +126,7 @@ class SocialAccount(Base):
     provider_account_id: Mapped[str | None]
     handle: Mapped[str | None]
     status: Mapped[str] = mapped_column(server_default="pending")
+    # Held only until `import_instagram` runs, which clears it (#102)
     access_token: Mapped[str | None]
     token_expires_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())

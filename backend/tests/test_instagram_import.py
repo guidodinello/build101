@@ -13,7 +13,7 @@ from app.api.instagram import DEV_STATE_SECRET
 from app.config import Settings, get_settings
 from app.db.models import BrandAsset, Business, Job, MagicLink, SocialAccount
 from app.db.session import get_session
-from app.instagram.base import InstagramError, InstagramImage, InstagramMedia
+from app.instagram.base import InstagramError, InstagramImage, InstagramMedia, InstagramProfile
 from app.instagram.factory import get_instagram
 from app.instagram.mock import MockInstagram
 from app.instagram.oauth_state import sign_state
@@ -221,12 +221,65 @@ async def test_the_import_feeds_the_brand_inputs_and_queues_the_analyses(
     assert [post["likes"] for post in imported["posts"]] == [40, 30, 20]
 
 
-async def test_a_second_import_only_adds_what_is_new(
+async def stored_token(sessions: async_sessionmaker[AsyncSession]) -> str | None:
+    async with sessions() as db:
+        account = await db.scalar(select(SocialAccount))
+        assert account is not None
+        return account.access_token
+
+
+async def test_the_import_deletes_the_token_it_used(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    await connect(client, token)
+    assert await stored_token(sessions)
+
+    await run_import(sessions, storage, MockInstagram())
+
+    assert await stored_token(sessions) is None
+    async with sessions() as db:
+        account = await db.scalar(select(SocialAccount))
+    assert account is not None
+    assert account.status == "connected" and account.token_expires_at
+
+
+async def test_a_failed_import_still_deletes_the_token(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
+) -> None:
+    class Unauthorized(MockInstagram):
+        async def profile(self, access_token: str) -> InstagramProfile:
+            raise InstagramError("401 from Instagram", status=401)
+
+    token = await new_link(client)
+    await connect(client, token)
+
+    with pytest.raises(InstagramError):
+        await run_import(sessions, storage, Unauthorized())
+
+    assert await stored_token(sessions) is None
+
+
+async def test_the_import_does_not_run_twice_on_one_token(
     client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
 ) -> None:
     token = await new_link(client)
     await connect(client, token)
     await run_import(sessions, storage, MockInstagram())
+
+    assert await run_import(sessions, storage, MockInstagram()) == {
+        "skipped": "no connected instagram"
+    }
+
+
+async def test_a_reconnect_stores_a_fresh_token_and_only_adds_what_is_new(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession], storage: FakeStorage
+) -> None:
+    token = await new_link(client)
+    await connect(client, token)
+    await run_import(sessions, storage, MockInstagram())
+    await connect(client, token)
+    assert await stored_token(sessions)
 
     result = await run_import(sessions, storage, MockInstagram())
 

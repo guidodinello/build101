@@ -25,8 +25,8 @@ Also rejected: connecting Zernio per Business too (two OAuth hops for the Owner,
 
 - One connect step for the Owner, and the first real use of our Meta app ([ADR 0015](0015-instagram-login.md)). In development mode it works only for accounts added as Instagram testers who accepted the invite. Serving any other Business needs Advanced Access, App Review and Business Verification.
 - Meta's IG Media reference labels `caption` "Facebook Login only", and its Instagram Login getting-started page leaves `biography` and `website` out of `/me`. The adapter asks for them and retries without them on a 400, so a refusal costs voice signal instead of failing the import. Confirm both on the demo account.
-- The long-lived token lasts 60 days and is not refreshed: a one-shot import doesn't need it, but comments, DMs or a re-import later will.
+- The long-lived token lasts 60 days and is not refreshed: a one-shot import doesn't need it, but comments, DMs or a re-import later will. Since the security audit (M-5, #102) the token is not kept either: `import_instagram` deletes it after its one read, so a re-import means a reconnect. Add encryption at rest (and refresh) together with the first feature that needs the token again.
 - The magic-link token travels through Meta inside `state`, as it did through Zernio in the old `redirect_url` design. A forwarded connect link stops working after 15 minutes, which limits binding someone else's account to a Business.
-- `social_accounts` now holds access tokens, so the migration turns on row level security there (the backend connects as the table owner, which RLS does not restrict).
+- `social_accounts` holds access tokens, briefly, so the migration turns on row level security there (the backend connects as the table owner, which RLS does not restrict).
 - Imported photos don't count toward the wizard's 3 to 15 photos and don't show in its grid. They reach the Agency as Brand assets, and the Owner can archive any of them later.
 - Stories cannot be imported after 24 hours, and highlights not at all, through either route.
