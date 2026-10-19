@@ -1,12 +1,13 @@
 import asyncio
 import json
+import uuid
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from app.channels.base import Button, InboundMessage
+from app.channels.base import Button, ChannelError, InboundMessage
 from app.channels.inbound import EchoHandler
 from app.channels.kapso_webhook import parse_message
 from app.config import Settings
@@ -17,7 +18,10 @@ from app.conversation.events import (
     AudioUnclear,
     BrandConfirmed,
     BrandFixAsked,
+    BrandGenerating,
+    BrandSummaryReady,
     Event,
+    JobFailed,
     JobRetried,
     PhotosReceived,
     PhotoTooBig,
@@ -36,8 +40,9 @@ from app.conversation.events import (
     StaleButton,
     UnsupportedMedia,
 )
-from app.conversation.factory import build_inbound_handler
+from app.conversation.factory import build_conversation
 from app.conversation.history import InMemoryHistory
+from app.conversation.outbound import FixedReplies
 from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
 from app.llm.client import Step, user_step
@@ -591,13 +596,13 @@ async def test_messages_from_one_sender_are_answered_in_order() -> None:
 
 def test_chat_handler_needs_a_gemini_key_and_a_public_url() -> None:
     with pytest.raises(ValueError, match="GEMINI_API_KEY"):
-        build_inbound_handler(
+        build_conversation(
             Settings(inbound_handler="chat", gemini_api_key=None),
             PublicImages(),
             MockPublisher(),
         )
     with pytest.raises(ValueError, match="PUBLIC_BACKEND_URL"):
-        build_inbound_handler(
+        build_conversation(
             Settings(inbound_handler="chat", gemini_api_key="key", public_backend_url=None),
             PublicImages(),
             MockPublisher(),
@@ -605,7 +610,7 @@ def test_chat_handler_needs_a_gemini_key_and_a_public_url() -> None:
 
 
 def test_factory_builds_each_handler() -> None:
-    chat = build_inbound_handler(
+    chat = build_conversation(
         Settings(
             inbound_handler="chat",
             gemini_api_key="key",
@@ -615,13 +620,16 @@ def test_factory_builds_each_handler() -> None:
         PublicImages(),
         MockPublisher(),
     )
-    echo = build_inbound_handler(Settings(inbound_handler="echo"), PublicImages(), MockPublisher())
+    echo = build_conversation(Settings(inbound_handler="echo"), PublicImages(), MockPublisher())
 
-    assert isinstance(chat, ChatHandler)
-    assert isinstance(echo, EchoHandler)
+    assert isinstance(chat.handler, ChatHandler)
+    assert chat.notify == chat.handler.notify
+    assert isinstance(echo.handler, EchoHandler)
+    assert isinstance(echo.notify, FixedReplies)
 
 
 POST_ID = "abcdef12"
+JOB_UUID = uuid.UUID("22222222-2222-2222-2222-222222222222")
 CREATE = call_reply("create_post", brief="mesa", asset_ids=["f1"], style="design")
 
 
@@ -788,6 +796,47 @@ EVENTS: list[Event] = [
     StaleButton(),
     *BUTTON_EVENTS,
 ]
+
+
+VERBATIM_EVENTS = [
+    (
+        BrandSummaryReady("Katei", "• cálidos"),
+        messages_es.brand_summary("Katei", "• cálidos"),
+        ["brand_ok", "brand_fix"],
+    ),
+    (JobFailed(JOB_UUID, "generate_brand"), messages_es.JOB_FAILED, [f"retry:{JOB_UUID}"]),
+    (BrandGenerating(), messages_es.BRAND_GENERATING, None),
+]
+
+
+@pytest.mark.parametrize(
+    ("event", "text", "button_ids"), VERBATIM_EVENTS, ids=lambda e: type(e).__name__
+)
+async def test_a_verbatim_event_is_sent_as_written_with_no_model_turn(
+    event: Event, text: str, button_ids: list[str] | None
+) -> None:
+    model, channel = ScriptedModel(), FakeChannel()
+    chat, _ = build(model)
+
+    await chat.notify(SENDER, event, channel)
+
+    assert model.calls == []
+    assert channel.sent == [(SENDER, text)]
+    assert [ids for _, _, ids in channel.buttons] == ([button_ids] if button_ids else [])
+    assert [step_text(step) for step in await chat._history.get(SENDER)] == [event.note()]
+
+
+async def test_a_verbatim_events_delivery_failure_reaches_the_caller_and_leaves_no_note() -> None:
+    class Down(FakeChannel):
+        async def send_text(self, to: str, text: str) -> str:
+            raise ChannelError("boom")
+
+    chat, _ = build(ScriptedModel())
+
+    with pytest.raises(ChannelError):
+        await chat.notify(SENDER, BrandGenerating(), Down())
+
+    assert await chat._history.get(SENDER) == []
 
 
 @pytest.mark.parametrize("event", EVENTS, ids=lambda event: type(event).__name__)

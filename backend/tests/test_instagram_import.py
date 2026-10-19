@@ -22,7 +22,7 @@ from app.jobs.runner import JobContext
 from app.main import app
 from app.storage import get_storage
 from tests.conftest import requires_db
-from tests.fakes import FakeChannel, FakeStorage, SequenceModel
+from tests.fakes import EventLog, FakeChannel, FakeStorage, SequenceModel
 from tests.test_onboarding_api import new_link, upload
 
 pytestmark = requires_db
@@ -178,7 +178,7 @@ def job_context(
     sessions: async_sessionmaker[AsyncSession], storage: FakeStorage, business_id: uuid.UUID
 ) -> JobContext:
     return JobContext(
-        uuid.uuid4(), business_id, sessions, storage, FakeChannel(), SequenceModel([])
+        uuid.uuid4(), business_id, sessions, storage, FakeChannel(), SequenceModel([]), EventLog()
     )
 
 

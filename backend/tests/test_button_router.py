@@ -9,8 +9,8 @@ from app.conversation.events import (
     PostStarted,
     PublishStarted,
     StaleButton,
-    buttons,
 )
+from app.conversation.outbound import buttons
 from app.conversation.photos import InMemoryPhotos
 from app.media.public import PublicImages
 from app.posts.drafts import PostCopy, PostDrafter

@@ -7,7 +7,6 @@ from app.conversation.history import (
     DbHistory,
     InMemoryHistory,
     cut_point,
-    record_note,
     tokens,
     transcript,
 )
@@ -130,22 +129,6 @@ async def test_without_a_business_nothing_is_stored(
     await history.extend(PHONE, turn("hola"))
 
     assert await history.get(PHONE) == []
-
-
-@requires_db
-async def test_a_job_can_add_a_note_to_the_history(
-    sessions: async_sessionmaker[AsyncSession],
-) -> None:
-    async with sessions() as db:
-        business = Business(owner_phone=PHONE)
-        db.add(business)
-        await db.commit()
-    history = DbHistory(sessions)
-    await history.extend(PHONE, turn("hola"))
-
-    await record_note(sessions, business.id, "[brand summary sent]")
-
-    assert (await history.get(PHONE))[-1] == user_step("[brand summary sent]")
 
 
 @pytest.mark.parametrize("drop", [0, 99])

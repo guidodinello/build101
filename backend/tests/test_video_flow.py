@@ -9,7 +9,7 @@ from app.config import Settings
 from app.conversation.button_router import ButtonRouter
 from app.conversation.chat import ChatHandler
 from app.conversation.events import StaleButton, VideoFailed
-from app.conversation.factory import build_inbound_handler
+from app.conversation.factory import build_conversation
 from app.conversation.history import InMemoryHistory
 from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
@@ -175,8 +175,8 @@ def test_flag_off_builds_no_video_maker_and_flag_on_builds_one() -> None:
     off = Settings(inbound_handler="chat", gemini_api_key="k", public_backend_url=BASE_URL)
     on = off.model_copy(update={"video_gen_enabled": True, "video_gen": "mock"})
 
-    handler_off = build_inbound_handler(off, PublicImages(), FakePublisher())
-    handler_on = build_inbound_handler(on, PublicImages(), FakePublisher())
+    handler_off = build_conversation(off, PublicImages(), FakePublisher()).handler
+    handler_on = build_conversation(on, PublicImages(), FakePublisher()).handler
 
     assert isinstance(handler_off, ChatHandler) and handler_off._videos is None
     assert isinstance(handler_on, ChatHandler) and handler_on._videos is not None
@@ -437,6 +437,6 @@ def test_the_factory_lets_the_clip_cache_fall_back_to_the_posts() -> None:
     videos = PublicVideos()
     settings = Settings(inbound_handler="chat", gemini_api_key="k", public_backend_url=BASE_URL)
 
-    build_inbound_handler(settings, PublicImages(), FakePublisher(), videos)
+    build_conversation(settings, PublicImages(), FakePublisher(), videos)
 
     assert videos._lookup is not None

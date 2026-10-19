@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.channels.inbound import mask
 from app.db.models import ConversationStep
 from app.knowledge.db import business_of
-from app.llm.client import ChatModel, LLMError, Step, text_content, user_step
+from app.llm.client import ChatModel, LLMError, Step, text_content
 from app.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
@@ -138,15 +138,6 @@ class DbHistory:
                 return None
             self._business_ids[sender] = business.id
         return self._business_ids[sender]
-
-
-async def record_note(
-    sessions: async_sessionmaker[AsyncSession], business_id: uuid.UUID, note: str
-) -> None:
-    """Add a system note to a Business's history from outside the chat (a job's message)."""
-    async with sessions() as db:
-        db.add(ConversationStep(business_id=business_id, step=user_step(note)))
-        await db.commit()
 
 
 class ConversationSummary(BaseModel):
