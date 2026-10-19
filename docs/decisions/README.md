@@ -22,7 +22,7 @@ When an ADR is superseded, set its Status to `superseded`, add `- Superseded by:
 | [0001](0001-backend-python-fastapi.md) | Backend in Python + FastAPI | accepted | 2026-10-17 |
 | [0002](0002-whatsapp-cloud-api-channel.md) | WhatsApp as the channel from day one | proposed | 2026-10-17 |
 | [0003](0003-database-supabase-sqlalchemy.md) | Database on Supabase Postgres with SQLAlchemy and Alembic | proposed | 2026-10-17 |
-| [0004](0004-frontend-nextjs-vercel.md) | Frontend in Next.js on Vercel | proposed | 2026-10-17 |
+| [0004](0004-frontend-nextjs-vercel.md) | Frontend in Next.js on Vercel | proposed; hand-written REST types superseded by [0034](0034-zod-api-response-schemas.md) | 2026-10-17 |
 | [0005](0005-single-instance-in-process-jobs.md) | One backend instance with in-process jobs for the MVP | proposed | 2026-10-17 |
 | [0006](0006-fixed-agent-catalog-brand-brain.md) | Fixed agent catalog personalized by a Brand Brain | proposed | 2026-10-17 |
 | [0007](0007-approve-every-post.md) | Every post needs explicit approval | proposed | 2026-10-17 |
@@ -51,3 +51,4 @@ When an ADR is superseded, set its Status to `superseded`, add `- Superseded by:
 | [0030](0030-orchestrator-memory-and-context.md) | The orchestrator's memory and context | proposed | 2026-10-18 |
 | [0031](0031-pricing-free-basic-pro.md) | Launch pricing is Free, Basic US$29 and Pro US$49 | proposed | 2026-10-18 |
 | [0032](0032-instagram-first-onboarding.md) | Connect Instagram early in the wizard and let it answer for the Owner | proposed | 2026-10-18 |
+| [0034](0034-zod-api-response-schemas.md) | Check backend responses in the frontend with Zod schemas | proposed | 2026-10-19 |

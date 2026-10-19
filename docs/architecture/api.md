@@ -1,6 +1,6 @@
 # Backend API
 
-FastAPI. JSON in and out, `snake_case` fields. Errors use `{"error": {"code": "...", "message": "..."}}` with a proper HTTP status. OpenAPI is served at `/docs`; the frontend's `lib/api.ts` types are written by hand from this document (no codegen in the hackathon).
+FastAPI. JSON in and out, `snake_case` fields. Errors use `{"error": {"code": "...", "message": "..."}}` with a proper HTTP status. OpenAPI is served at `/docs`; the frontend's `lib/api.ts` has a Zod schema per response, written by hand from this document, and parses every response with it; its types are inferred from the schemas ([ADR 0034](../decisions/0034-zod-api-response-schemas.md), no codegen).
 
 ## Authentication
 
