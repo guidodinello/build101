@@ -11,6 +11,7 @@ from app.storage import StorageError
 logger = logging.getLogger(__name__)
 
 INVALID_REQUEST = "Revisá los datos e intentá de nuevo."
+ERROR_DETAIL_KEYS = ("type", "loc", "msg")
 STORAGE_UNAVAILABLE = "No pudimos guardar el archivo. Probá de nuevo en un ratito."
 
 
@@ -38,7 +39,9 @@ async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
 
 
 async def _validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
-    body = _error_body("invalid_request", INVALID_REQUEST, details=jsonable_encoder(exc.errors()))
+    # Only where and why: an error's `input` is the submitted value, `ctx` and `url` are noise.
+    details = [{key: error[key] for key in ERROR_DETAIL_KEYS} for error in exc.errors()]
+    body = _error_body("invalid_request", INVALID_REQUEST, details=jsonable_encoder(details))
     return JSONResponse(body, status_code=422)
 
 

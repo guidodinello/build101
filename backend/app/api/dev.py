@@ -32,7 +32,10 @@ def require_dev_token(
         raise HTTPException(status_code=401)
 
 
-router = APIRouter(prefix="/dev", dependencies=[Depends(require_dev_token)])
+# Not in the OpenAPI schema: it would list these routes even where they are off.
+router = APIRouter(
+    prefix="/dev", dependencies=[Depends(require_dev_token)], include_in_schema=False
+)
 
 
 class OnboardingLinkRequest(BaseModel):

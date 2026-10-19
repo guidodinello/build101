@@ -143,7 +143,7 @@ async def test_dev_link_is_off_unless_enabled(client: httpx.AsyncClient) -> None
 async def test_dev_link_rejects_a_non_ascii_token(client: httpx.AsyncClient) -> None:
     # Bytes: httpx refuses a non-ASCII str header, but a real client can send them (latin-1).
     response = await client.post(
-        "/dev/onboarding-link", json={"phone": PHONE}, headers={"X-Dev-Token": "ñandú".encode()}
+        "/dev/onboarding-link", json={"phone": PHONE}, headers=[(b"x-dev-token", "ñandú".encode())]
     )
 
     assert response.status_code == 401
