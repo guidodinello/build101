@@ -136,7 +136,11 @@ class ButtonRouter:
             return started(self._maker.remake(post, channel), "Sí, otro")
         if self._videos is None:  # the flag was turned off since
             return StaleButton()
-        return started(self._videos.remake(post, channel), "Sí, otro")
+        result = self._videos.remake(post, channel)
+        if not result.get("error"):
+            # One tap, one clip: Veo bills per second, so the same button can't start a second.
+            post.status = "replaced"
+        return started(result, "Sí, otro")
 
     async def _post_publish(self, sender: str, entity: str, channel: ChannelPort) -> Event:
         post = self._post(sender, entity, {"approved"})

@@ -1,5 +1,7 @@
 """The WhatsApp video flow (T61, ADR 0033): `create_video`, the video message, approval, reel."""
 
+import json
+
 import pytest
 
 from app.channels.base import Button
@@ -15,7 +17,7 @@ from app.media.public import PublicImages, PublicVideos
 from app.posts.drafts import PostDrafter
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
-from app.posts.store import InMemoryPosts, Post, PostImage
+from app.posts.store import InMemoryPosts, Post, PostImage, PostVideo
 from app.posts.video_maker import VideoMaker
 from app.publishing.mock import MOCK_ACCOUNT_ID
 from app.rendering.mock import MockRenderer
@@ -163,7 +165,8 @@ async def test_flag_off_the_model_never_gets_the_tool_or_the_video_prompt() -> N
         "create_video" not in [tool["name"] for tool in tools or []] for tools in model.tools_seen
     )
     assert "## Videos" not in model.systems[0]
-    # Even if it called the tool anyway, nothing runs.
+    # It called the tool anyway: the answer is unknown_tool and nothing runs.
+    assert "unknown_tool" in json.dumps(model.calls[1])
     assert rig.videos_of() == []
     assert rig.channel.video_headers == []
 
@@ -344,7 +347,7 @@ async def test_revise_post_does_not_touch_a_video_post() -> None:
     assert result == {"error": "video_post"}
 
 
-async def test_another_after_discarding_a_video_makes_a_new_video_and_replaces_nothing() -> None:
+async def test_another_after_discarding_a_video_makes_a_new_video_and_leaves_the_source() -> None:
     video_gen = CountingVideoGen()
     rig = Rig(ScriptedModel(replies=[create_video(), STARTED, READY, TOLD]), video_gen)
     source = rig.add_post()
@@ -358,6 +361,55 @@ async def test_another_after_discarding_a_video_makes_a_new_video_and_replaces_n
 
     assert len(video_gen.calls) == 2
     assert len(rig.videos_of()) == 2
-    assert first.status == "discarded"
+    assert first.status == "replaced"  # consumed by the tap
     assert source.status == "pending_approval"
-    assert all(post.status != "replaced" for post in rig.store.all(SENDER))
+    assert [post.status for post in rig.videos_of()] == ["replaced", "pending_approval"]
+
+
+async def test_another_is_one_shot_for_a_discarded_video() -> None:
+    video_gen = CountingVideoGen()
+    rig = Rig(ScriptedModel(replies=[create_video(), STARTED, READY, TOLD]), video_gen)
+    rig.add_post()
+    await rig.say()
+    [first] = rig.videos_of()
+    await rig.tap(f"post_discard:{first.id}")
+
+    await rig.tap(f"post_replace:{first.id}")
+    await rig.tap(f"post_replace:{first.id}")  # a second tap on the same button
+    await rig.maker.join()  # type: ignore[union-attr]
+
+    assert len(video_gen.calls) == 2  # the request, and one remake
+    assert first.status == "replaced"
+    assert len(rig.videos_of()) == 2
+
+
+async def test_another_on_a_video_post_is_stale_with_the_flag_off() -> None:
+    rig = Rig(ScriptedModel(replies=[text_reply("ok")]), None)
+    source = rig.add_post()
+    video = Post(
+        "v1",
+        SENDER,
+        [],
+        source.caption,
+        status="discarded",
+        source_photos=source.source_photos,
+        video=PostVideo("/media/v.mp4", b"mp4"),
+    )
+    rig.store.add(video)
+
+    event = await rig.chat._buttons.handle(SENDER, "post_replace:v1", rig.channel)
+
+    assert event == StaleButton()
+    assert video.status == "discarded"
+
+
+async def test_an_unwired_maker_refuses_before_any_generation() -> None:
+    video_gen = CountingVideoGen()
+    rig = Rig(ScriptedModel(replies=[text_reply("ok")]), video_gen)
+    rig.add_post()
+    unwired = VideoMaker(video_gen, rig.store, rig.videos, BASE_URL, 2)
+
+    with pytest.raises(RuntimeError, match="on_event"):
+        unwired.create_video(SENDER, {"post_id": "p1"}, rig.channel)
+
+    assert video_gen.calls == []

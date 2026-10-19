@@ -78,6 +78,7 @@ class VideoMaker:
         self, sender: str, arguments: dict[str, Any], channel: ChannelPort
     ) -> dict[str, Any]:
         """Check the guards and start the generation; the result goes back to the model."""
+        self._require_wired()
         try:
             args = CreateVideoArgs.model_validate(arguments)
         except ValidationError as exc:
@@ -93,6 +94,7 @@ class VideoMaker:
 
     def remake(self, post: Post, channel: ChannelPort) -> dict[str, Any]:
         """Another video from the same request as `post` ([Sí, otro] after [Descartar])."""
+        self._require_wired()
         return self._start(post.sender, post.source_photos, post.caption, post.brief, channel)
 
     def _start(
@@ -118,6 +120,11 @@ class VideoMaker:
     async def join(self) -> None:
         """Wait for the running generations (tests, shutdown)."""
         await asyncio.gather(*self._tasks)
+
+    def _require_wired(self) -> None:
+        """Refuse before any guard or spend: a clip nobody can announce is billed for nothing."""
+        if self._notify is None:
+            raise RuntimeError("VideoMaker.on_event was never called: nobody can tell the Owner")
 
     def _count_today(self, sender: str) -> int:
         day, count = self._videos_today.get(sender, (self._now().date(), 0))
@@ -179,9 +186,11 @@ class VideoMaker:
     async def _announce(
         self, sender: str, post_id: str, event: Event, channel: ChannelPort
     ) -> None:
-        if self._notify is None:
-            raise RuntimeError("VideoMaker.on_event was never called: nobody can tell the Owner")
         try:
+            if (
+                self._notify is None
+            ):  # `_require_wired` makes this unreachable; never escape the task
+                raise RuntimeError("VideoMaker.on_event was never called")
             await self._notify(sender, event, channel)
         except Exception:
             logger.exception("event for video %s failed for %s", post_id, mask(sender))
