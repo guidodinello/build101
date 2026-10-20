@@ -6,10 +6,11 @@ The live routines are configured on claude.ai under the account that created the
 
 | Routine | Runs | Opens | Label |
 |---|---|---|---|
+| [nightly-issue-fixer.md](nightly-issue-fixer.md) | Daily 01:00 Montevideo (`0 4 * * *` UTC) | Up to 2 draft PRs, each implementing one open issue end to end (`Closes #N`); issues labeled `nightly-fix` go first, then trusted-author `security`, `bug`, `nightly-bug` and `enhancement` issues that are code-only and decided | `nightly-fix` |
 | [nightly-product-research.md](nightly-product-research.md) | Daily 03:00 Montevideo (`0 6 * * *` UTC) | Up to 2 draft PRs implementing ideas from competitor research, or 1 issue with the ranked ideas | `nightly-idea` |
 | [nightly-bug-hunt.md](nightly-bug-hunt.md) | Daily 05:00 Montevideo (`0 8 * * *` UTC) | Up to 3 draft PRs fixing provable bugs, and up to 3 issues for bugs it could not fix safely | `nightly-bug` |
 
-A `nightly-*` PR closed without merging tells the next runs that the team rejected that idea or fix, so they don't propose it again.
+A `nightly-*` PR closed without merging tells the next runs that the team rejected that idea or fix, so they don't propose it again. To queue an issue for the issue fixer, add the `nightly-fix` label; to keep it away from an issue, assign the issue to someone.
 
 ## Changing or restoring a routine
 
