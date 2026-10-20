@@ -6,6 +6,7 @@ in the conversation history and answers. Primitives only, so `posts/` can import
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Literal
 
 from app.channels.base import Button, ChannelPort
 from app.copy import messages_es
@@ -15,7 +16,7 @@ from app.copy import messages_es
 class PostSent:
     post_id: str
     image_count: int
-    style: str  # "photos" or "design"
+    style: Literal["photos", "design"]
     photo_ids: tuple[str, ...]
     headlines: tuple[str, ...]  # one per slide of a design; empty for photos as they are
     text: str  # caption + hashtags, as the Owner received it
@@ -36,7 +37,7 @@ class PostSent:
 @dataclass(frozen=True, slots=True)
 class PostFailed:
     post_id: str
-    style: str
+    style: Literal["photos", "design"]
     photo_ids: tuple[str, ...]
     brief: str
 

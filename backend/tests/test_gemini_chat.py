@@ -116,7 +116,7 @@ async def test_structured_output_is_validated_against_the_schema() -> None:
 
     assert title == Title(title="Mesa")
     response_format = interactions.requests[0]["response_format"]
-    assert response_format["schema"]["required"] == ["title"]
+    assert response_format["schema_"]["required"] == ["title"]
 
 
 async def test_structured_output_that_does_not_match_is_an_error() -> None:
@@ -208,7 +208,7 @@ async def test_a_grounded_call_returns_the_output_and_what_the_tools_read() -> N
     assert grounded.sources == [WebSource("https://a.uy", "A"), WebSource("https://b.uy/nota")]
     request = interactions.requests[0]
     assert request["tools"] == tools
-    assert request["response_format"]["schema"]["required"] == ["title"]
+    assert request["response_format"]["schema_"]["required"] == ["title"]
 
 
 async def test_a_grounded_call_with_no_output_is_an_error() -> None:

@@ -50,7 +50,8 @@ export function usePhotoUploads(token: string, onUploaded: (asset: Asset) => voi
 
   function pump() {
     while (handles.current.size < MAX_PARALLEL && queue.current.length > 0) {
-      const photo = queue.current.shift()!;
+      const photo = queue.current.shift();
+      if (!photo) break;
       patch(photo.id, { status: "uploading", progress: 0, error: null });
 
       const handle = uploadAsset(token, "photo", photo.file, (progress) =>

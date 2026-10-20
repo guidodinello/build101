@@ -15,4 +15,4 @@ Next.js (App Router, TypeScript) with Tailwind CSS and shadcn/ui, deployed on Ve
 
 - Fits the shared frontend skills in [`.claude/skills/`](../../.claude/skills/README.md) (shadcn, Next.js, Vercel React best practices).
 - Two languages in the repo (Python backend, TypeScript frontend); each build track owns one.
-- REST types in `frontend/lib/api.ts` are written by hand from [architecture/api.md](../architecture/api.md) for the hackathon; generate them from the OpenAPI schema later.
+- REST types in `frontend/lib/api.ts` were written by hand from [architecture/api.md](../architecture/api.md) for the hackathon; [ADR 0034](0034-zod-api-response-schemas.md) replaced them with Zod schemas that also check each response at runtime.

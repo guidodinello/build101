@@ -1,6 +1,5 @@
 import logging
 import re
-from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
@@ -52,7 +51,7 @@ class RedactQueryTokens(logging.Filter):
         return True
 
 
-def _redact_arg(arg: Any) -> Any:
+def _redact_arg(arg: object) -> object:
     if isinstance(arg, httpx.URL):
         return redact_url(str(arg))
     if isinstance(arg, str) and arg.startswith(("http://", "https://")):

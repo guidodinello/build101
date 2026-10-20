@@ -10,9 +10,9 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.channels.base import Button, ChannelError, ChannelPort
@@ -106,16 +106,22 @@ class JobRunner:
         """
         cutoff = datetime.now(UTC) - older_than
         async with self._sessions() as db:
-            result = await db.execute(
-                update(Job)
-                .where(
-                    Job.status == "running",
-                    Job.started_at < cutoff,
-                    Job.id.not_in(self._running_ids),
-                )
-                .values(
-                    status="failed", error="interrupted by a restart", finished_at=datetime.now(UTC)
-                )
+            # An UPDATE returns a CursorResult at runtime; the stubs only say Result.
+            result = cast(
+                CursorResult[Any],
+                await db.execute(
+                    update(Job)
+                    .where(
+                        Job.status == "running",
+                        Job.started_at < cutoff,
+                        Job.id.not_in(self._running_ids),
+                    )
+                    .values(
+                        status="failed",
+                        error="interrupted by a restart",
+                        finished_at=datetime.now(UTC),
+                    )
+                ),
             )
             await db.commit()
         if result.rowcount:

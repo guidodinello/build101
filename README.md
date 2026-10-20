@@ -55,7 +55,7 @@ cd frontend && cp .env.example .env.local
 npm install && npm run dev
 ```
 
-Checks before a PR: `uv run ruff check . && uv run pytest` in `backend/`, `npm run lint && npm run build` in `frontend/`.
+Checks before a PR: `uv run ruff check . && uv run pyright && uv run pytest` in `backend/`, `npm run typecheck && npm run lint && npm run build` in `frontend/`.
 
 ## How we work
 
