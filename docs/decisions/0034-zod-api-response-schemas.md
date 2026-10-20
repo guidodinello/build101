@@ -27,6 +27,6 @@ Use [Zod](https://zod.dev) 4 in `frontend/lib/api.ts`:
 - A contract change fails in `lib/api.ts` with a typed error, not inside a component. The mock API ([`app/mock-api/`](../../frontend/app/mock-api/)) has to keep returning shapes that pass the schemas.
 - The schemas are a second hand-written copy of the Pydantic models, so a backend change means updating both. The runtime check is what makes that drift visible. Generating schemas from OpenAPI later is still possible and would replace only the schema definitions.
 - Zod becomes a client dependency (a few KB gzipped).
-- Zod is pinned to exactly `4.6.5`, about five weeks old when added, instead of the newest release (4.6.7, one week old), as a supply-chain cooldown.
+- Zod was first pinned to exactly `4.6.5`, about five weeks old when added, as a supply-chain cooldown. On 2026-10-20 the pin moved to exactly `4.6.7` (8 days old), after checking it was published by `colinhacks` through the trusted GitHub Actions release workflow with SLSA provenance.
 - A backend field added later is ignored (Zod strips unknown keys); a removed or retyped one fails.
 - Supersedes the consequence in [ADR 0004](0004-frontend-nextjs-vercel.md) that REST types are written by hand.
