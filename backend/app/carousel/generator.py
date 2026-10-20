@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.imagegen.base import GeneratedImage, ImageGenBlocked, ImageGenNoImage, ImageGenPort
-from app.media.images import prepare_reference, slice_panorama, to_post_image
+from app.media.images import decode, prepare_reference, slice_panorama, to_post_image
 
 from .prompts import BLOCKED_RETRY_NOTE, build_panorama_prompt, build_slide_prompt, panorama_ratio
 from .schemas import CarouselBrief, CarouselCopy
@@ -170,9 +170,7 @@ def check_redo_request(slide_count: int, current: list[GeneratedSlide], indexes:
 
 
 async def prepare_references(references: list[bytes]) -> list[bytes]:
-    return list(
-        await asyncio.gather(*(asyncio.to_thread(prepare_reference, data) for data in references))
-    )
+    return list(await asyncio.gather(*(decode(prepare_reference, data) for data in references)))
 
 
 async def gather_slides(

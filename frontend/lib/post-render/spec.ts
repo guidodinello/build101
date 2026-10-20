@@ -1,3 +1,5 @@
+import { readImageSize } from "./image-size";
+
 export const FAMILIES = ["editorial", "numbers", "panorama"] as const;
 export const ROLES = ["cover", "content", "cta"] as const;
 export const TONES = ["light", "dark"] as const;
@@ -38,7 +40,23 @@ export type SlideSpec = {
   brand: Brand;
 };
 
+// A scene is 1080×1350 and its logo at most 600 px (backend `media/images.py`); a worst-case noise
+// JPEG is a 1.25 MB data URI and a noise PNG logo 1.8 MB, so 2.5 MB leaves headroom.
+export const MAX_DATA_URI_CHARS = 2_500_000;
+export const MAX_IMAGE_SIDE = 4096;
+const HEADER_BASE64_CHARS = 65_536;
+
 export class SpecError extends Error {}
+
+// The spec is well formed but its image would be too costly to decode (HTTP 422, not 400).
+export class ImageRejectedError extends SpecError {
+  constructor(
+    readonly code: "image_too_large" | "image_unreadable",
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const IMAGE_DATA_URI = /^data:image\/(jpeg|png|webp);base64,/;
@@ -78,7 +96,27 @@ function image(value: unknown, field: string): string {
   if (typeof value !== "string" || !IMAGE_DATA_URI.test(value)) {
     throw new SpecError(`${field} must be a base64 JPEG, PNG or WebP data URI`);
   }
+  if (value.length > MAX_DATA_URI_CHARS) {
+    throw new ImageRejectedError("image_too_large", `${field} is longer than ${MAX_DATA_URI_CHARS} characters`);
+  }
+  const size = readImageSize(headerBytes(value));
+  if (!size) throw new ImageRejectedError("image_unreadable", `${field} has no readable image header`);
+  if (size.width > MAX_IMAGE_SIDE || size.height > MAX_IMAGE_SIDE) {
+    throw new ImageRejectedError(
+      "image_too_large",
+      `${field} is ${size.width}×${size.height}, above ${MAX_IMAGE_SIDE} px on a side`,
+    );
+  }
   return value;
+}
+
+// Most headers fit in the first bytes; a JPEG with a large EXIF or ICC block can push its size
+// further out, so fall back to the whole (already length-capped) payload.
+function headerBytes(dataUri: string): Uint8Array {
+  const payload = dataUri.slice(dataUri.indexOf(",") + 1);
+  const head = Buffer.from(payload.slice(0, HEADER_BASE64_CHARS), "base64");
+  if (payload.length <= HEADER_BASE64_CHARS || readImageSize(head)) return head;
+  return Buffer.from(payload, "base64");
 }
 
 function colors(value: unknown): BrandColors {

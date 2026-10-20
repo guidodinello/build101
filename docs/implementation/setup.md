@@ -56,7 +56,7 @@
 | `ENABLE_DEV_ENDPOINTS` | `true` | `/dev/*` |
 | `DEV_TOKEN` | random | Header `X-Dev-Token` |
 | `MAX_CONCURRENT_JOBS` | `4` | |
-| `MAX_PHOTO_MB` | `10` | Rejected before the signed upload URL is issued; a WhatsApp photo over it gets `photo_too_big` without being downloaded (or after, when Kapso doesn't say its size) |
+| `MAX_PHOTO_MB` | `10` | Rejected before the signed upload URL is issued; a WhatsApp photo over it gets `photo_too_big` without being downloaded (or after, when Kapso doesn't say its size). A WhatsApp photo over 25 megapixels gets `photo_too_large` before it is decoded, and WhatsApp photos and carousel references decode under the same limit as onboarding uploads (2 at a time) |
 | `MAX_AUDIO_MB` | `3` | Voice notes over it get `audio_too_long` (~25 min of WhatsApp Opus) |
 | `MAX_VIDEO_MB` | `300` | Could (video work). Must not exceed the Supabase Storage global file size limit |
 | `DASHBOARD_LINK_TTL_DAYS` | `7` | Should (read-only dashboard). Dashboard magic links expire after this |
@@ -76,9 +76,10 @@ Plan B only (Meta Cloud API direct, if Kapso fails its first-hour test; [integra
 | Variable | Example |
 |---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` / prod backend URL |
+| `SUPABASE_URL` | the project URL, same as the backend's; read at build time for the CSP (`img-src` / `connect-src`), required on Vercel, optional locally |
 | `NEXT_PUBLIC_DEV_TOKEN` | same as `DEV_TOKEN` (simulator only; acceptable for a demo, remove for production) |
 | `NEXT_PUBLIC_WHATSAPP_URL` | `https://wa.me/56920403095` (same number as `WHATSAPP_BOT_NUMBER`; used by the landing CTAs and the expired-link screen, which has no onboarding state) |
-| `ENABLE_MOCK_API` | `true` locally to serve an in-memory mock of the onboarding API at `/mock-api` (then `NEXT_PUBLIC_API_URL=http://localhost:3000/mock-api`); never set in production |
+| `ENABLE_MOCK_API` | `true` locally to serve an in-memory mock of the onboarding API at `/mock-api` (then `NEXT_PUBLIC_API_URL=http://localhost:3000/mock-api`); never set in production (it also refuses when `VERCEL_ENV` is `production`, and serves stored files with `nosniff` and `Content-Disposition: attachment`) |
 
 ## Supabase Storage
 

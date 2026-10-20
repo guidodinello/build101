@@ -1,11 +1,16 @@
 import asyncio
 from dataclasses import dataclass
 from io import BytesIO
-from weakref import WeakKeyDictionary
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from app.media.images import reference_from
+from app.media.images import (
+    MAX_PIXELS,
+    ImageTooLarge,
+    UnreadableImage,
+    decode_slot,
+    reference_from,
+)
 
 HEIC = "image/heic"
 EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", HEIC: "heic"}
@@ -16,22 +21,6 @@ PALETTE_SIZE = 5
 PALETTE_SAMPLE_SIDE = 128
 OPAQUE_ALPHA = 128
 JPEG_QUALITY = 90
-# Checked before decoding: a small PNG can expand to hundreds of MB. A decoded 25 MP image takes
-# 75-100 MB, so a few of them at once stay inside the one backend instance's memory (ADR 0005).
-MAX_PIXELS = 25_000_000
-# Decodes running at once across the wizard and the Instagram import; the rest wait their turn.
-MAX_CONCURRENT_DECODES = 2
-# A semaphore binds to the event loop it first waits on, so each loop gets its own (the app has
-# one; tests run one loop each).
-_decode_slots: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = WeakKeyDictionary()
-
-
-class UnreadableImage(Exception):
-    pass
-
-
-class ImageTooLarge(UnreadableImage):
-    """Readable, but over MAX_PIXELS."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,9 +44,7 @@ def llm_copy_path(business_id: object, asset_id: object) -> str:
 async def read_upload(data: bytes, content_type: str, kind: str) -> ProcessedUpload:
     """`process_upload` in a thread, at most MAX_CONCURRENT_DECODES at a time. The others wait on
     the event loop, not in a thread, so they don't hold the pool other work needs."""
-    loop = asyncio.get_running_loop()
-    slots = _decode_slots.setdefault(loop, asyncio.Semaphore(MAX_CONCURRENT_DECODES))
-    async with slots:
+    async with decode_slot():
         return await asyncio.to_thread(process_upload, data, content_type, kind)
 
 
@@ -69,7 +56,8 @@ def process_upload(data: bytes, content_type: str, kind: str) -> ProcessedUpload
                 raise ImageTooLarge(f"{source.width}x{source.height} is over {MAX_PIXELS} px")
             image = ImageOps.exif_transpose(source)
             image.load()
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+    # ValueError: pillow_heif's error for a truncated HEIF.
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         raise UnreadableImage(str(exc)) from exc
     return ProcessedUpload(
         width=image.width,
