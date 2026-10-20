@@ -3,6 +3,7 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -464,6 +465,43 @@ async def test_generate_brand_saves_a_version_and_raises_the_summary_event(
     assert version and (version.version, version.reason) == (1, "onboarding")
     assert version.data["constraints"][0] == "precios"
     assert events.events == [(PHONE, BrandSummaryReady("Katei", "• *Cómo hablamos:* cálidos"))]
+
+
+async def test_concurrent_brand_generations_save_distinct_versions(
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.jobs.brand as brand_job
+
+    business = await add_business(sessions)
+    both_generated = asyncio.Event()
+    generation_count = 0
+
+    async def coordinated_generation(model: Any, inputs: Any) -> Any:
+        nonlocal generation_count
+        generation_count += 1
+        if generation_count == 2:
+            both_generated.set()
+        await asyncio.wait_for(both_generated.wait(), timeout=5)
+        return brand_brain()
+
+    monkeypatch.setattr(
+        brand_job, "write_brand_brain", AsyncMock(side_effect=coordinated_generation)
+    )
+
+    first, second = await asyncio.gather(
+        generate_brand(context(sessions, business, SequenceModel([])), {}),
+        generate_brand(context(sessions, business, SequenceModel([])), {}),
+    )
+
+    assert {first["version"], second["version"]} == {1, 2}
+
+    async with sessions() as db:
+        versions = (
+            await db.scalars(select(BrandBrainVersion.version).order_by(BrandBrainVersion.version))
+        ).all()
+
+    assert versions == [1, 2]
 
 
 async def test_the_summary_reaches_the_owner_and_the_history_through_fixed_replies(
