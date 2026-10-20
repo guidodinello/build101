@@ -53,10 +53,15 @@ Set for Production and Preview (`vercel env add KEY production`, value on stdin)
 | Variable | Value |
 |---|---|
 | `NEXT_PUBLIC_API_URL` | the Railway backend, `https://backend-production-6e67.up.railway.app` |
+| `SUPABASE_URL` | the Supabase project URL, same as the backend's; read at build time for the CSP, and the Vercel build fails without it |
 | `NEXT_PUBLIC_WHATSAPP_URL` | `https://wa.me/56920403095`, the shared Kapso sandbox number (same as the backend's `WHATSAPP_BOT_NUMBER`) |
 | `ENABLE_MOCK_API` | `false` |
 | `NEXT_PUBLIC_DEV_TOKEN` | unset (the simulator is not used in production) |
 | `RENDER_SECRET` | a random secret, the same as the backend's `RENDERER_SECRET`; without it `/api/render` answers 503 |
 | `ENABLE_TEMPLATE_PREVIEW` | `false` |
+
+### Security headers
+
+`next.config.ts` sets `Content-Security-Policy`, `X-Frame-Options: DENY` and `X-Content-Type-Options: nosniff` on every route, and `Referrer-Policy: no-referrer` on `/o/*` (the onboarding token is in the path). The CSP allows `img-src` / `connect-src` only for `'self'`, the origins of `NEXT_PUBLIC_API_URL` and `SUPABASE_URL`, and `blob:` / `data:` images. Preview deployments also allow the [Vercel Toolbar hosts](https://vercel.com/docs/vercel-toolbar/managing-toolbar#using-a-content-security-policy). Scripts keep `'unsafe-inline'`: a nonce CSP would force dynamic rendering and rule out `cacheComponents`, so inline-script injection is not blocked. A new external host (an image CDN, an analytics script) needs an entry there.
 
 The backend must list the Vercel domain in `FRONTEND_URL` and `FRONTEND_ORIGINS` ([backend/README.md](../backend/README.md#environment-variables)), or magic links point at localhost and browser calls fail CORS.
