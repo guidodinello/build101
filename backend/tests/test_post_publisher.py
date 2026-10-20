@@ -7,7 +7,7 @@ import pytest
 
 from app.background import BackgroundWork
 from app.config import Settings
-from app.conversation.factory import ChatParts, build_chat, build_conversation
+from app.conversation.factory import ChatParts, Conversation, build_chat, build_conversation
 from app.conversation.history import InMemoryHistory
 from app.copy import messages_es
 from app.media.public import PublicImages
@@ -586,7 +586,7 @@ def test_the_chat_publishes_behind_the_guard_from_the_settings(
         unnamed = build_conversation(chat_settings(env="prod"), PublicImages(), MockPublisher())
     local = build_conversation(chat_settings(), PublicImages(), MockPublisher())
 
-    def guard(conversation: object) -> SharedAccountGuard:
+    def guard(conversation: Conversation) -> SharedAccountGuard:
         return conversation.handler._buttons._publisher._shared_account
 
     assert guard(named) == SharedAccountGuard(SENDER, open_when_unset=False)

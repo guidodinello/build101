@@ -6,7 +6,7 @@ and its one check in `PostPublisher` go away.
 
 from dataclasses import dataclass
 
-from app.pilot import phone_digits
+from app.channels.inbound import phone_digits
 
 
 @dataclass(frozen=True, slots=True)

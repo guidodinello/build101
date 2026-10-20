@@ -208,3 +208,8 @@ def describe(message: InboundMessage) -> str:
 
 def mask(phone: str) -> str:
     return f"***{phone[-4:]}"
+
+
+def phone_digits(phone: str) -> str:
+    """A WhatsApp number as digits only: "+598 99 123 456" and "59899123456" are one number."""
+    return "".join(char for char in phone if char.isdigit())

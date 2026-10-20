@@ -1,7 +1,6 @@
 """Dev-only endpoints, behind ENABLE_DEV_ENDPOINTS and X-Dev-Token (api.md § Dev / simulator)."""
 
 import hmac
-import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -9,6 +8,7 @@ from pydantic import BaseModel, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.channels.inbound import phone_digits
 from app.config import Settings, get_settings
 from app.db.models import Business
 from app.db.session import get_session
@@ -56,7 +56,7 @@ async def create_onboarding_link(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> OnboardingLinkResponse:
     """Shortcut past the WhatsApp onboarding, for tests and the simulator: a Business, a link."""
-    phone = re.sub(r"\D", "", body.phone)
+    phone = phone_digits(body.phone)
     business = await session.scalar(select(Business).where(Business.owner_phone == phone))
     if business is None:
         business = Business(owner_phone=phone)

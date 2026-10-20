@@ -36,6 +36,7 @@ from app.conversation.events import (
     PostStarted,
     Published,
     PublishFailed,
+    PublishNotConnected,
     PublishPending,
     PublishStarted,
     StaleButton,
@@ -775,6 +776,7 @@ BUTTON_EVENTS: list[Event] = [
     PostStarted(POST_ID, "Sí, otro"),
     PostNotStarted("daily_limit"),
     PublishStarted(POST_ID),
+    PublishNotConnected(POST_ID),
     ActionFailed(),
 ]
 EVENTS: list[Event] = [
@@ -957,6 +959,7 @@ FALLBACKS = [
     (PostNotStarted("generation_in_progress"), messages_es.GENERATION_BUSY),
     (PostNotStarted("unknown_asset"), messages_es.PHOTOS_GONE),
     (PublishStarted(POST_ID), messages_es.PUBLISHING),
+    (PublishNotConnected(POST_ID), messages_es.NEED_IG),
     (ActionFailed(), messages_es.REPLY_FAILED),
 ]
 

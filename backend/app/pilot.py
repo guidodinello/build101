@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.channels.base import ChannelError, ChannelPort, InboundMessage
-from app.channels.inbound import InboundHandler, mask
+from app.channels.inbound import InboundHandler, mask, phone_digits
 from app.config import Settings, get_settings
 from app.db.models import PilotSender
 from app.db.session import get_sessionmaker
@@ -29,11 +29,9 @@ PILOT_LIST_TTL_S = 60.0
 # Kapso's plan counts every message sent and received, so a number not on the list that keeps
 # writing gets one reply a day, not one per message.
 WAITLIST_REPLY_EVERY_S = 24 * 3600.0
-
-
-def phone_digits(phone: str) -> str:
-    """A WhatsApp number as digits only: "+598 99 123 456" and "59899123456" are one number."""
-    return "".join(char for char in phone if char.isdigit())
+# SQLAlchemy doesn't wrap asyncpg's connect failures: an unreachable database (refused, DNS,
+# timeout) raises OSError, not SQLAlchemyError.
+DATABASE_DOWN = (SQLAlchemyError, OSError)
 
 
 def configured_numbers(numbers: str) -> frozenset[str]:
@@ -85,7 +83,7 @@ class PilotList:
         """Who gets in, by count: an empty list in production locks every Owner out."""
         try:
             count = len(await self.numbers())
-        except SQLAlchemyError:
+        except DATABASE_DOWN:
             logger.warning("pilot list: pilot_senders could not be read at boot", exc_info=True)
             return
         if count:
@@ -105,7 +103,7 @@ class PilotList:
         try:
             async with sessions() as db:
                 phones = (await db.scalars(select(PilotSender.phone))).all()
-        except SQLAlchemyError:
+        except DATABASE_DOWN:
             if last is None:
                 raise
             logger.warning("reading pilot_senders failed, keeping the last list", exc_info=True)
@@ -153,11 +151,9 @@ class PilotGate:
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
         try:
             allowed = await self._pilot.allows(message.sender)
-        except SQLAlchemyError:
+        except DATABASE_DOWN:
             logger.exception(
-                "pilot list unavailable, dropping %s from %s",
-                message.message_id,
-                mask(message.sender),
+                "pilot list unavailable, dropping %s from %s", message.kind, mask(message.sender)
             )
             return
         if allowed:

@@ -1,5 +1,6 @@
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import pytest
@@ -23,6 +24,7 @@ from app.conversation.factory import Conversation
 from app.conversation.onboarding import OnboardingGate
 from app.copy import messages_es
 from app.db.models import Business, Job, MagicLink, PilotSender
+from app.db.session import create_engine
 from app.main import app
 from app.pilot import (
     PILOT_LIST_TTL_S,
@@ -37,6 +39,7 @@ from app.ratelimit import TURNS_BURST
 from tests.conftest import requires_db, sign
 from tests.fakes import CountingImageGen, FakeChannel, ScriptedModel
 from tests.test_chat_handler import build, message
+from tests.test_ratelimit import Clock
 from tests.test_whatsapp_router import FIXTURE_TIME, SECRET, post, raw_fixture
 
 STRANGER = "59899000001"  # the fixtures' sender
@@ -44,14 +47,8 @@ PILOT = "59899000002"
 ASSISTANT = "Mora"
 WAITLIST = messages_es.waitlist(ASSISTANT)
 KINDS = ("text", "audio", "image", "album", "button")
-
-
-@dataclass
-class Clock:
-    now: float = 1000.0
-
-    def __call__(self) -> float:
-        return self.now
+# Nothing listens there, so asyncpg's connect fails as it does for a database that is down.
+UNREACHABLE_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@127.0.0.1:1/nothing"
 
 
 @dataclass
@@ -123,17 +120,33 @@ async def test_the_boot_log_warns_when_production_lets_nobody_in(
     assert PILOT not in caplog.text
 
 
-def test_the_app_says_at_boot_that_nobody_gets_in(caplog: pytest.LogCaptureFixture) -> None:
+def boot(pilot: PilotList) -> None:
     get_channel.cache_clear()
     app.dependency_overrides[get_inbound_handler] = RecordingHandler
-    app.dependency_overrides[get_pilot_list] = lambda: build_pilot_list(Settings(env="prod"))
+    app.dependency_overrides[get_pilot_list] = lambda: pilot
     try:
-        with caplog.at_level(logging.WARNING, logger="app.pilot"), TestClient(app):
+        with TestClient(app):
             pass
     finally:
         app.dependency_overrides.clear()
 
+
+def test_the_app_says_at_boot_that_nobody_gets_in(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING, logger="app.pilot"):
+        boot(build_pilot_list(Settings(env="prod")))
+
     assert "pilot list is empty with ENV=prod: nobody gets in" in caplog.text
+
+
+def unreachable_sessions() -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(create_engine(UNREACHABLE_DATABASE_URL))
+
+
+def test_the_app_boots_with_the_database_unreachable(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING, logger="app.pilot"):
+        boot(PilotList(frozenset(), unreachable_sessions(), open_when_empty=False))
+
+    assert "pilot_senders could not be read at boot" in caplog.text
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -219,11 +232,14 @@ class BrokenSessions:
         raise OperationalError("select", {}, Exception("database down"))
 
 
+@pytest.mark.parametrize(
+    "down", [BrokenSessions, unreachable_sessions], ids=lambda down: down.__name__
+)
 async def test_without_a_list_read_yet_a_database_failure_drops_the_message(
-    caplog: pytest.LogCaptureFixture,
+    down: Callable[[], Callable[[], AsyncSession]], caplog: pytest.LogCaptureFixture
 ) -> None:
     inner = RecordingHandler()
-    pilot = PilotList(frozenset(), BrokenSessions(), open_when_empty=True)
+    pilot = PilotList(frozenset(), down(), open_when_empty=True)
     gate = PilotGate(inner, pilot, WAITLIST)
     channel = FakeChannel()
 
@@ -333,11 +349,10 @@ async def test_the_table_takes_digits_only(sessions: async_sessionmaker[AsyncSes
 class FlakySessions:
     sessions: async_sessionmaker[AsyncSession]
     down: bool = False
+    unreachable: async_sessionmaker[AsyncSession] = field(default_factory=unreachable_sessions)
 
     def __call__(self) -> AsyncSession:
-        if self.down:
-            raise OperationalError("select", {}, Exception("database down"))
-        return self.sessions()
+        return self.unreachable() if self.down else self.sessions()
 
 
 @requires_db
