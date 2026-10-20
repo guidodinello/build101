@@ -4,6 +4,18 @@ Entry point to the product and codebase audit of Neitor AI run on 2026-10-19: th
 
 Conventions: amounts in `$` are USD and amounts in `$U` are Uruguayan pesos. In the "Where" columns and in code links, paths are relative to `backend/app/` unless they start with `backend/`, `frontend/`, `docs/` or name a root file. Findings that overlap across dimensions are merged into one row; a merged row takes the highest severity of its parts, and its Ids column links each finding to the doc that holds it. Every cost, latency and saving in this doc is an estimate (see the caveat under [Cost and models](#cost-and-models)).
 
+## Status since the audit
+
+Checked on 2026-10-20 against main at `cedb7cc` and the open PRs; the full table is in [status.md](status.md), and each affected finding carries a status line. 4 findings are fixed, 17 partly fixed and 17 in flight; the other 187 are still open as written. The ones that change the lists below:
+
+- **P0 #3, Supabase anon access** ([SEC-1](security-privacy.md), [ARCH-16](backend-architecture.md)): in flight in [#158](https://github.com/guidodinello/build101/pull/158), RLS on every table and no Data API grants. Production was still at Alembic revision `0004` on 2026-10-20 although main has `0005`, so confirm the deploy runs its migrations after merging.
+- **P1 #16, sender allowlist and upload caps**: the upload caps are fixed by [#129](https://github.com/guidodinello/build101/pull/129) ([SEC-5](security-privacy.md)); a per-sender rate limit is in flight in [#155](https://github.com/guidodinello/build101/pull/155) ([SEC-4](security-privacy.md)).
+- **P1 #21, magic-link tokens**: [#129](https://github.com/guidodinello/build101/pull/129) masks tokens in access logs and closes sibling links once one is submitted; the 7-day TTL and revoking older links remain ([SEC-7](security-privacy.md), [SEC-8](security-privacy.md)).
+- **P1 #15, factual guards**: the hashtag cap is in flight in [#42](https://github.com/guidodinello/build101/pull/42) and the invented-figures check in [#47](https://github.com/guidodinello/build101/pull/47), both stale against main ([AIQ-3](ai-quality.md), [AIQ-14](ai-quality.md)).
+- **Landing**: [#157](https://github.com/guidodinello/build101/pull/157) translated it to Rioplatense Spanish ([PRD-6](product.md) fixed; [FE-3](frontend.md), [GRW-14](growth-pricing-market.md) and [DOC-3](docs-process.md) partly); prices are still in US$ and some promises are still unbuilt.
+- **Niche Report**: [#63](https://github.com/guidodinello/build101/pull/63) made it one report per niche per week ([COST-9](unit-economics.md) fixed), but every Business is still mapped to the furniture niche ([GRW-12](growth-pricing-market.md), [AIQ-12](ai-quality.md)).
+- **Instagram tokens**: [#129](https://github.com/guidodinello/build101/pull/129) nulls each token when the import starts ([SEC-10](security-privacy.md) fixed) and binds the OAuth state to the browser ([SEC-9](security-privacy.md) partly).
+
 ## Executive summary
 
 - **Health.** For a 2-person MVP the core is solid. Approval is decided in code ([ADR 0007](../../decisions/0007-approve-every-post.md)), the webhook checks an HMAC signature, every lookup is scoped to the sender, and the ports and adapters are clean ([security-privacy.md](security-privacy.md), [backend-architecture.md](backend-architecture.md)). Tests: 591 unit tests pass, 95 Postgres tests run in CI, ruff is clean, and 69 of the last 70 CI runs were green (audit observation, 2026-10-19; [platform-ops.md](platform-ops.md)). The weak spots are durability, operations and hackathon-era shortcuts, not the conversation logic.

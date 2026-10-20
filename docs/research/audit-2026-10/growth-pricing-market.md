@@ -209,6 +209,7 @@ Exchange rate: US$1 = UYU 40.24 ([Infobae, 2026-08-06](https://www.infobae.com/n
 ### GRW-12: Vertical packs don't scale yet: one global furniture Niche Report feeds every Business
 
 - **Severity**: medium · **Effort**: M · **Confidence**: high · **Verified**: adjusted
+- **Status (2026-10-20)**: partly fixed, by [#63](https://github.com/guidodinello/build101/pull/63); details in [status.md](status.md).
 - **Evidence**: trend notes load once from the global `NICHE_REPORT_PATH` ([factory.py:59,114-120](../../../backend/app/conversation/factory.py)); the same `trend_notes` go into every Post's prompt ([drafts.py:68-70,170-172](../../../backend/app/posts/drafts.py)); exactly one hard-coded niche, `curated-wood-furniture-uy` ([niches.py:19-46](../../../backend/app/agents/data/niches.py)); the wizard offers Muebles y deco, Gastronomía, Indumentaria, Belleza and Servicios ([categories.ts:11-46](../../../frontend/lib/categories.ts)); the report is per Business ([ADR 0025:18](../../decisions/0025-weekly-niche-report.md)).
 - **Basis**: evidence.
 - **Problem**: If `NICHE_REPORT_PATH` is set, a hair salon or pasta shop onboarded through the wizard gets furniture trend notes (illustrative examples: "wood grain", "cómo cuidar la madera"; the report's real content is generated at run time) in its copy and image prompts, which breaks the "sounds like us" promise. And adding a vertical means a code change plus a manual research doc, while this is the unit that should scale expansion.
@@ -231,6 +232,7 @@ Exchange rate: US$1 = UYU 40.24 ([Infobae, 2026-08-06](https://www.infobae.com/n
 ### GRW-14: The Owner-facing landing is in English and built for judges; add a Spanish page for Owners
 
 - **Severity**: medium · **Effort**: S · **Confidence**: high · **Verified**: confirmed
+- **Status (2026-10-20)**: partly fixed, by [#157](https://github.com/guidodinello/build101/pull/157); details in [status.md](status.md).
 - **Evidence**: "the landing copy is in English for them", meaning judges and investors ([PRODUCT.md:13](../../../PRODUCT.md)); "Hi, I'm Neitor. Your marketing agency, living in your WhatsApp." ([hero.tsx:22](../../../frontend/components/landing/hero.tsx)); a Spanish meta description over English content, with `lang="es"` ([layout.tsx:16-19](../../../frontend/app/layout.tsx)); the English prefill "Hi Neitor" ([whatsapp.ts:3](../../../frontend/lib/whatsapp.ts)).
 - **Basis**: evidence.
 - **Problem**: Every non-ad channel (partners, referrals, press, Google) sends the persona to the landing, where she reads English, US$ prices and "Join the Pro list". That contradicts the "speaks your Spanish" promise on the same page.

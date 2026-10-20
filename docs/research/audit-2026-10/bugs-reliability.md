@@ -337,6 +337,7 @@ Effort: S is under half a day, M is 1-2 days, L is about a week, XL is more than
 ### BUG-18: Wizard PUT `/brand` and `/preferences` can overwrite the Instagram import's `onboarding_data` (lost update)
 
 - **Severity**: low · **Effort**: S · **Confidence**: medium · **Verified**: confirmed
+- **Status (2026-10-20)**: partly fixed, by [#129](https://github.com/guidodinello/build101/pull/129); details in [status.md](status.md).
 - **Evidence**:
   - [api/onboarding.py:234-236](../../../backend/app/api/onboarding.py): a read-modify-write of the JSONB loaded at request start.
   - [api/onboarding.py:248-250](../../../backend/app/api/onboarding.py): the same for preferences.

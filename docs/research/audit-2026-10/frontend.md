@@ -95,6 +95,7 @@ Values come from the audit's reading of the code at `dc0bc01` unless a source is
 ### FE-3: The live landing is in English for a Rioplatense persona; the Spanish translation sits uncommitted in another worktree
 
 - **Severity**: medium · **Effort**: S · **Confidence**: high · **Verified**: adjusted
+- **Status (2026-10-20)**: partly fixed, by [#157](https://github.com/guidodinello/build101/pull/157); details in [status.md](status.md).
 - **Evidence**:
   - [page.tsx:14-23](../../../frontend/app/page.tsx) sets an English title, description and OG data, and line 31 sets `lang="en"` on the wrapper.
   - [layout.tsx:28](../../../frontend/app/layout.tsx) sets `html lang="es"` and lines 16-19 a Spanish default description, so the two disagree.
@@ -269,6 +270,7 @@ Values come from the audit's reading of the code at `dc0bc01` unless a source is
 ### FE-15: No frontend CI: no lint, typecheck, build or E2E smoke test, even though a mock backend exists
 
 - **Severity**: medium · **Effort**: M · **Confidence**: high · **Verified**: confirmed
+- **Status (2026-10-20)**: partly fixed, by [#118](https://github.com/guidodinello/build101/pull/118); details in [status.md](status.md).
 - **Evidence**:
   - [ci.yml:33-54](../../../.github/workflows/ci.yml): the paths filters cover only Markdown, workflows and the backend; there is no frontend job.
   - [package.json:5-10](../../../frontend/package.json): only `dev`, `build`, `start` and `lint` scripts.

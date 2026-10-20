@@ -157,6 +157,7 @@ Every place where the audit found the docs (or a process rule) saying one thing 
 ### DOC-3: Public promises (landing, PRODUCT.md, README) don't match what is built, and the landing is in English for a Montevideo Owner
 
 - **Severity**: medium · **Effort**: S · **Confidence**: high · **Verified**: adjusted
+- **Status (2026-10-20)**: partly fixed, by [#157](https://github.com/guidodinello/build101/pull/157); details in [status.md](status.md).
 - **Evidence**:
   - [PRODUCT.md:13 and :41](../../../PRODUCT.md): "landing copy is in English for" hackathon judges.
   - [layout.tsx:28](../../../frontend/app/layout.tsx): `lang="es"` on an English landing, so screen readers use a Spanish voice.
@@ -323,6 +324,7 @@ Every place where the audit found the docs (or a process rule) saying one thing 
 ### DOC-13: Review and CI blind spots: Tenki skips prompts and migrations, no frontend CI, Dependabot ignores uv and npm
 
 - **Severity**: medium · **Effort**: S · **Confidence**: high · **Verified**: adjusted
+- **Status (2026-10-20)**: partly fixed, by [#118](https://github.com/guidodinello/build101/pull/118); [#155](https://github.com/guidodinello/build101/pull/155) (open); details in [status.md](status.md).
 - **Evidence**:
   - [tenki-review.yml:15-21](../../../.github/workflows/tenki-review.yml): triggers only on `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, so prompt `.md` and migration `.sql` changes get no AI review; :46-48 one review per PR, so pushes after the first aren't re-reviewed.
   - [ci.yml:6-7](../../../.github/workflows/ci.yml): "Add the frontend job in its own PR"; :146-151 the CI gate needs no frontend job.
@@ -396,6 +398,7 @@ Every place where the audit found the docs (or a process rule) saying one thing 
 ### DOC-18: Trend notes depend on a local file path, and there is no "how to add a niche or category" guide
 
 - **Severity**: medium · **Effort**: S · **Confidence**: medium · **Verified**: confirmed
+- **Status (2026-10-20)**: partly fixed, by [#63](https://github.com/guidodinello/build101/pull/63); details in [status.md](status.md).
 - **Evidence**:
   - [config.py:46-48](../../../backend/app/config.py): `niche_report_path`, a report saved by the CLI, is the trend notes "until the weekly job saves them in niche_reports (T19)".
   - [factory.py:59](../../../backend/app/conversation/factory.py): `trend_notes = load_trend_notes(settings.niche_report_path)`.

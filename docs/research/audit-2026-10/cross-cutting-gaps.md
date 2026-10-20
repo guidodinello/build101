@@ -189,6 +189,7 @@ Caveat from verification (GAP-1): spec v1.295.0 still tags Messages, Comments, R
 ### GAP-8: The identity model is one phone, one Business; cheap to prepare now, a migration later
 
 - **Severity**: low · **Effort**: M · **Confidence**: high · **Verified**: adjusted
+- **Status (2026-10-20)**: in flight, by [#81](https://github.com/guidodinello/build101/pull/81) (open, draft); details in [status.md](status.md).
 - **Evidence**:
   - [0001_initial.sql:24](../../../backend/migrations/versions/0001_initial.sql): constraint `uq_businesses_owner_phone unique (owner_phone)`.
   - [library.py:36, 81, 123](../../../backend/app/conversation/library.py), [notes.py:67, 74, 88](../../../backend/app/conversation/notes.py), [onboarding.py:65](../../../backend/app/conversation/onboarding.py) and [queue.py:45](../../../backend/app/jobs/queue.py): every lookup is by `owner_phone`.

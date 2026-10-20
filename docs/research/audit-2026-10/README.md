@@ -21,11 +21,13 @@ Start at [summary.md](summary.md): the cross-dimension synthesis with the execut
 | Hosting plans, deploys, monitoring, backups, CI and tests | [platform-ops.md](platform-ops.md) |
 | Where docs contradict the code, ADR hygiene, the PR and review process | [docs-process.md](docs-process.md) |
 | One Instagram connection (Zernio or our Meta app), third-party terms, legal entity and IVA | [cross-cutting-gaps.md](cross-cutting-gaps.md) |
+| Which findings are fixed or in flight since the audit | [status.md](status.md) |
 | What is still unknown and needs a decision or a check | [open-questions.md](../../open-questions.md#from-the-2026-10-19-audit) |
 
 | File | What it covers | Findings | Date |
 |---|---|---|---|
 | [summary.md](summary.md) | Cross-dimension synthesis: executive summary, P0 and P1 fix lists, a digest of each dimension, roadmap and how the audit was done. Start here | 225 (merged) | 2026-10-19 |
+| [status.md](status.md) | Which findings the PRs merged or opened after the audit fixed, partly fixed or have in flight, and what remains of each | 38 of 225 | 2026-10-20 |
 | [unit-economics.md](unit-economics.md) | COST: cost per Owner (text models, scene images, WhatsApp messages, Zernio, platform plans), gross margin at the ADR 0031 prices, savings levers, Zernio or our own Meta app | 17 (2 high, 8 medium, 7 low) | 2026-10-19 |
 | [models.md](models.md) | MOD: the model for each agent, scene images and voice transcription, compared on price, quality, latency and migration risk | 17 (1 high, 8 medium, 8 low) | 2026-10-19 |
 | [ai-quality.md](ai-quality.md) | AIQ: the Orchestrator and its agents (prompt quality, factual guarantees, evals, traceability, latency, model cost), plus a proposed eval harness | 21 (2 high, 12 medium, 7 low) | 2026-10-19 |

@@ -155,6 +155,7 @@ Per-Business platform costs at pilot scale:
 ### PRD-6: The landing is in English for a 50+ Spanish-speaking Owner, and the WhatsApp prefill says "Hi Neitor"
 
 - **Severity**: medium · **Effort**: S · **Confidence**: high · **Verified**: adjusted
+- **Status (2026-10-20)**: fixed, by [#157](https://github.com/guidodinello/build101/pull/157); details in [status.md](status.md).
 - **Evidence**: landing copy is in English for judges ([PRODUCT.md:13](../../../PRODUCT.md)); "No app to install", "Speaks your Spanish" ([hero.tsx:8](../../../frontend/components/landing/hero.tsx)); "/ month" ([pricing-section.tsx:45](../../../frontend/components/landing/pricing-section.tsx)); `lang="es"` on English copy ([layout.tsx:28](../../../frontend/app/layout.tsx)); the prefilled text is "Hi Neitor" ([whatsapp.ts:3](../../../frontend/lib/whatsapp.ts)).
 - **Problem**: Pilot Owners will reach Neitor from a link or a referral. An English page with US$ prices and an English opener contradicts "speaks your Spanish" and principle 1. `lang="es"` on English text also hurts screen readers and SEO.
 - **Recommendation**: Revisit [PRODUCT.md:13](../../../PRODUCT.md) for the pilot: serve a Rioplatense Spanish landing (English at `/en` for judges), prefill "Hola Neitor", and set `lang` to match each page's content. A demo recording and peso prices are optional.
@@ -243,6 +244,7 @@ Per-Business platform costs at pilot scale:
 ### PRD-15: Hashtag rules go over Instagram's 5-hashtag cap
 
 - **Severity**: medium · **Effort**: S · **Confidence**: high · **Verified**: confirmed
+- **Status (2026-10-20)**: in flight, by [#42](https://github.com/guidodinello/build101/pull/42) (open); details in [status.md](status.md).
 - **Evidence**: "hashtags: 5 to 10" ([draft.md:6](../../../backend/app/posts/prompts/draft.md)); "10 to 20" ([brand_strategist.md:30](../../../backend/app/agents/prompts/brand_strategist.md)); already flagged and still open ([open-questions.md:40](../../open-questions.md)); Posts with hashtags got fewer views, capped at 5 ([instagram-content-trends.md:26](../instagram-content-trends.md)); Instagram caps posts and reels at 5 hashtags since December 2025 ([Social Media Today](https://www.socialmediatoday.com/news/instagrams-implementing-new-limits-on-hashtag-use/808309/), read 2026-10-19).
 - **Problem**: Captions with 6–10 hashtags may be rejected or cut by Instagram, untested through Zernio. Hashtags no longer add reach, while keyword-rich first lines help search. The current rule makes Posts look spammy and "AI".
 - **Recommendation**: Close the open question: at most 3–5 hashtags (keep the Owner's own from the import), a keyword-rich first line with the Product and the place ("Mesa de roble maciza en Montevideo"), and a validator in `drafts.py` that trims to 5. The Brand Brain stores at most 8 candidates.
