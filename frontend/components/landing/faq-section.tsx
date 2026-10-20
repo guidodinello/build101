@@ -2,33 +2,33 @@ import { Bubble, DayChip } from "@/components/landing/chat";
 
 const FAQS = [
   {
-    question: "Do I need to download anything?",
-    answer: "No. Just WhatsApp. The only web step is the 5-minute form, opened from a link in the chat.",
+    question: "¿Tengo que descargar algo?",
+    answer: "No. Solo WhatsApp. El único paso en la web es un formulario de 5 minutos, que abrís desde un link en el chat.",
   },
   {
-    question: "Will you post without asking me?",
-    answer: "Never. Every post comes to you first, and it goes out only after you tap Approve.",
+    question: "¿Van a publicar sin preguntarme?",
+    answer: "Nunca. Cada post te llega primero, y sale solo después de que tocás Aprobar.",
   },
   {
-    question: "Do you need my Instagram password?",
-    answer: "No. You connect your account on Instagram's own login page. We never see your password.",
+    question: "¿Necesitan mi contraseña de Instagram?",
+    answer: "No. Conectás tu cuenta en la página de inicio de sesión del propio Instagram. Nunca vemos tu contraseña.",
   },
   {
-    question: "Will it sound like a robot?",
-    answer: "It learns your tone, your words and your style from the form and from every correction you make.",
+    question: "¿Va a sonar como un robot?",
+    answer: "Aprende tu tono, tus palabras y tu estilo del formulario y de cada corrección que le hacés.",
   },
   {
-    question: "Can I just send voice notes?",
-    answer: "Yes. Talk to Neitor the way you'd talk to anyone on your team, in your own Spanish.",
+    question: "¿Puedo mandar solo audios?",
+    answer: "Sí. Hablale a Neitor como le hablarías a cualquiera de tu equipo, con tus palabras.",
   },
-  { question: "Which networks?", answer: "Instagram today. Facebook and TikTok are on the roadmap." },
+  { question: "¿En qué redes?", answer: "Hoy en Instagram. Facebook y TikTok vienen en camino." },
 ];
 
 export function FaqSection() {
   return (
     <section aria-labelledby="faq-title">
       <DayChip id="faq" headingId="faq-title">
-        Questions owners ask
+        Preguntas frecuentes
       </DayChip>
       <dl>
         {FAQS.map((faq) => (

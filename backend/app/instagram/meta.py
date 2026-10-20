@@ -1,9 +1,10 @@
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Any, Self
+from typing import Annotated, Any, Self
 from urllib.parse import urlencode
 
 import httpx
+from pydantic import BaseModel, BeforeValidator, Field, ValidationError, model_validator
 
 from .base import InstagramError, InstagramImage, InstagramMedia, InstagramProfile, InstagramToken
 
@@ -36,6 +37,88 @@ MEDIA_FIELDS = (
 # Meta's IG Media reference labels `caption` "Facebook Login only"; Zernio reads it over
 # Instagram Login, so it is asked for and dropped only if Meta refuses it
 MEDIA_OPTIONAL_FIELDS = ("caption",)
+
+
+# Models for the parts of Meta's answers we read; unknown fields are ignored. Only what the code
+# needs is strict (the access token, a media item's id and type). Everything else degrades the
+# way it always has: null, a wrong type or a non-object list entry is treated as absent.
+def _str_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _int_or_none(value: object) -> int | None:
+    return value if isinstance(value, int) else None
+
+
+def _id_or_none(value: object) -> str | None:
+    return str(value) if value else None
+
+
+def _object_or_none(value: object) -> object:
+    return value if isinstance(value, dict) else None
+
+
+def _objects(value: object) -> list[object]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+class _ShortToken(BaseModel):
+    access_token: str = Field(min_length=1)
+    user_id: Annotated[str, BeforeValidator(lambda value: str(value or ""))] = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _unwrap(cls, data: object) -> object:
+        # Meta has answered both {access_token, user_id} and {data: [{...}]}
+        match data:
+            case {"data": [first, *_]}:
+                return first
+            case _:
+                return data
+
+
+class _LongToken(BaseModel):
+    access_token: str = Field(min_length=1)
+    expires_in: Annotated[int | None, BeforeValidator(_int_or_none)] = None
+
+
+class _ProfileResponse(InstagramProfile):
+    """An InstagramProfile as Meta answers it: the id may come as `id`, and as a number."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _user_id(cls, data: object) -> object:
+        if isinstance(data, dict):
+            return {**data, "user_id": str(data.get("user_id") or data.get("id") or "")}
+        return data
+
+
+class _MediaChild(BaseModel):
+    id: Annotated[str | None, BeforeValidator(_id_or_none)] = None
+    media_type: object = None
+    media_url: Annotated[str | None, BeforeValidator(_str_or_none)] = None
+    thumbnail_url: Annotated[str | None, BeforeValidator(_str_or_none)] = None
+
+
+class _Children(BaseModel):
+    data: Annotated[list[_MediaChild], BeforeValidator(_objects)] = Field(default_factory=list)
+
+
+class _MediaItem(InstagramMedia):
+    """A post as /me/media lists it: the fields InstagramMedia keeps, plus its image sources."""
+
+    media_url: Annotated[str | None, BeforeValidator(_str_or_none)] = None
+    thumbnail_url: Annotated[str | None, BeforeValidator(_str_or_none)] = None
+    children: Annotated[_Children | None, BeforeValidator(_object_or_none)] = None
+
+
+class _Paging(BaseModel):
+    next: Annotated[str | None, BeforeValidator(_str_or_none)] = None
+
+
+class _MediaPage(BaseModel):
+    data: Annotated[list[_MediaItem], BeforeValidator(_objects)] = Field(default_factory=list)
+    paging: Annotated[_Paging | None, BeforeValidator(_object_or_none)] = None
 
 
 class MetaInstagram:
@@ -75,7 +158,7 @@ class MetaInstagram:
 
     async def exchange_code(self, code: str, redirect_uri: str) -> InstagramToken:
         """Authorization code → short-lived token → long-lived token (60 days)."""
-        short = _json(
+        short = _parse(
             await self._request(
                 "POST",
                 TOKEN_URL,
@@ -86,41 +169,38 @@ class MetaInstagram:
                     "redirect_uri": redirect_uri,
                     "code": code,
                 },
-            )
+            ),
+            _ShortToken,
         )
-        # Meta has answered both {access_token, user_id} and {data: [{...}]}
-        if isinstance(short.get("data"), list) and short["data"]:
-            short = short["data"][0]
-        short_token = _text(short, "access_token")
-        user_id = str(short.get("user_id") or "")
-
-        long = _json(
+        long = _parse(
             await self._request(
                 "GET",
                 f"{GRAPH_URL}/access_token",
                 params={
                     "grant_type": "ig_exchange_token",
                     "client_secret": self._app_secret,
-                    "access_token": short_token,
+                    "access_token": short.access_token,
                 },
-            )
+            ),
+            _LongToken,
         )
-        expires_in = long.get("expires_in")
         return InstagramToken(
-            access_token=_text(long, "access_token"),
-            user_id=user_id,
-            expires_at=datetime.now(UTC) + timedelta(seconds=expires_in)
-            if isinstance(expires_in, int)
+            access_token=long.access_token,
+            user_id=short.user_id,
+            expires_at=datetime.now(UTC) + timedelta(seconds=long.expires_in)
+            if long.expires_in is not None
             else None,
         )
 
     async def profile(self, access_token: str) -> InstagramProfile:
-        body = await self._fields(
-            f"{self._graph}/me", access_token, PROFILE_FIELDS, PROFILE_OPTIONAL_FIELDS
+        profile = await self._fields(
+            f"{self._graph}/me",
+            access_token,
+            PROFILE_FIELDS,
+            PROFILE_OPTIONAL_FIELDS,
+            _ProfileResponse,
         )
-        return InstagramProfile.model_validate(
-            {**body, "user_id": str(body.get("user_id") or body.get("id") or "")}
-        )
+        return InstagramProfile.model_validate(profile.model_dump())
 
     async def recent_media(self, access_token: str, limit: int) -> list[InstagramMedia]:
         """The newest `limit` posts, Reels and carousels (never stories), newest first."""
@@ -129,43 +209,48 @@ class MetaInstagram:
             access_token,
             MEDIA_FIELDS,
             MEDIA_OPTIONAL_FIELDS,
+            _MediaPage,
             {"limit": min(PAGE_SIZE, limit)},
         )
         media: list[InstagramMedia] = []
         while True:
-            media.extend(_media(item) for item in page.get("data") or [] if isinstance(item, dict))
-            next_url = (page.get("paging") or {}).get("next")
-            if len(media) >= limit or not isinstance(next_url, str):
+            media.extend(_media(item) for item in page.data)
+            next_url = page.paging.next if page.paging else None
+            if len(media) >= limit or next_url is None:
                 return media[:limit]
             # The next link already carries the fields and the token
-            page = _json(await self._request("GET", next_url))
+            page = _parse(await self._request("GET", next_url), _MediaPage)
 
     async def download(self, url: str) -> tuple[bytes, str]:
         response = await self._request("GET", url)
         content_type = response.headers.get("content-type", "").split(";")[0].strip()
         return response.content, content_type
 
-    async def _fields(
+    async def _fields[M: BaseModel](
         self,
         url: str,
         access_token: str,
         fields: tuple[str, ...],
         optional: tuple[str, ...],
-        params: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+        model: type[M],
+        params: dict[str, int] | None = None,
+    ) -> M:
         """GET with `fields` and `optional`; if Meta rejects that, again without `optional`."""
         base = {**(params or {}), "access_token": access_token}
         try:
-            return _json(
+            return _parse(
                 await self._request(
                     "GET", url, params={**base, "fields": ",".join(fields + optional)}
-                )
+                ),
+                model,
             )
         except InstagramError as exc:
             if exc.status != HTTP_BAD_REQUEST:
                 raise
             logger.warning("instagram refused %s, retrying without them: %s", optional, exc)
-        return _json(await self._request("GET", url, params={**base, "fields": ",".join(fields)}))
+        return _parse(
+            await self._request("GET", url, params={**base, "fields": ",".join(fields)}), model
+        )
 
     async def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         try:
@@ -180,33 +265,33 @@ class MetaInstagram:
         return response
 
 
-def _media(item: dict[str, Any]) -> InstagramMedia:
-    media = InstagramMedia.model_validate({k: v for k, v in item.items() if k != "children"})
-    children = (item.get("children") or {}).get("data") or [item]
+def _media(item: _MediaItem) -> InstagramMedia:
+    media = InstagramMedia.model_validate(
+        item.model_dump(include=InstagramMedia.model_fields.keys() - {"images"})
+    )
+    children = (item.children.data if item.children else None) or [item]
     images = [image for child in children if (image := _image(child)) is not None]
     return media.model_copy(update={"images": images})
 
 
-def _image(item: dict[str, Any]) -> InstagramImage | None:
+def _image(item: _MediaChild | _MediaItem) -> InstagramImage | None:
     """The photo itself, or a video's cover; `media_url` is missing on copyrighted media."""
-    url = item.get("thumbnail_url") if item.get("media_type") == "VIDEO" else item.get("media_url")
-    if not isinstance(url, str) or not url or not item.get("id"):
+    url = item.thumbnail_url if item.media_type == "VIDEO" else item.media_url
+    if not url or not item.id:
         return None
-    return InstagramImage(id=str(item["id"]), url=url)
+    return InstagramImage(id=item.id, url=url)
 
 
-def _json(response: httpx.Response) -> dict[str, Any]:
+def _parse[M: BaseModel](response: httpx.Response, model: type[M]) -> M:
     try:
         body = response.json()
     except ValueError as exc:
         raise InstagramError(f"instagram returned a non-JSON body: {response.text[:200]}") from exc
-    if not isinstance(body, dict):
-        raise InstagramError("instagram returned an unexpected body")
-    return body
-
-
-def _text(body: dict[str, Any], key: str) -> str:
-    value = body.get(key)
-    if not isinstance(value, str) or not value:
-        raise InstagramError(f"instagram response has no {key}")
-    return value
+    try:
+        return model.model_validate(body)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        if not first["loc"]:
+            raise InstagramError("instagram returned an unexpected body") from exc
+        field = ".".join(str(part) for part in first["loc"])
+        raise InstagramError(f"instagram response has no {field}") from exc

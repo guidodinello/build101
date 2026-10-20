@@ -27,7 +27,7 @@ import { currentLogo, MAX_BRAND_WORDS, ownPhotos, readyPhotos } from "@/lib/onbo
 import { uploadAsset, validatePhoto } from "@/lib/upload";
 
 const MAX_COLORS = 5;
-const NEW_COLORS = ["#c89b6d", "#4b5d3a", "#e9dcc6", "#6b3e26", "#1f3a5f"];
+const NEW_COLORS = ["#c89b6d", "#4b5d3a", "#e9dcc6", "#6b3e26", "#1f3a5f"] as const;
 
 type LogoUpload = {
   fileName: string;

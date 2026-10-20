@@ -80,6 +80,7 @@ Messages for the Owner. Since [ADR 0026](../decisions/0026-owner-messages-from-t
 | `post_not_started` **(event)** | `[Sí, otro]` that can't start: another post is being made, the daily limit, or the photos expired (kept 30 minutes until T02) | Estoy terminando otro post 🙌 Apenas te lo mande, armamos este. / Por hoy ya armamos todos los diseños que puedo hacer 🙈 Mañana seguimos. / Ya no tengo esas fotos 🙈 ¿Me las mandás de nuevo? | — |
 | `action_failed` **(event)** | A button's database call failed | Uy, se me trabó algo. ¿Me lo mandás de nuevo en un ratito? | — |
 | `photo_too_big` **(event)** | WhatsApp photo over `MAX_PHOTO_MB` | Esa foto es muy pesada 🙈 ¿Me mandás una más liviana? (hasta {max_mb} MB) | — |
+| `photo_too_large` **(event)** | WhatsApp photo over 25 megapixels (refused before decoding) | Esa foto es demasiado grande 🙈 ¿Me mandás una más chica? | — |
 | `video_saved` | Video received, no context, `reel_suitable` | ¡Qué buen video! Lo guardo 🎬 ¿Armo un Reel con este? | `reel_post:{asset_id}` "Sí, armalo" · `noop` "No, guardalo" |
 | `video_saved_no_reel` | Video received, not `reel_suitable` | ¡Gracias! Lo guardo para sacarle ideas y fotos 🎬 Para un Reel me sirven videos verticales de 3 a 90 segundos. | — |
 | `dashboard_link` | "¿Dónde veo todo?" / "link" once `active` | Acá tenés tu panel: tu catálogo, tus fotos y videos y tus promos. Mientras más subas, mejor te conozco 👇 | CTA URL "Abrí tu panel" (link valid 7 days) |

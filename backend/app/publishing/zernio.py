@@ -3,9 +3,10 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Any, Self
+from typing import Annotated, Any, Self
 
 import httpx
+from pydantic import BaseModel, BeforeValidator, Field, ValidationError
 
 from .base import PublisherError, PublishInProgress, PublishMedia, PublishResult, PublishRetryable
 
@@ -36,6 +37,63 @@ ERROR_BODY_CHARS = 300
 
 Sleep = Callable[[float], Awaitable[None]]
 Clock = Callable[[], float]
+
+
+# Models for the parts of Zernio's answers we read; unknown fields are ignored. Only what the code
+# needs is strict. Everything else degrades as it always has: `_post_result` runs on the answer to
+# POST /posts, after the post may already exist, so an odd-shaped optional field must never turn
+# into a final PublisherError.
+def _str_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _objects(value: object) -> list[object]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+class _Profile(BaseModel):
+    id: str = Field(validation_alias="_id", min_length=1)
+
+
+class _Profiles(BaseModel):
+    profiles: Annotated[list[object] | None, BeforeValidator(lambda value: value or None)] = None
+
+
+class _CreatedProfile(BaseModel):
+    profile: _Profile
+
+
+class _ConflictDetails(BaseModel):
+    existing_profile_id: str = Field(validation_alias="existingProfileId", min_length=1)
+
+
+class _ProfileConflict(BaseModel):
+    details: _ConflictDetails
+
+
+class _ConnectUrl(BaseModel):
+    auth_url: str = Field(validation_alias="authUrl", min_length=1)
+
+
+class _Target(BaseModel):
+    platform: object = None
+    platform_post_url: Annotated[str | None, BeforeValidator(_str_or_none)] = Field(
+        default=None, validation_alias="platformPostUrl"
+    )
+    error_message: object = Field(default=None, validation_alias="errorMessage")
+
+
+class _Post(BaseModel):
+    id: Annotated[str | None, BeforeValidator(_str_or_none)] = Field(
+        default=None, validation_alias="_id"
+    )
+    status: object = None
+    platforms: Annotated[list[_Target], BeforeValidator(_objects)] = Field(default_factory=list)
+
+
+class _PostBody(BaseModel):
+    post: _Post
+    error: object = None
 
 
 class ZernioPublisher:
@@ -84,9 +142,9 @@ class ZernioPublisher:
 
     async def ensure_profile(self, name: str, external_id: str) -> str:
         response = await self._request("GET", "/profiles", params={"externalId": external_id})
-        profiles = _json(response).get("profiles") or []
+        profiles = _parse(response, _Profiles, "profiles").profiles
         if profiles:
-            return _field(profiles[0], "_id")
+            return _validate(profiles[0], _Profile, "_id").id
 
         response = await self._request(
             "POST",
@@ -94,11 +152,11 @@ class ZernioPublisher:
             json={"name": name, "externalId": external_id},
             accept={HTTP_CONFLICT},
         )
-        body = _json(response)
         if response.status_code == HTTP_CONFLICT:
             # a concurrent create (or a taken name) already made it: reuse that profile
-            return _field(body.get("details") or {}, "existingProfileId")
-        return _field(body.get("profile") or {}, "_id")
+            conflict = _parse(response, _ProfileConflict, "existingProfileId")
+            return conflict.details.existing_profile_id
+        return _parse(response, _CreatedProfile, "_id").profile.id
 
     async def connect_url(self, profile_id: str, platform: str, redirect_url: str) -> str:
         if platform != INSTAGRAM:
@@ -108,7 +166,7 @@ class ZernioPublisher:
             f"/connect/{platform}",
             params={"profileId": profile_id, "redirect_url": redirect_url},
         )
-        return _field(_json(response), "authUrl")
+        return _parse(response, _ConnectUrl, "authUrl").auth_url
 
     async def publish(
         self,
@@ -133,7 +191,7 @@ class ZernioPublisher:
         response = await self._request(
             "POST", "/posts", json=body, headers=headers, timeout=PUBLISH_TIMEOUT_S
         )
-        result = _post_result(_json(response))
+        result = _post_result(_parse(response, _PostBody, "post"))
         if result.status == "pending":
             if not result.external_post_id:
                 # nothing to poll and nothing for the webhook (T29) to match: surface it
@@ -169,7 +227,7 @@ class ZernioPublisher:
                 response = await self._request(
                     "GET", f"/posts/{post_id}", timeout=POLL_REQUEST_TIMEOUT_S
                 )
-                result = _post_result(_json(response))
+                result = _post_result(_parse(response, _PostBody, "post"))
             except PublisherError as exc:
                 logger.warning("zernio poll %d for post %s failed: %s", attempt, post_id, exc)
                 continue
@@ -255,55 +313,45 @@ def _instagram_data(media: PublishMedia) -> dict[str, Any]:
     return data
 
 
-def _json(response: httpx.Response) -> dict[str, Any]:
+def _parse[M: BaseModel](response: httpx.Response, model: type[M], label: str) -> M:
     try:
         body = response.json()
     except ValueError as exc:
         raise PublisherError(f"zernio returned a non-JSON body: {response.text[:200]}") from exc
-    if not isinstance(body, dict):
-        raise PublisherError("zernio returned an unexpected body")
-    return body
+    return _validate(body, model, label)
 
 
-def _field(obj: Any, key: str) -> str:
-    value = obj.get(key) if isinstance(obj, dict) else None
-    if not isinstance(value, str) or not value:
-        raise PublisherError(f"zernio response has no {key}")
-    return value
+def _validate[M: BaseModel](data: object, model: type[M], label: str) -> M:
+    try:
+        return model.model_validate(data)
+    except ValidationError as exc:
+        raise PublisherError(f"zernio response has no {label}") from exc
 
 
-def _post_result(body: dict[str, Any]) -> PublishResult:
+def _post_result(body: _PostBody) -> PublishResult:
     """Map a create-post or get-post body to a result, by `post.status` alone.
 
     Only a final failure maps to `failed`: anything not final (including a post that is live
     but whose permalink is not there yet) is `pending`, so the caller never reports a failure
     for a post that may still go out.
     """
-    post = body.get("post")
-    if not isinstance(post, dict):
-        raise PublisherError("zernio response has no post")
-    post_id = post.get("_id") if isinstance(post.get("_id"), str) else None
-    status = post.get("status")
-    target = next(
-        (
-            p
-            for p in post.get("platforms") or []
-            if isinstance(p, dict) and p.get("platform") == INSTAGRAM
-        ),
-        {},
-    )
+    post = body.post
+    post_id = post.id
+    status = post.status
+    target = next((p for p in post.platforms if p.platform == INSTAGRAM), _Target())
 
     if status == STATUS_PUBLISHED:
-        permalink = target.get("platformPostUrl")
-        if isinstance(permalink, str) and permalink:
-            return PublishResult(status="published", external_post_id=post_id, permalink=permalink)
+        if target.platform_post_url:
+            return PublishResult(
+                status="published", external_post_id=post_id, permalink=target.platform_post_url
+            )
         return PublishResult(
             status="pending",
             external_post_id=post_id,
             error="published, but Zernio has no permalink yet",
         )
     if status in STATUSES_FAILED:
-        reason = target.get("errorMessage") or body.get("error") or f"post status {status!r}"
+        reason = target.error_message or body.error or f"post status {status!r}"
         return PublishResult(status="failed", external_post_id=post_id, error=str(reason))
     if status not in STATUSES_PENDING:
         logger.warning("zernio post %s has an unknown status %r", post_id, status)

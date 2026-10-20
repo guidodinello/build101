@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from functools import cache
 from typing import Any, Protocol, Self
 from urllib.parse import parse_qs, urlparse
@@ -12,10 +13,18 @@ REQUEST_TIMEOUT_S = 30.0
 HTTP_NOT_FOUND = 404
 HTTP_BAD_REQUEST = 400
 ERROR_BODY_CHARS = 300
+MAX_REMOVE_PATHS = 1000
+LIST_PAGE_SIZE = 100
+# Supabase signed upload URLs last 2 h: an object older than this can no longer be PUT again.
+SIGNED_UPLOAD_URL_TTL = timedelta(hours=2)
 
 
 class StorageError(Exception):
     pass
+
+
+class ObjectTooLarge(StorageError):
+    """The object is bigger than the `max_bytes` the caller allowed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,11 +33,20 @@ class SignedUpload:
     token: str
 
 
+@dataclass(frozen=True, slots=True)
+class StoredObject:
+    name: str  # relative to the listed prefix
+    created_at: datetime
+
+
 class StoragePort(Protocol):
     async def create_signed_upload_url(self, bucket: str, path: str) -> SignedUpload: ...
 
-    async def download(self, bucket: str, path: str) -> bytes | None:
-        """The object's bytes, or None when it doesn't exist."""
+    async def download(
+        self, bucket: str, path: str, *, max_bytes: int | None = None
+    ) -> bytes | None:
+        """The object's bytes, or None when it doesn't exist. Past `max_bytes` it stops reading
+        and raises ObjectTooLarge, so an oversized object is never held whole in memory."""
         ...
 
     async def upload(self, bucket: str, path: str, data: bytes, content_type: str) -> None: ...
@@ -37,6 +55,14 @@ class StoragePort(Protocol):
         self, bucket: str, paths: list[str], expires_in_s: int
     ) -> dict[str, str]:
         """Signed read URLs by path; paths that don't exist are left out."""
+        ...
+
+    async def remove(self, bucket: str, paths: list[str]) -> None:
+        """Delete the objects; a path that doesn't exist is not an error."""
+        ...
+
+    async def list_objects(self, bucket: str, prefix: str) -> list[StoredObject]:
+        """The objects directly under `prefix` (a folder, no trailing slash)."""
         ...
 
 
@@ -74,16 +100,24 @@ class SupabaseStorage:
             raise StorageError("supabase returned a signed upload url without a token")
         return SignedUpload(url=signed, token=token[0])
 
-    async def download(self, bucket: str, path: str) -> bytes | None:
+    async def download(
+        self, bucket: str, path: str, *, max_bytes: int | None = None
+    ) -> bytes | None:
         try:
-            response = await self._client.get(f"/object/{bucket}/{path}")
+            # Identity: the byte count must be the object's own, not what a compressed body
+            # expands to; a response that is encoded anyway is refused in _read_capped.
+            async with self._client.stream(
+                "GET", f"/object/{bucket}/{path}", headers={"Accept-Encoding": "identity"}
+            ) as response:
+                # Storage answers a missing object with 400 or 404 depending on the version.
+                if response.status_code in (HTTP_NOT_FOUND, HTTP_BAD_REQUEST):
+                    return None
+                if response.is_error:
+                    await response.aread()
+                    _raise_for_status(response)
+                return await _read_capped(response, max_bytes)
         except httpx.HTTPError as exc:
             raise StorageError(f"supabase download failed: {exc!r}") from exc
-        # Storage answers a missing object with 400 or 404 depending on the version.
-        if response.status_code in (HTTP_NOT_FOUND, HTTP_BAD_REQUEST):
-            return None
-        _raise_for_status(response)
-        return response.content
 
     async def upload(self, bucket: str, path: str, data: bytes, content_type: str) -> None:
         await self._request(
@@ -107,6 +141,44 @@ class SupabaseStorage:
             if item.get("signedURL") and not item.get("error")
         }
 
+    async def remove(self, bucket: str, paths: list[str]) -> None:
+        # DELETE /object/{bucket} with {"prefixes": [...]}, up to 1000 paths per call: what
+        # storage-js's `remove` sends (src/packages/StorageFileApi.ts, src/lib/fetch.ts) and
+        # https://supabase.com/docs/guides/storage/management/delete-objects documents.
+        for start in range(0, len(paths), MAX_REMOVE_PATHS):
+            await self._request(
+                "DELETE",
+                f"/object/{bucket}",
+                json={"prefixes": paths[start : start + MAX_REMOVE_PATHS]},
+            )
+
+    async def list_objects(self, bucket: str, prefix: str) -> list[StoredObject]:
+        # POST /object/list/{bucket} with {prefix, limit, offset, sortBy}: what storage-js's `list`
+        # sends (src/packages/StorageFileApi.ts), items shaped like its `FileObject`
+        # (src/lib/types.ts). Sub-folders come back without an `id`; they are skipped.
+        objects: list[StoredObject] = []
+        offset = 0
+        while True:
+            response = await self._request(
+                "POST",
+                f"/object/list/{bucket}",
+                json={
+                    "prefix": prefix,
+                    "limit": LIST_PAGE_SIZE,
+                    "offset": offset,
+                    "sortBy": {"column": "name", "order": "asc"},
+                },
+            )
+            page = response.json()
+            objects.extend(
+                StoredObject(item["name"], datetime.fromisoformat(item["created_at"]))
+                for item in page
+                if item.get("id") and item.get("created_at")
+            )
+            if len(page) < LIST_PAGE_SIZE:
+                return objects
+            offset += LIST_PAGE_SIZE
+
     async def aclose(self) -> None:
         await self._client.aclose()
 
@@ -117,6 +189,24 @@ class SupabaseStorage:
             raise StorageError(f"supabase {method} {url} failed: {exc!r}") from exc
         _raise_for_status(response)
         return response
+
+
+async def _read_capped(response: httpx.Response, max_bytes: int | None) -> bytes:
+    """The body, read chunk by chunk; leaving early closes the connection with the rest unread."""
+    encoding = response.headers.get("content-encoding", "identity").lower()
+    if encoding != "identity":
+        raise StorageError(f"supabase answered with content-encoding {encoding!r}")
+    declared = response.headers.get("content-length", "")
+    if max_bytes is not None and declared.isdigit() and int(declared) > max_bytes:
+        raise ObjectTooLarge(f"object is {declared} bytes, over {max_bytes}")
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in response.aiter_bytes():
+        total += len(chunk)
+        if max_bytes is not None and total > max_bytes:
+            raise ObjectTooLarge(f"object is over {max_bytes} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _raise_for_status(response: httpx.Response) -> None:

@@ -11,6 +11,7 @@ from app.storage import StorageError
 logger = logging.getLogger(__name__)
 
 INVALID_REQUEST = "Revisá los datos e intentá de nuevo."
+ERROR_DETAIL_KEYS = ("type", "loc", "msg")
 STORAGE_UNAVAILABLE = "No pudimos guardar el archivo. Probá de nuevo en un ratito."
 
 
@@ -28,12 +29,19 @@ def _error_body(code: str, message: str, **extra: Any) -> dict[str, dict[str, An
     return {"error": {"code": code, "message": message, **extra}}
 
 
-async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
+def error_response(exc: ApiError) -> JSONResponse:
+    """The response of an ApiError, for a handler that must add to it (e.g. clear a cookie)."""
     return JSONResponse(_error_body(exc.code, exc.message), status_code=exc.status)
 
 
+async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
+    return error_response(exc)
+
+
 async def _validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
-    body = _error_body("invalid_request", INVALID_REQUEST, details=jsonable_encoder(exc.errors()))
+    # Only where and why: an error's `input` is the submitted value, `ctx` and `url` are noise.
+    details = [{key: error[key] for key in ERROR_DETAIL_KEYS} for error in exc.errors()]
+    body = _error_body("invalid_request", INVALID_REQUEST, details=jsonable_encoder(details))
     return JSONResponse(body, status_code=422)
 
 
@@ -43,6 +51,10 @@ async def _storage_error(_: Request, exc: StorageError) -> JSONResponse:
 
 
 def install_error_handlers(app: FastAPI) -> None:
-    app.add_exception_handler(ApiError, _api_error)
-    app.add_exception_handler(RequestValidationError, _validation_error)
-    app.add_exception_handler(StorageError, _storage_error)
+    # Starlette types handlers as taking `Exception`; it calls each with its registered class.
+    app.add_exception_handler(ApiError, _api_error)  # pyright: ignore[reportArgumentType]
+    app.add_exception_handler(
+        RequestValidationError,
+        _validation_error,  # pyright: ignore[reportArgumentType]
+    )
+    app.add_exception_handler(StorageError, _storage_error)  # pyright: ignore[reportArgumentType]

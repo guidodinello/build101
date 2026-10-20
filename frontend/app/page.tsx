@@ -12,13 +12,14 @@ import { SiteHeader } from "@/components/landing/site-header";
 import { TeamSection } from "@/components/landing/team-section";
 
 export const metadata: Metadata = {
-  title: "Neitor AI · Your marketing agency in WhatsApp",
+  title: "Neitor AI · Tu agencia de marketing en WhatsApp",
   description:
-    "Send a photo of what you sell. Neitor's AI team plans, writes, designs and posts it to your Instagram. Nothing goes out until you tap Approve.",
+    "Mandá una foto de lo que vendés. El equipo de IA de Neitor planifica el post, lo escribe, lo diseña y lo publica en tu Instagram. Nada sale hasta que tocás Aprobar.",
   openGraph: {
-    title: "Neitor AI · Your marketing agency in WhatsApp",
-    description: "You approve, Neitor does the rest. An AI marketing agency that lives in your WhatsApp.",
+    title: "Neitor AI · Tu agencia de marketing en WhatsApp",
+    description: "Vos aprobás, Neitor hace el resto. Una agencia de marketing con IA que vive en tu WhatsApp.",
     type: "website",
+    locale: "es_UY",
   },
 };
 
@@ -28,7 +29,7 @@ export const viewport: Viewport = {
 
 export default function Home() {
   return (
-    <div id="top" lang="en" className="flex-1 bg-ld-ground bg-dot-grid text-ld-ink">
+    <div id="top" className="flex-1 bg-ld-ground bg-dot-grid text-ld-ink">
       <SiteHeader />
       <main className="mx-auto max-w-240 px-4 pt-11 sm:px-6">
         <Hero />

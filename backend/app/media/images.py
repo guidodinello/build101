@@ -1,12 +1,23 @@
+import asyncio
 import base64
+from collections.abc import Callable
 from io import BytesIO
-from typing import Literal
+from typing import Any, Literal
+from weakref import WeakKeyDictionary
 
-from PIL import Image, ImageDraw, ImageOps, ImageStat
+from PIL import Image, ImageDraw, ImageOps, ImageStat, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 
 register_heif_opener()
 
+# What an Owner can send us (HEIC reads as HEIF); anything else is not decoded.
+ACCEPTED_FORMATS = ["JPEG", "PNG", "WEBP", "HEIF"]
+# Checked before decoding: a small PNG can expand to hundreds of MB. A decoded 25 MP image takes
+# 75-100 MB, so a few of them at once stay inside the one backend instance's memory (ADR 0005).
+MAX_PIXELS = 25_000_000
+# Decodes running at once across the wizard, the Instagram import, WhatsApp photos and the
+# carousel's references; the rest wait their turn.
+MAX_CONCURRENT_DECODES = 2
 POST_SIZE = (1080, 1350)
 REFERENCE_MAX_SIDE = 1536
 JPEG_QUALITY = 90
@@ -25,12 +36,54 @@ POST_RATIO = POST_SIZE[0] / POST_SIZE[1]
 
 Tone = Literal["light", "dark"]
 
+# A semaphore binds to the event loop it first waits on, so each loop gets its own (the app has
+# one; tests run one loop each).
+_decode_slots: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = WeakKeyDictionary()
+
+
+class UnreadableImage(Exception):
+    pass
+
+
+class ImageTooLarge(UnreadableImage):
+    """Readable, but over MAX_PIXELS."""
+
+
+def decode_slot() -> asyncio.Semaphore:
+    """The running loop's one semaphore for image decodes, sized by MAX_CONCURRENT_DECODES the
+    first time the loop asks (read here, so it doesn't depend on who asks first)."""
+    return _decode_slots.setdefault(
+        asyncio.get_running_loop(), asyncio.Semaphore(MAX_CONCURRENT_DECODES)
+    )
+
+
+async def decode[T](function: Callable[..., T], *args: Any) -> T:
+    """`function` in a thread, at most MAX_CONCURRENT_DECODES decodes at a time. The others wait
+    on the event loop, not in a thread, so they don't hold the pool other work needs.
+
+    Never call this (or take the slot) from inside a slot: with few slots that can deadlock.
+    """
+    async with decode_slot():
+        return await asyncio.to_thread(function, *args)
+
 
 def prepare_reference(data: bytes) -> bytes:
-    with Image.open(BytesIO(data)) as source:
-        image = ImageOps.exif_transpose(source).convert("RGB")
-    image.thumbnail((REFERENCE_MAX_SIDE, REFERENCE_MAX_SIDE), Image.Resampling.LANCZOS)
-    return _to_jpeg(image)
+    """The agents' copy of a photo the Owner sent. CPU-bound: run it through `decode`."""
+    try:
+        with Image.open(BytesIO(data), formats=ACCEPTED_FORMATS) as source:
+            if source.width * source.height > MAX_PIXELS:
+                raise ImageTooLarge(f"{source.width}x{source.height} is over {MAX_PIXELS} px")
+            return reference_from(ImageOps.exif_transpose(source))
+    # ValueError: pillow_heif's error for a truncated HEIF.
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise UnreadableImage(str(exc)) from exc
+
+
+def reference_from(image: Image.Image) -> bytes:
+    """The agents' copy of an already decoded image; `image` itself is left as it was."""
+    reference = image.convert("RGB")  # a copy, so the thumbnail below doesn't touch `image`
+    reference.thumbnail((REFERENCE_MAX_SIDE, REFERENCE_MAX_SIDE), Image.Resampling.LANCZOS)
+    return _to_jpeg(reference)
 
 
 def to_post_image(data: bytes) -> bytes:
@@ -68,7 +121,10 @@ def logo_for_render(data: bytes) -> tuple[bytes, Tone]:
         raise ValueError("the logo is fully transparent")
     mark = mark.crop(bounds)
     mark.thumbnail((RENDER_LOGO_MAX_SIDE, RENDER_LOGO_MAX_SIDE), Image.Resampling.LANCZOS)
-    shape = mark.getchannel("A").point(lambda value: 255 if value >= OPAQUE_ALPHA else 0)
+    # Pillow stubs type the `point()` lambda argument as an ImagePointTransform, not an int
+    shape = mark.getchannel("A").point(
+        lambda value: 255 if value >= OPAQUE_ALPHA else 0  # pyright: ignore[reportOperatorIssue]
+    )
     if shape.getbbox() is None:
         shape = mark.getchannel("A").point(lambda value: 255 if value else 0)
     luminance = ImageStat.Stat(mark.convert("L"), shape).mean[0]
@@ -124,11 +180,18 @@ def fit_logo(data: bytes, post_size: tuple[int, int]) -> Image.Image:
 def logo_backing(behind: Image.Image, mark: Image.Image) -> tuple[int, int, int] | None:
     """The backing color a transparent logo needs to stand out from `behind`, if any."""
     alpha = mark.getchannel("A")
-    if alpha.getextrema()[0] >= OPAQUE_ALPHA:
+    # Pillow stubs: `getextrema()` is `float | tuple[int, int]`; a single band gives ints.
+    if alpha.getextrema()[0] >= OPAQUE_ALPHA:  # pyright: ignore[reportOperatorIssue]
         return None
     # A logo that is semi-transparent everywhere has no opaque pixel: measure all visible ones.
-    threshold = OPAQUE_ALPHA if alpha.getextrema()[1] >= OPAQUE_ALPHA else 1
-    shape = alpha.point(lambda value: 255 if value >= threshold else 0)
+    threshold = (
+        OPAQUE_ALPHA
+        if alpha.getextrema()[1] >= OPAQUE_ALPHA  # pyright: ignore[reportOperatorIssue]
+        else 1
+    )
+    shape = alpha.point(
+        lambda value: 255 if value >= threshold else 0  # pyright: ignore[reportOperatorIssue]
+    )
     logo_luminance = ImageStat.Stat(mark.convert("L"), shape).mean[0]
     behind_luminance = ImageStat.Stat(behind.convert("L"), shape).mean[0]
     if abs(logo_luminance - behind_luminance) >= LOGO_MIN_CONTRAST:

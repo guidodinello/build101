@@ -65,13 +65,23 @@ class Toolbox:
         approval: Approval,
         owner_request: bool,
     ) -> dict[str, Any]:
-        logger.info("tool %s for %s: %s", call.name, mask(sender), call.arguments)
+        # Arguments, results and replies hold the Owner's business content: INFO names the
+        # tool and the keys, DEBUG has the content.
+        logger.info("tool %s for %s: args %s", call.name, mask(sender), sorted(call.arguments))
+        logger.debug("tool %s arguments: %s", call.name, call.arguments)
         try:
             result = await self._dispatch(call, sender, channel, notify, approval, owner_request)
         except SQLAlchemyError:
             logger.warning("tool %s failed for %s", call.name, mask(sender), exc_info=True)
             result = {"error": "action_failed"}
-        logger.info("tool %s result: %s", call.name, result)
+        error = result.get("error")
+        logger.info(
+            "tool %s result keys %s%s",
+            call.name,
+            sorted(result),
+            f", error {error}" if isinstance(error, str) else "",
+        )
+        logger.debug("tool %s result: %s", call.name, result)
         return result
 
     async def _dispatch(

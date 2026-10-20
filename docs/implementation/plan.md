@@ -99,7 +99,7 @@ The demo architecture is meant to survive. Next steps in order:
 
 1. The Should features not finished on the day (plan on request, ideas, revisions, scheduling, style matching, read-only dashboard), then [ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)'s Catalog, content uploads and Reels ([ADR 0016](../decisions/0016-demo-scope-one-post.md)).
 2. Real job queue (arq/Redis or Postgres-based) + multiple backend instances (move locks to Postgres advisory locks).
-3. RLS on Supabase; generated frontend API types from OpenAPI.
+3. Generated frontend API types from OpenAPI (RLS on Supabase is done: migration `0007`).
 4. WhatsApp Business verification + own number + approved templates for proactive messages.
 5. Plans/quotas enforcement + billing (Mercado Pago / Stripe).
 6. Evals for each agent (golden briefs → graded outputs) before changing prompts or models.

@@ -1,15 +1,22 @@
+import asyncio
+import threading
+import time
 from io import BytesIO
 
 import pytest
 from PIL import Image
 
+from app.media import images
 from app.onboarding import uploads
 from app.onboarding.uploads import (
+    ImageTooLarge,
+    ProcessedUpload,
     UnreadableImage,
     asset_path,
     llm_copy_path,
     logo_palette,
     process_upload,
+    read_upload,
 )
 from tests.conftest import make_image
 
@@ -65,7 +72,7 @@ def test_an_image_over_the_pixel_cap_is_rejected_before_decoding(
 ) -> None:
     monkeypatch.setattr(uploads, "MAX_PIXELS", 100 * 100)
 
-    with pytest.raises(UnreadableImage, match="101x100"):
+    with pytest.raises(ImageTooLarge, match="101x100"):
         process_upload(make_image((101, 100)), "image/jpeg", "photo")
 
 
@@ -84,3 +91,85 @@ def test_unreadable_file_raises() -> None:
 def test_storage_paths() -> None:
     assert asset_path("b1", "a1", "image/heic") == "b1/a1.heic"
     assert llm_copy_path("b1", "a1") == "b1/a1-llm.jpg"
+
+
+@pytest.mark.parametrize(
+    ("format", "content_type"),
+    [("JPEG", "image/jpeg"), ("PNG", "image/png"), ("WEBP", "image/webp"), ("HEIF", "image/heic")],
+)
+def test_every_accepted_format_passes(format: str, content_type: str) -> None:
+    processed = process_upload(make_image((120, 80), format=format), content_type, "photo")
+
+    assert (processed.width, processed.height) == (120, 80)
+
+
+@pytest.mark.parametrize("format", ["TIFF", "BMP", "GIF"])
+def test_a_file_of_another_format_is_unreadable_whatever_it_declares(format: str) -> None:
+    with pytest.raises(UnreadableImage):
+        process_upload(make_image((50, 50), format=format), "image/png", "photo")
+
+
+def test_a_file_must_match_its_declared_type() -> None:
+    with pytest.raises(UnreadableImage):
+        process_upload(make_image((50, 50), format="PNG"), "image/jpeg", "photo")
+
+
+def test_the_pixel_cap_is_25_megapixels() -> None:
+    assert uploads.MAX_PIXELS == 25_000_000
+
+
+async def test_decodes_run_at_most_as_many_at_once_as_the_limit_allows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(images, "MAX_CONCURRENT_DECODES", 2)
+    running = 0
+    peak = 0
+    lock = threading.Lock()
+    reference_from = uploads.reference_from
+
+    def slow_reference(image: Image.Image) -> bytes:
+        nonlocal running, peak
+        with lock:
+            running += 1
+            peak = max(peak, running)
+        time.sleep(0.05)
+        with lock:
+            running -= 1
+        return reference_from(image)
+
+    monkeypatch.setattr(uploads, "reference_from", slow_reference)
+    data = make_image((100, 80))
+
+    await asyncio.gather(*(read_upload(data, "image/jpeg", "photo") for _ in range(6)))
+
+    assert peak == 2
+
+
+async def test_decodes_waiting_for_a_slot_leave_the_thread_pool_free(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Waiting happens on the event loop: one decode runs in a thread, the rest hold none."""
+    monkeypatch.setattr(images, "MAX_CONCURRENT_DECODES", 1)
+    in_threads = 0
+    peak = 0
+    lock = threading.Lock()
+    process = uploads.process_upload
+
+    def counting(data: bytes, content_type: str, kind: str) -> ProcessedUpload:
+        nonlocal in_threads, peak
+        with lock:
+            in_threads += 1
+            peak = max(peak, in_threads)
+        try:
+            time.sleep(0.05)
+            return process(data, content_type, kind)
+        finally:
+            with lock:
+                in_threads -= 1
+
+    monkeypatch.setattr(uploads, "process_upload", counting)
+    data = make_image((100, 80))
+
+    await asyncio.gather(*(read_upload(data, "image/jpeg", "photo") for _ in range(5)))
+
+    assert peak == 1

@@ -126,6 +126,7 @@ class SocialAccount(Base):
     provider_account_id: Mapped[str | None]
     handle: Mapped[str | None]
     status: Mapped[str] = mapped_column(server_default="pending")
+    # `import_instagram` claims it (reads, then nulls it) when it starts (#102)
     access_token: Mapped[str | None]
     token_expires_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
@@ -176,3 +177,12 @@ class NicheReportRow(Base):
     week_start: Mapped[date]
     report: Mapped[dict[str, Any]]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class InboundDelivery(Base):
+    """A WhatsApp message id the webhook accepted: the durable dedupe key (#105)."""
+
+    __tablename__ = "inbound_deliveries"
+
+    external_id: Mapped[str] = mapped_column(primary_key=True)
+    received_at: Mapped[datetime] = mapped_column(server_default=func.now())

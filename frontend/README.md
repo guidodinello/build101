@@ -14,16 +14,17 @@ Stack: Next.js (App Router, TypeScript), Tailwind CSS, shadcn/ui, lucide-react, 
 cp .env.example .env.local
 npm install
 npm run dev
+npm run typecheck   # next typegen, then tsc (strict flags in tsconfig.json); CI runs it with npm run lint
 ```
 
 Until the backend serves the onboarding endpoints (T24), set `ENABLE_MOCK_API=true` and `NEXT_PUBLIC_API_URL=http://localhost:3000/mock-api` in `.env.local`: `lib/mock-backend.ts` implements the [onboarding contract](../docs/architecture/api.md#onboarding-web-wizard) in memory. Any token works (`/o/demo`); `/o/vencido` shows the expired-link screen.
 
 ## Layout
 
-- `app/page.tsx` + `components/landing/`: the English landing page, built as one WhatsApp-style thread with Neitor (design: [canvas](https://claude.ai/artifact/4ghMvD3UL9q5x3E4P1Fbai), Option A). Server components except `approval-demo.tsx`, the hero's working Approve / Change buttons. Its colors are the `ld-*` tokens in `app/globals.css`; every CTA opens `NEXT_PUBLIC_WHATSAPP_URL` with "Hi Neitor" typed in (`lib/whatsapp.ts`).
+- `app/page.tsx` + `components/landing/`: the landing page, in Rioplatense Spanish like the bot and the wizard, built as one WhatsApp-style thread with Neitor (design: [canvas](https://claude.ai/artifact/4ghMvD3UL9q5x3E4P1Fbai), Option A). Server components except `approval-demo.tsx`, the hero's working Approve / Change buttons. Its colors are the `ld-*` tokens in `app/globals.css`; every CTA opens `NEXT_PUBLIC_WHATSAPP_URL` with "Hola Neitor" typed in (`lib/whatsapp.ts`).
 - `app/o/[token]/`: the onboarding wizard route (loads `OnboardingState` on the server, `?step=` picks the screen).
 - `components/onboarding/`: wizard shell, one file per step under `steps/`, the photo upload queue. The wizard reuses the landing's chat primitives (`Bubble`, `Display`, `NeitorAvatar`) and its palette, mapped onto the shadcn tokens in `app/globals.css`. `lib/categories.ts` holds the per-category examples, audiences and brand words; step order and resume logic are in `lib/onboarding.ts` ([ADR 0032](../docs/decisions/0032-instagram-first-onboarding.md)).
-- `lib/api.ts`: REST client and types, written by hand from `api.md`. `lib/upload.ts`: signed-URL uploads.
+- `lib/api.ts`: REST client; Zod schemas (written by hand from `api.md`) check every response and give the types. `lib/upload.ts`: signed-URL uploads.
 - `components/ui/`: shadcn/ui components, restyled to the tokens in [web-app.md](../docs/design/web-app.md#visual-language) (the landing palette), with a `cta` button variant for the orange call to action.
 - `app/api/render/` + `lib/post-render/`: the post slide renderer ([ADR 0029](../docs/decisions/0029-designed-slides-ai-scene-code-layout.md)). The backend POSTs one slide's spec and gets a 1080×1350 JPEG, rendered by Takumi without a browser. Template families are in `lib/post-render/families/`, fonts (OFL) in `lib/post-render/fonts/`. Contract: [integrations.md § Slide renderer](../docs/architecture/integrations.md#slide-renderer-takumi-on-vercel). With `ENABLE_TEMPLATE_PREVIEW=true`, `/dev/post-templates` shows every family over sample copy.
 
@@ -53,10 +54,15 @@ Set for Production and Preview (`vercel env add KEY production`, value on stdin)
 | Variable | Value |
 |---|---|
 | `NEXT_PUBLIC_API_URL` | the Railway backend, `https://backend-production-6e67.up.railway.app` |
+| `SUPABASE_URL` | the Supabase project URL, same as the backend's; read at build time for the CSP, and the Vercel build fails without it |
 | `NEXT_PUBLIC_WHATSAPP_URL` | `https://wa.me/56920403095`, the shared Kapso sandbox number (same as the backend's `WHATSAPP_BOT_NUMBER`) |
-| `ENABLE_MOCK_API` | `false` |
+| `ENABLE_MOCK_API` | `false` (the mock also answers 404 whenever `VERCEL_ENV` is `production`) |
 | `NEXT_PUBLIC_DEV_TOKEN` | unset (the simulator is not used in production) |
 | `RENDER_SECRET` | a random secret, the same as the backend's `RENDERER_SECRET`; without it `/api/render` answers 503 |
 | `ENABLE_TEMPLATE_PREVIEW` | `false` |
+
+### Security headers
+
+`next.config.ts` sets `Content-Security-Policy`, `X-Frame-Options: DENY` and `X-Content-Type-Options: nosniff` on every route, and `Referrer-Policy: no-referrer` on `/o/*` (the onboarding token is in the path). The CSP allows `img-src` / `connect-src` only for `'self'`, the origins of `NEXT_PUBLIC_API_URL` and `SUPABASE_URL`, and `blob:` / `data:` images. Preview deployments also allow the [Vercel Toolbar hosts](https://vercel.com/docs/vercel-toolbar/managing-toolbar#using-a-content-security-policy). Scripts keep `'unsafe-inline'`: a nonce CSP would force dynamic rendering and rule out `cacheComponents`, so inline-script injection is not blocked. A new external host (an image CDN, an analytics script) needs an entry there.
 
 The backend must list the Vercel domain in `FRONTEND_URL` and `FRONTEND_ORIGINS` ([backend/README.md](../backend/README.md#environment-variables)), or magic links point at localhost and browser calls fail CORS.

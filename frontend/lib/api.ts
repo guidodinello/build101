@@ -1,89 +1,121 @@
+import * as z from "zod";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-export type BusinessInfo = {
-  name: string | null;
-  category: string | null;
-  one_liner: string | null;
-  description: string | null;
-  location: string | null;
-  website: string | null;
-  instagram_handle: string | null;
-};
+const BusinessInfoSchema = z.object({
+  name: z.string().nullable(),
+  category: z.string().nullable(),
+  one_liner: z.string().nullable(),
+  description: z.string().nullable(),
+  location: z.string().nullable(),
+  website: z.string().nullable(),
+  instagram_handle: z.string().nullable(),
+});
+export type BusinessInfo = z.infer<typeof BusinessInfoSchema>;
 
-export type Product = {
-  id: string;
-  name: string;
-  description: string;
-  price: string | null;
-  category: string | null;
-  position: number;
-  asset_count: number;
-  archived: boolean;
-};
+const ProductSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  price: z.string().nullable(),
+  category: z.string().nullable(),
+  position: z.number(),
+  asset_count: z.number(),
+  archived: z.boolean(),
+});
+export type Product = z.infer<typeof ProductSchema>;
 
-export type AssetKind = "logo" | "photo" | "video";
-export type AssetSource = "web" | "instagram";
+const AssetKindSchema = z.literal(["logo", "photo", "video"]);
+export type AssetKind = z.infer<typeof AssetKindSchema>;
+const AssetSourceSchema = z.literal(["web", "instagram"]);
+export type AssetSource = z.infer<typeof AssetSourceSchema>;
 
-export type Asset = {
-  id: string;
-  kind: AssetKind;
-  source: AssetSource;
-  status: "uploading" | "ready" | "failed";
-  url: string;
-  thumbnail_url: string | null;
-  width: number | null;
-  height: number | null;
-  duration_ms: number | null;
-  derived_from_asset_id: string | null;
-  owner_hint: string | null;
-  palette: string[] | null;
-  product_ids: string[];
-  reel_suitable: boolean | null;
-  analyzed: boolean;
-  archived: boolean;
-};
+const AssetSchema = z.object({
+  id: z.string(),
+  kind: AssetKindSchema,
+  source: AssetSourceSchema,
+  status: z.literal(["uploading", "ready", "failed"]),
+  url: z.string(),
+  thumbnail_url: z.string().nullable(),
+  width: z.number().nullable(),
+  height: z.number().nullable(),
+  duration_ms: z.number().nullable(),
+  derived_from_asset_id: z.string().nullable(),
+  owner_hint: z.string().nullable(),
+  palette: z.array(z.string()).nullable(),
+  product_ids: z.array(z.string()),
+  reel_suitable: z.boolean().nullable(),
+  analyzed: z.boolean(),
+  archived: z.boolean(),
+});
+export type Asset = z.infer<typeof AssetSchema>;
 
-export type Goal = "sales" | "awareness" | "launch" | "loyalty";
-export type EmojiPolicy = "many" | "few" | "none";
-export type Scale = 1 | 2 | 3 | 4 | 5;
-export type PostsPerWeek = 2 | 3 | 5;
+const GoalSchema = z.literal(["sales", "awareness", "launch", "loyalty"]);
+export type Goal = z.infer<typeof GoalSchema>;
+const EmojiPolicySchema = z.literal(["many", "few", "none"]);
+export type EmojiPolicy = z.infer<typeof EmojiPolicySchema>;
+const ScaleSchema = z.literal([1, 2, 3, 4, 5]);
+export type Scale = z.infer<typeof ScaleSchema>;
+const PostsPerWeekSchema = z.literal([2, 3, 5]);
+export type PostsPerWeek = z.infer<typeof PostsPerWeekSchema>;
 
-export type Questionnaire = {
-  goal: Goal;
-  audiences: string[];
-  formality: Scale | null;
-  humor: Scale | null;
-  posts_per_week: PostsPerWeek | null;
-  emoji_policy: EmojiPolicy | null;
-  avoid: string | null;
-  current_offer: string | null;
-};
+const QuestionnaireSchema = z.object({
+  goal: GoalSchema,
+  audiences: z.array(z.string()),
+  formality: ScaleSchema.nullable(),
+  humor: ScaleSchema.nullable(),
+  posts_per_week: PostsPerWeekSchema.nullable(),
+  emoji_policy: EmojiPolicySchema.nullable(),
+  avoid: z.string().nullable(),
+  current_offer: z.string().nullable(),
+});
+export type Questionnaire = z.infer<typeof QuestionnaireSchema>;
 
-export type InstagramStatus = "not_connected" | "pending" | "connected" | "error";
+const InstagramStatusSchema = z.literal(["not_connected", "pending", "connected", "error"]);
+export type InstagramStatus = z.infer<typeof InstagramStatusSchema>;
 
-export type OnboardingState = {
-  business: BusinessInfo;
-  products: Product[];
-  brand: { three_words: string[]; colors: string[] };
-  assets: Asset[];
-  preferences: Questionnaire | null;
-  instagram: { status: InstagramStatus; handle: string | null };
-  completed: boolean;
-  whatsapp_url: string;
-};
+const OnboardingStateSchema = z.object({
+  business: BusinessInfoSchema,
+  products: z.array(ProductSchema),
+  brand: z.object({ three_words: z.array(z.string()), colors: z.array(z.string()) }),
+  assets: z.array(AssetSchema),
+  preferences: QuestionnaireSchema.nullable(),
+  instagram: z.object({ status: InstagramStatusSchema, handle: z.string().nullable() }),
+  completed: z.boolean(),
+  whatsapp_url: z.string(),
+});
+export type OnboardingState = z.infer<typeof OnboardingStateSchema>;
+
+const UploadTicketSchema = z.object({
+  asset_id: z.string(),
+  upload_url: z.string(),
+  upload_token: z.string(),
+  resumable: z.boolean(),
+});
+export type UploadTicket = z.infer<typeof UploadTicketSchema>;
+
+const ConnectResponseSchema = z.object({ auth_url: z.string() });
+export type ConnectResponse = z.infer<typeof ConnectResponseSchema>;
+
+const CompleteResponseSchema = z.object({ status: z.literal("generating_brand") });
+export type CompleteResponse = z.infer<typeof CompleteResponseSchema>;
+
+const ErrorBodySchema = z.object({
+  error: z.object({ code: z.string().optional(), message: z.string().optional() }).optional(),
+});
 
 export type BusinessInput = {
   name: string;
   category: string;
   one_liner: string;
-  location?: string;
+  location?: string | undefined;
 };
 
 export type ProductInput = {
-  id?: string;
+  id?: string | undefined;
   name: string;
   description: string;
-  price?: string;
+  price?: string | undefined;
   category?: string;
   asset_ids?: string[];
 };
@@ -102,20 +134,14 @@ export type UploadRequest = {
   owner_hint?: string;
 };
 
-export type UploadTicket = {
-  asset_id: string;
-  upload_url: string;
-  upload_token: string;
-  resumable: boolean;
-};
-
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
     message: string,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
   }
 
   get isLinkInvalid() {
@@ -125,7 +151,7 @@ export class ApiError extends Error {
 
 const GENERIC_ERROR = "Algo salió mal. Probá de nuevo en un ratito.";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function send(path: string, init?: RequestInit): Promise<Response> {
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`, {
@@ -138,67 +164,78 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    throw new ApiError(
-      response.status,
-      body?.error?.code ?? "unknown",
-      body?.error?.message ?? GENERIC_ERROR,
-    );
+    const body = ErrorBodySchema.safeParse(await response.json().catch(() => null));
+    const error = body.success ? body.data.error : undefined;
+    throw new ApiError(response.status, error?.code ?? "unknown", error?.message ?? GENERIC_ERROR);
   }
+  return response;
+}
 
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+// A body that does not match the schema means the backend contract changed: fail here, with the
+// same ApiError the callers already handle, instead of crashing later inside a component.
+async function request<S extends z.ZodType>(
+  schema: S,
+  path: string,
+  init?: RequestInit,
+): Promise<z.infer<S>> {
+  const response = await send(path, init);
+  const body = schema.safeParse(await response.json().catch(() => null));
+  if (!body.success) {
+    throw new ApiError(response.status, "invalid_response", GENERIC_ERROR, { cause: body.error });
+  }
+  return body.data;
 }
 
 const onboarding = (token: string) => `/api/o/${encodeURIComponent(token)}`;
 
 export const onboardingApi = {
-  getState: (token: string) => request<OnboardingState>(onboarding(token)),
+  getState: (token: string) => request(OnboardingStateSchema, onboarding(token)),
 
   saveBusiness: (token: string, body: BusinessInput) =>
-    request<OnboardingState>(`${onboarding(token)}/business`, {
+    request(OnboardingStateSchema, `${onboarding(token)}/business`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
 
   saveProducts: (token: string, products: ProductInput[]) =>
-    request<OnboardingState>(`${onboarding(token)}/products`, {
+    request(OnboardingStateSchema, `${onboarding(token)}/products`, {
       method: "PUT",
       body: JSON.stringify({ products }),
     }),
 
   saveBrand: (token: string, body: BrandInput) =>
-    request<OnboardingState>(`${onboarding(token)}/brand`, {
+    request(OnboardingStateSchema, `${onboarding(token)}/brand`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
 
   savePreferences: (token: string, body: Questionnaire) =>
-    request<OnboardingState>(`${onboarding(token)}/preferences`, {
+    request(OnboardingStateSchema, `${onboarding(token)}/preferences`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
 
   requestUpload: (token: string, body: UploadRequest) =>
-    request<UploadTicket>(`${onboarding(token)}/uploads`, {
+    request(UploadTicketSchema, `${onboarding(token)}/uploads`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
 
   completeUpload: (token: string, assetId: string) =>
-    request<Asset>(`${onboarding(token)}/assets/${assetId}/complete`, { method: "POST" }),
+    request(AssetSchema, `${onboarding(token)}/assets/${assetId}/complete`, { method: "POST" }),
 
-  deleteAsset: (token: string, assetId: string) =>
-    request<void>(`${onboarding(token)}/assets/${assetId}`, { method: "DELETE" }),
+  deleteAsset: async (token: string, assetId: string) => {
+    await send(`${onboarding(token)}/assets/${assetId}`, { method: "DELETE" });
+  },
 
   connectInstagram: (token: string) =>
-    request<{ auth_url: string }>(`${onboarding(token)}/instagram/connect`, {
+    request(ConnectResponseSchema, `${onboarding(token)}/instagram/connect`, {
       method: "POST",
       body: "{}",
     }),
 
   complete: (token: string) =>
-    request<{ status: string }>(`${onboarding(token)}/complete`, { method: "POST" }),
+    request(CompleteResponseSchema, `${onboarding(token)}/complete`, { method: "POST" }),
 };
 
 export function messageOf(error: unknown) {

@@ -9,7 +9,7 @@ type ScreenLayoutProps = {
   subtitle?: ReactNode;
   children?: ReactNode;
   footer?: ReactNode;
-  onSubmit?: () => void;
+  onSubmit?: (() => void) | undefined;
 };
 
 export function ScreenLayout({

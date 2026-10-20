@@ -3,11 +3,11 @@ import { NeitorAvatar } from "@/components/landing/site-header";
 import { WHATSAPP_START_URL } from "@/lib/whatsapp";
 
 const PRODUCT_LINKS = [
-  { href: "#how", label: "How it works" },
-  { href: "#team", label: "The team" },
-  { href: "#control", label: "You stay in control" },
-  { href: "#pricing", label: "Pricing" },
-  { href: "#faq", label: "FAQ" },
+  { href: "#how", label: "Cómo funciona" },
+  { href: "#team", label: "El equipo" },
+  { href: "#control", label: "Vos tenés el control" },
+  { href: "#pricing", label: "Precios" },
+  { href: "#faq", label: "Preguntas" },
 ];
 
 const linkClass = "text-[15px] text-[#dce8e1] transition-colors hover:text-white";
@@ -23,22 +23,22 @@ export function SiteFooter() {
               <span className="font-heading text-2xl font-extrabold tracking-tight text-white">Neitor AI</span>
             </div>
             <p className="max-w-85 text-base leading-normal">
-              An AI marketing agency in your WhatsApp. You approve, Neitor does the rest.
+              Una agencia de marketing con IA en tu WhatsApp. Vos aprobás, Neitor hace el resto.
             </p>
             <CtaLink icon className="mt-1.5">
-              Get started on WhatsApp
+              Empezá en WhatsApp
             </CtaLink>
           </div>
-          <nav aria-label="Product" className="flex flex-[1_1_160px] flex-col gap-3">
-            <span className="mb-1 text-xs font-semibold tracking-[0.06em] text-[#7f9a8d] uppercase">Product</span>
+          <nav aria-label="Producto" className="flex flex-[1_1_160px] flex-col gap-3">
+            <span className="mb-1 text-xs font-semibold tracking-[0.06em] text-[#7f9a8d] uppercase">Producto</span>
             {PRODUCT_LINKS.map((link) => (
               <a key={link.href} href={link.href} className={linkClass}>
                 {link.label}
               </a>
             ))}
           </nav>
-          <nav aria-label="Contact" className="flex flex-[1_1_160px] flex-col gap-3">
-            <span className="mb-1 text-xs font-semibold tracking-[0.06em] text-[#7f9a8d] uppercase">Contact</span>
+          <nav aria-label="Contacto" className="flex flex-[1_1_160px] flex-col gap-3">
+            <span className="mb-1 text-xs font-semibold tracking-[0.06em] text-[#7f9a8d] uppercase">Contacto</span>
             <a href={WHATSAPP_START_URL} className={linkClass}>
               WhatsApp
             </a>
@@ -53,7 +53,7 @@ export function SiteFooter() {
         <div className="mt-7 flex flex-wrap gap-x-7 gap-y-2.5 border-t border-white/10 pt-5.5 text-[13px] text-[#7f9a8d]">
           <span>© 2026 Neitor AI</span>
           <span className="sm:ml-auto">
-            Example business and posts are illustrative. Photos by Shixart1985 on{" "}
+            El negocio y los posts de ejemplo son ilustrativos. Fotos de Shixart1985 en{" "}
             <a
               href="https://commons.wikimedia.org/wiki/User:Shixart1985"
               className="underline underline-offset-2 hover:text-white"

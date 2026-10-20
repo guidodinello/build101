@@ -42,7 +42,7 @@ Each outside service sits behind a small interface (a Python `Protocol`, called 
 | `ImageGenPort` | `imagegen/gemini.py` | `imagegen/mock.py` | `IMAGE_GEN` |
 | `PublisherPort` (Instagram) | `publishing/zernio.py` | `publishing/mock.py` | `PUBLISHER` |
 
-Everything is wired together in [`backend/app/conversation/factory.py`](../../backend/app/conversation/factory.py) (`build_conversation` reads `Settings`; `build_chat` is the one place the chat graph is wired, in production and in tests; it returns the inbound `handler` and the `notify` that jobs share). It is the best first file to read.
+Everything is wired together in [`backend/app/conversation/factory.py`](../../backend/app/conversation/factory.py) (`build_conversation` reads `Settings`; `build_chat` is the one place the chat graph is wired, in production and in tests; it returns the inbound `handler` and the `notify` that jobs share). It is the best first file to read. The webhook's `get_conversation()` in `channels/router.py` puts the `handler` behind a `RateLimitedHandler` (a token bucket per sender, [#106](https://github.com/guidodinello/build101/issues/106)); `notify` is not limited, since code raises those events, not the Owner.
 
 ## WhatsApp and the backend, through Kapso
 
@@ -182,7 +182,7 @@ Only onboarding data is stored for good; the conversation and the posts live in 
 | Products and brand assets (wizard photos, logo) | Photos sent on WhatsApp (`InMemoryPhotos`) |
 | Brand Brain versions, Niche Reports | Posts and their status (`PostLifecycle`, over `InMemoryPosts`) |
 | Jobs | Generated JPEGs (`PublicImages`, newest 200) |
-| | Webhook dedupe store |
+| | Webhook dedupe store, only without `DATABASE_URL` (with it, `inbound_deliveries`) |
 
 A redeploy while a post is waiting means it can no longer be approved or published, and its image links return 404. The code comments point to tasks T17 and T19 to move this into the database and Storage. The guards that stop a second generation (`generation_in_progress`, the daily limits) are in memory for the same reason.
 

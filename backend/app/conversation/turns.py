@@ -352,7 +352,8 @@ class Turns:
 
 
 def log_reply(sender: str, text: str) -> None:
-    logger.info("%s replied to %s: %s", AGENT, mask(sender), text[:LOGGED_REPLY_CHARS])
+    logger.info("%s replied to %s (%d chars)", AGENT, mask(sender), len(text))
+    logger.debug("%s reply: %s", AGENT, text[:LOGGED_REPLY_CHARS])
 
 
 def offered_post(event: Event) -> str | None:

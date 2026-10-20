@@ -22,7 +22,7 @@ from app.onboarding.uploads import (
     UnreadableImage,
     asset_path,
     llm_copy_path,
-    process_upload,
+    read_upload,
 )
 from app.storage import ASSETS_BUCKET
 
@@ -54,22 +54,22 @@ def import_instagram_job(instagram: InstagramPort, max_posts: int, max_images: i
         The profile and the captions go to `onboarding_data["instagram"]`; the newest images
         become Brand assets (`source = 'instagram'`) with an Asset Analyst job each. Images
         imported before are skipped, so a reconnect only adds what is new.
+
+        The Owner's token is claimed first: the job reads it and nulls the column in one
+        transaction, committed before any call to Instagram. From then on the token lives only in
+        this job's memory, so a failure, a cancellation or a killed process leaves nothing in the
+        database; a reconnect stores a fresh token for its own import; and two overlapping
+        imports can't both get one, the second is skipped (#102). A failed import therefore
+        needs a reconnect.
         """
         if context.business_id is None:
             raise ValueError("import_instagram needs a business")
         business_id = context.business_id
+        access_token = await _claim_token(context, business_id)
+        if access_token is None:
+            return {"skipped": "no connected instagram"}
+
         async with context.sessions() as db:
-            account = await db.scalar(
-                select(SocialAccount).where(
-                    SocialAccount.business_id == business_id,
-                    SocialAccount.platform == "instagram",
-                    SocialAccount.status == "connected",
-                    SocialAccount.access_token.is_not(None),
-                )
-            )
-            if account is None:
-                return {"skipped": "no connected instagram"}
-            access_token = account.access_token or ""
             imported = set(
                 (
                     await db.scalars(
@@ -81,7 +81,6 @@ def import_instagram_job(instagram: InstagramPort, max_posts: int, max_images: i
                     )
                 ).all()
             )
-
         profile = await instagram.profile(access_token)
         media = await instagram.recent_media(access_token, max_posts)
         wanted = _images_to_import(media, imported, max_images)
@@ -125,6 +124,30 @@ def import_instagram_job(instagram: InstagramPort, max_posts: int, max_images: i
     return import_instagram
 
 
+async def _claim_token(context: JobContext, business_id: uuid.UUID) -> str | None:
+    """Take the connected account's token out of the database: the token, or None if there is
+    none. `FOR UPDATE` makes the read and the null one step: a second claim waits for the first
+    to commit, then no longer matches. (A single `UPDATE ... RETURNING` can't do it: RETURNING
+    gives the new value, which is null.)"""
+    async with context.sessions() as db:
+        account = await db.scalar(
+            select(SocialAccount)
+            .where(
+                SocialAccount.business_id == business_id,
+                SocialAccount.platform == "instagram",
+                SocialAccount.status == "connected",
+                SocialAccount.access_token.is_not(None),
+            )
+            .with_for_update()
+        )
+        if account is None:
+            return None
+        token = account.access_token
+        account.access_token = None
+        await db.commit()
+        return token
+
+
 def _images_to_import(
     media: list[InstagramMedia], imported: set[str | None], max_images: int
 ) -> list[tuple[InstagramImage, str | None]]:
@@ -147,7 +170,7 @@ async def _store_image(
         data, content_type = await instagram.download(image.url)
         if content_type not in EXTENSIONS or content_type == HEIC:
             raise UnreadableImage(f"unexpected content type {content_type!r}")
-        processed = await asyncio.to_thread(process_upload, data, content_type, "photo")
+        processed = await read_upload(data, content_type, "photo")
     except (InstagramError, UnreadableImage) as exc:
         logger.warning("instagram image %s not imported: %s", image.id, exc)
         return None

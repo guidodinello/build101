@@ -188,7 +188,7 @@ create table social_accounts (
   provider_account_id  text,                          -- the provider's id for the connected IG account
   handle               text,
   status               text not null default 'pending',
-  access_token         text,                          -- 'meta': the long-lived Instagram Login token
+  access_token         text,                          -- 'meta': the long-lived Instagram Login token, import_instagram nulls it when it starts, before any call to Instagram (0005)
   token_expires_at     timestamptz,                   -- 60 days after the connect; not refreshed yet
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now(),
@@ -359,6 +359,17 @@ create table owner_notes (
 );
 create index ix_owner_notes_business_id on owner_notes (business_id) where archived_at is null;
 
+-- Webhook dedupe (#105, migration 0006): one row per WhatsApp message id the webhook accepted, pruned
+-- after 48 h. messages.external_id can't serve: the webhook has no business_id when it dedupes (the
+-- onboarding gate creates the Business later) and nothing writes messages until T02.
+create table inbound_deliveries (
+  external_id  text not null,
+  received_at  timestamptz not null default now(),
+  constraint inbound_deliveries_pkey primary key (external_id)
+);
+create index ix_inbound_deliveries_received_at on inbound_deliveries (received_at);
+alter table inbound_deliveries enable row level security;
+
 create table jobs (
   id           uuid primary key default gen_random_uuid(),
   business_id  uuid constraint jobs_business_id_fkey references businesses(id) on delete cascade,
@@ -405,7 +416,7 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 
 - **Phone number = identity** in the MVP. Multi-user businesses later need `users` + `business_members`; nothing else in the schema assumes one owner except `businesses.owner_phone`.
 - **Simulator businesses** use fake phone numbers prefixed `sim-` and `channel = 'simulator'`, so the outbound channel is chosen per business.
-- **Row Level Security**: off for the hackathon (the backend uses the service role key and is the only DB client), except on `social_accounts`, which holds Instagram access tokens ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)). RLS there has no policies, so Supabase's `anon` and `authenticated` roles read nothing; the backend connects as the table owner, which RLS does not restrict. Turn RLS on for the rest before any client talks to Supabase directly. Browser uploads don't break this rule: the browser only writes to Storage, through a signed upload URL the backend issues for one path ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)).
+- **Row Level Security**: on for every table in `public`, with no policies, and Supabase's `anon` and `authenticated` roles hold no grants on its tables, sequences or functions, including the ones later migrations create (migration `0007`). Supabase serves `public` through its Data API to anyone with the project's publishable key, so leaving RLS off exposed every row even though no client uses that API (2026-10-19 audit, finding SEC-1). The backend is still the only database client: it connects as `postgres`, the table owner, which RLS does not restrict. Enable RLS in the migration that creates a table, as `social_accounts` (0002) does; `tests/test_data_api_closed.py` fails otherwise. The closing covers objects `postgres` creates: Supabase's own `supabase_admin` default privileges still grant those roles anything it creates in `public`, so keep extensions in the `extensions` schema. Browser uploads don't touch `public`: the browser only writes to Storage, through a signed upload URL the backend issues for one path ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)).
 - **Products and Offers**: the Catalog lives in `products`, not in `onboarding_data` or the Brand Brain. The Brand Brain keeps only a featured summary that references product ids; agents read the full Catalog and the `active` Offers (not past `ends_on`) from these tables. `current_offers` no longer exists.
 - **Archiving, not deleting**: Owners archive Products, Brand assets and Offers (`archived_at`, or `status = 'archived'` for Offers). Archived rows are hidden from agents and the dashboard. Published and scheduled Posts keep their generated image or video; draft Posts (`pending_approval`, `revising`) that use archived material are flagged for review.
 - **Variations**: `generate_post` writes one `post_variations` row per generated image; picking one copies its path and URL to `posts.image_path` / `image_url` and sets `variation_n`. Approval ([ADR 0007](../decisions/0007-approve-every-post.md)) applies to the picked variation; for an image Post the publisher only ever reads `posts.image_url`. Image-service cost is logged in `agent_runs` with `agent = 'image_gen'`.
@@ -424,3 +435,6 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 | `0002` | Instagram import ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)): `social_accounts.access_token`, `token_expires_at`, unique on `(business_id, platform, provider)`, RLS on; `brand_assets.external_id` and its partial unique index; job kind `import_instagram` |
 | `0003` | The orchestrator's memory ([ADR 0030](../decisions/0030-orchestrator-memory-and-context.md)): `conversation_steps`, `owner_notes`, `businesses.conversation_summary` |
 | `0004` | Weekly Niche Reports ([ADR 0025](../decisions/0025-weekly-niche-report.md)): `niche_reports`, one per niche and week (the first design had one per Business and was never migrated); job kind `generate_niche_report` |
+| `0005` | Instagram tokens are not kept (security audit M-5, [ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)): sets `social_accounts.access_token` to null for every row; `import_instagram` now claims it (reads and nulls it in one transaction) when it starts. The downgrade is a no-op, since the tokens can't be restored |
+| `0006` | Durable webhook dedupe (security audit L-3): `inbound_deliveries(external_id pk, received_at)`, RLS on, rows pruned after 48 h by the webhook itself |
+| `0007` | The Data API is closed (2026-10-19 audit, finding SEC-1): RLS on every table in `public`, `alembic_version` included; every grant of `anon` and `authenticated` on tables, sequences and functions in `public` revoked, along with the default privileges `postgres` gives them there (skipped where those roles don't exist, as in CI); `PUBLIC`'s `EXECUTE` on functions in `public` revoked, and on functions `postgres` creates later. Sets a 5 s `lock_timeout`. The downgrade turns RLS off again but leaves every grant revoked |

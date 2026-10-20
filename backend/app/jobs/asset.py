@@ -29,6 +29,10 @@ async def analyze_asset(context: JobContext, payload: dict[str, Any]) -> dict[st
 
     image = await context.storage.download(ASSETS_BUCKET, llm_copy_path(business_id, asset_id))
     if image is None:
+        async with context.sessions() as db:
+            current = await db.get(BrandAsset, asset_id)
+        if current is None or current.archived_at is not None:
+            return {"skipped": "archived while queued"}  # archiving deletes the files
         raise FileNotFoundError(f"the agents' copy of asset {asset_id} is missing")
     analysis = await analyze_brand_photo(
         context.model,
