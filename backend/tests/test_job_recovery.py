@@ -361,6 +361,29 @@ async def test_at_startup_a_business_stuck_with_no_brand_job_gets_exactly_one(
     assert await queue_stranded_brands(sessions) == 0
 
 
+async def test_a_brand_job_abandoned_at_startup_is_left_to_the_owners_reintentar(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business, channel = await add_business(sessions), FakeChannel()
+    job = await add_job(sessions, business, **left_running(attempts=2))
+    check = PeriodicCheck("stranded brands", None, queue_stranded_brands)
+    jobs, background = runner(sessions, {}, channel, poll_interval_s=0.01, checks=(check,))
+
+    await jobs.start()
+    await asyncio.sleep(0.1)
+    jobs.stop()
+    await background.drain(timeout_s=1)
+
+    [failed] = await brand_jobs(sessions, business)
+    assert (failed.status, failed.error, failed.result) == ("failed", INTERRUPTED, None)
+    assert failed.retry_offered_at is not None
+    assert channel.buttons == [(PHONE, messages_es.JOB_FAILED, [f"retry:{job.id}"])]
+
+    tapped = await router(sessions).handle(PHONE, f"retry:{job.id}", FakeChannel(), EventLog())
+
+    assert tapped == JobRetried("generate_brand")
+
+
 async def test_a_brand_the_old_stale_check_failed_gets_exactly_one_new_job(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:

@@ -114,7 +114,11 @@ class JobRunner:
         self._stopping = False
 
     async def start(self) -> None:
-        await self.recover_stale()
+        _, abandoned = await self._take_stale(STALE_AFTER)
+        # Awaited, unlike the poller's: the poller's first round runs the startup check of stuck
+        # brands, which would queue a copy of a brand job abandoned here before its Reintentar is
+        # out. Still started as background work, which logs a failure instead of ending startup.
+        await asyncio.gather(*(self._start_after_failure(job) for job in abandoned))
         self._background.start_service(self._poll(), "job poller")
 
     def stop(self) -> None:
@@ -127,6 +131,14 @@ class JobRunner:
 
         This process's own jobs are skipped however long they take: they are alive.
         """
+        stale, abandoned = await self._take_stale(older_than)
+        for job in abandoned:
+            # Not in the poller's round: `JobFailed` waits for any turn the Owner is in.
+            self._start_after_failure(job)
+        return stale
+
+    async def _take_stale(self, older_than: timedelta) -> tuple[int, list[Job]]:
+        """Requeue or abandon the stale jobs; returns how many there were and the abandoned ones."""
         cutoff = datetime.now(UTC) - older_than
         async with self._sessions() as db:
             stale = (
@@ -140,13 +152,12 @@ class JobRunner:
                     .with_for_update(skip_locked=True)
                 )
             ).all()
-            abandoned = await self._recover(db, stale)
-        for job in abandoned:
-            # Not in the poller's round: `JobFailed` waits for any turn the Owner is in.
-            self._background.start(
-                self._after_failure(job.id, job.kind, job.business_id), _task_name(job)
-            )
-        return len(stale)
+            return len(stale), await self._recover(db, stale)
+
+    def _start_after_failure(self, job: Job) -> asyncio.Task[None]:
+        return self._background.start(
+            self._after_failure(job.id, job.kind, job.business_id), _task_name(job)
+        )
 
     async def run_due(self) -> int:
         """Claim as many queued jobs as there are free slots and start them; none once stopped."""
