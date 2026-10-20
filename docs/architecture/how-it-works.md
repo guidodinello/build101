@@ -176,7 +176,7 @@ Only onboarding data is stored for good; the conversation and the posts live in 
 | Products and brand assets (wizard photos, logo) | Photos sent on WhatsApp (`InMemoryPhotos`) |
 | Brand Brain versions, Niche Reports | Posts and their status (`InMemoryPosts`) |
 | Jobs | Generated JPEGs (`PublicImages`, newest 200) |
-| | Webhook dedupe store |
+| | Webhook dedupe store, only without `DATABASE_URL` (with it, `inbound_deliveries`) |
 
 A redeploy while a post is waiting means it can no longer be approved or published, and its image links return 404. The code comments point to tasks T17 and T19 to move this into the database and Storage.
 

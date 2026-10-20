@@ -1,7 +1,5 @@
-import asyncio
 import logging
 import time
-from collections import defaultdict
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -12,6 +10,7 @@ from app.channels.inbound import InboundHandler, mask
 from app.copy import messages_es
 from app.db.models import Business
 from app.onboarding.links import add_onboarding_link, onboarding_url
+from app.ratelimit import MAX_TRACKED_KEYS, KeyedLocks, TtlMap
 
 from .chat import mark_read
 
@@ -20,6 +19,9 @@ logger = logging.getLogger(__name__)
 MAX_NAME_CHARS = 200
 # WhatsApp delivers an album as one message per photo: one welcome or reminder covers them all.
 REMINDER_COOLDOWN_S = 30.0
+# Both per-sender timestamps matter for seconds (the cooldown, "Hola" + "¿hay alguien?"), so they
+# expire; with the cap, a flood of new numbers can't grow them (#106).
+STATE_TTL_S = 600.0
 
 
 class OnboardingGate:
@@ -41,12 +43,13 @@ class OnboardingGate:
         self._frontend_url = frontend_url
         self._assistant_name = assistant_name
         self._reminder_cooldown_s = reminder_cooldown_s
-        self._locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-        self._welcomed_at: dict[str, float] = {}
-        self._last_prompt: dict[str, float] = {}
+        ttl_s = max(STATE_TTL_S, reminder_cooldown_s)
+        self._locks = KeyedLocks()
+        self._welcomed_at = TtlMap[float](ttl_s, MAX_TRACKED_KEYS)
+        self._last_prompt = TtlMap[float](ttl_s, MAX_TRACKED_KEYS)
 
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
-        async with self._locks[message.sender]:
+        async with self._locks.hold(message.sender):
             try:
                 reply = await self._onboard(message)
             except SQLAlchemyError:
@@ -76,7 +79,7 @@ class OnboardingGate:
             name = business_name(message)
             if state == "new":
                 business.onboarding_state = "awaiting_name"
-                self._welcomed_at[message.sender] = time.time()
+                self._welcomed_at.set(message.sender, time.time())
                 reply = self._welcome(message.sender)
             elif state == "awaiting_name" and self._written_before_welcome(message):
                 return ""
@@ -94,12 +97,12 @@ class OnboardingGate:
         return reply
 
     def _welcome(self, sender: str) -> str:
-        self._last_prompt[sender] = time.monotonic()
+        self._last_prompt.set(sender, time.monotonic())
         return messages_es.welcome(self._assistant_name)
 
     def _new_link(self, db: AsyncSession, business: Business) -> str:
         # Only the token's hash is stored, so a reminder needs a new link.
-        self._last_prompt[business.owner_phone] = time.monotonic()
+        self._last_prompt.set(business.owner_phone, time.monotonic())
         return onboarding_url(self._frontend_url, add_onboarding_link(db, business))
 
     def _written_before_welcome(self, message: InboundMessage) -> bool:
