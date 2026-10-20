@@ -17,8 +17,11 @@ from app.channels.router import (
     get_inbound_handler,
 )
 from app.config import Settings, get_settings
+from app.copy import messages_es
 from app.main import app
+from app.ratelimit import TURNS_BURST
 from tests.conftest import FIXTURES, sign
+from tests.fakes import FakeChannel
 
 SECRET = "test-secret"
 EVENT = "whatsapp.message.received"
@@ -266,3 +269,36 @@ def test_the_dedupe_store_follows_the_database_setting(monkeypatch: pytest.Monke
         assert isinstance(get_dedupe_store(), DbDedupeStore)
     finally:
         get_dedupe_store.cache_clear()
+
+
+def test_webhook_turns_are_rate_limited_per_sender(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Guard for #106: goes red if the webhook's handler is ever not the rate-limited one.
+
+    Only what sits behind the wrap is replaced (the factory's handler, the channel, the dedupe
+    store); `get_inbound_handler` itself is the real one. If a refactor moves the handler's
+    construction, re-apply the wrap there and point this test at the new factory.
+    """
+    inner = RecordingHandler()
+    channel = FakeChannel()
+    monkeypatch.setattr("app.channels.router.build_inbound_handler", lambda *args: inner)
+    get_inbound_handler.cache_clear()
+    store = InMemoryDedupeStore()
+    app.dependency_overrides[get_settings] = lambda: Settings(kapso_webhook_secret=SECRET)
+    app.dependency_overrides[get_dedupe_store] = lambda: store
+    app.dependency_overrides[get_clock] = lambda: float(FIXTURE_TIME)
+    app.dependency_overrides[get_channel] = lambda: channel
+    body = json.loads(raw_fixture("text"))
+    try:
+        with TestClient(app) as test_client:
+            for number in range(TURNS_BURST + 1):
+                body["message"]["id"] = f"wamid.{number}"  # distinct ids: not a duplicate
+                raw = json.dumps(body).encode()
+                response = post(test_client, raw, signature=sign(raw, SECRET))
+                assert response.json() == {"status": "ok"}
+    finally:
+        app.dependency_overrides.clear()
+        get_inbound_handler.cache_clear()
+
+    assert len(inner.handled) == TURNS_BURST
+    assert [m.message_id for m in inner.handled] == [f"wamid.{n}" for n in range(TURNS_BURST)]
+    assert channel.sent == [(body["message"]["from"], messages_es.RATE_LIMITED)]
