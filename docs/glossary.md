@@ -111,8 +111,13 @@ _Avoid_: Page, card, Variation
 _Status_: draft
 
 **Reel**:
-A Post made from one of the Owner's videos, published as-is with a caption and a cover frame chosen by the Agency.
+A Post made from one of the Owner's videos, published as-is, or from a clip generated from a Post's product image ([ADR 0033](decisions/0033-ai-generated-reels-veo.md)); the caption and cover frame are chosen by the Agency.
 _Avoid_: Video post, clip, story
+_Status_: draft
+
+**Video request**:
+The Owner asking, in their own words, for a Reel made from the product photo of a Post they already got; it makes a new Post beside the original, which stays as it is. Only exists while `VIDEO_GEN_ENABLED` is on, and is capped per day.
+_Avoid_: Reel order, animate button
 _Status_: draft
 
 **Approval**:

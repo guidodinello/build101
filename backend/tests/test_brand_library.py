@@ -7,19 +7,11 @@ from app.conversation.library import BrandBrains, BrandLibrary
 from app.db.models import AssetProduct, BrandAsset, BrandBrainVersion, Business, Product
 from app.storage import StorageError
 from tests.conftest import make_image, requires_db
-from tests.fakes import FakeStorage, brand_brain
+from tests.fakes import CountingStorage, FakeStorage, brand_brain
 
 pytestmark = requires_db
 
 PHONE = "59899123456"
-
-
-class CountingStorage(FakeStorage):
-    downloads: int = 0
-
-    async def download(self, bucket: str, path: str) -> bytes | None:
-        self.downloads += 1
-        return await super().download(bucket, path)
 
 
 async def test_the_wizard_photos_keep_their_ids_and_show_their_product(

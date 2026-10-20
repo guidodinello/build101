@@ -191,16 +191,19 @@ POST /v1/posts
 Zernio's Instagram page says carousels take up to 10 items and are cropped to the first item's ratio ([Zernio Instagram](https://docs.zernio.com/platforms/instagram), [research](../research/media-uploads.md#publishing-video-and-carousels-zernio-instagram)); every slide is 1080×1350, so nothing is cropped. **Not verified:** that several `mediaItems` without any other field publish as a carousel, and that it works with our public `renders` URLs. Test one carousel publish on the demo IG before relying on it (T55).
 
 ```python
-# 4. Reel (Could): one video, no contentType (Zernio publishes a single video as a Reel)
+# 4. Reel (T60): one video, no contentType (Zernio publishes a single video as a Reel)
 POST /v1/posts
 {
   "content": "<caption + hashtags>",
-  "mediaItems": [{"type": "video", "url": "<signed Supabase URL of the Owner's video, valid 24 h>"}],
+  "mediaItems": [{"type": "video", "url": "<public HTTPS URL of the video, or a signed Supabase URL valid 24 h>"}],
   "platforms": [{"platform": "instagram", "accountId": "<provider_account_id>",
-                 "platformSpecificData": {"thumbOffset": 4200}}],   # posts.cover_offset_ms
+                 "platformSpecificData": {"thumbOffset": 4200,      # PublishMedia.cover_offset_ms, omitted when null
+                                          "isAiGenerated": true}}],  # PublishMedia.ai_generated, omitted when false
   "publishNow": true
 }
 ```
+
+Sources, read 2026-10-19: "A single video publishes as a Reel with no `contentType`" ([Zernio: Instagram posts](https://docs.zernio.com/platforms/instagram/posts)); `thumbOffset` (integer ms ≥ 0, default 0, ignored when `instagramThumbnail` is set) and `isAiGenerated` ("the post is labeled by Instagram as containing AI-generated media", Reels included) in [Platform Fields](https://docs.zernio.com/platforms/instagram/fields) and the [OpenAPI spec](https://zernio.com/openapi.yaml) v1.297.1; video limits in [Media Requirements](https://docs.zernio.com/platforms/instagram/media): MP4/MOV, H.264, 30 fps, 1080×1920 (9:16), 3–90 s, ≤ 300 MB. Code does not check these (it only has a URL). A custom cover image (`instagramThumbnail`) exists but is not used: a generated video has no separate cover. **Not verified live:** a real Reel publish on the demo account (`test_publish_one_reel_to_the_demo_account`, `@pytest.mark.live`, needs `ZERNIO_TEST_VIDEO_URL`).
 
 Gotchas:
 
@@ -231,12 +234,15 @@ The Owner connects their Instagram in wizard step 2 ([ADR 0032](../decisions/003
 **Calls** ([Business Login](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login), read 2026-10-18):
 
 ```python
-# 1. The wizard's POST /api/o/{token}/instagram/connect returns
+# 1. The wizard's POST /api/o/{token}/instagram/connect returns our own start hop,
+#    GET /api/o/{token}/instagram/start?ticket=..., which sets the `ig_oauth` binding cookie
+#    (HttpOnly, SameSite=Lax) and redirects to
 https://www.instagram.com/oauth/authorize?client_id={INSTAGRAM_APP_ID}&redirect_uri={callback}
-    &response_type=code&scope=instagram_business_basic&state={signed state}
+    &response_type=code&scope=instagram_business_basic&state={nonce}
 # The code Instagram sends back "is valid for 1 hour and can only be used once"
 
-# 2. GET /oauth/instagram/callback?code&state: code → short-lived token (form POST)
+# 2. GET /oauth/instagram/callback?code&state (+ the cookie, whose nonce must equal `state`):
+#    code → short-lived token (form POST)
 POST https://api.instagram.com/oauth/access_token
 client_id, client_secret, grant_type=authorization_code, redirect_uri, code
 → {"access_token": "...", "user_id": 178...}      # also seen as {"data": [{...}]}: both are read
@@ -259,7 +265,7 @@ GET https://graph.instagram.com/{INSTAGRAM_GRAPH_VERSION}/me/media?limit=50&fiel
 - **Images.** A photo's `media_url`; for a carousel, each child's (a video child gives its `thumbnail_url`); for a video, its `thumbnail_url` (the cover). `media_url` "is omitted … if the media contains copyrighted material" (Reels with licensed audio), and such an item is skipped. CDN URLs stop working "when the content has been deleted or has expired" ([overview](https://developers.facebook.com/documentation/instagram-platform/overview.md)), so images are downloaded and stored, never linked.
 - **Limits.** `/me/media` "Returns a maximum of 10K of the most recently created media" and never stories ([IG User Media](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media.md)). Stories exist only for 24 hours ([IG User Stories](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/stories.md)), and there is no highlights edge. Comments need `instagram_business_manage_comments` and DMs `instagram_business_manage_messages`; neither is requested. All read 2026-10-18.
 - **What the job does.** `import_instagram` reads the profile and up to `INSTAGRAM_IMPORT_MAX_POSTS` (100) posts into `businesses.onboarding_data["instagram"]`. It downloads up to `INSTAGRAM_IMPORT_MAX_IMAGES` (24) of the newest images not imported yet, 4 at a time, and stores each in the `assets` bucket with its agents' copy, as a `photo` Brand asset with `source = 'instagram'` and `external_id` = the media id. It queues one `analyze_asset` per image. An image that fails to download or decode is logged and skipped.
-- **Tokens.** The long-lived token is stored on `social_accounts.access_token` (RLS on, [data-model.md](data-model.md)). It can be refreshed with `GET /refresh_access_token?grant_type=ig_refresh_token` once it is 24 hours old, and expires if not refreshed within 60 days. Refresh is not built: the import runs once, right after the connect. httpx logs redact `access_token` and `client_secret` in query strings.
+- **Tokens.** The callback stores the long-lived token on `social_accounts.access_token` (RLS on, [data-model.md](data-model.md)) only so the queued `import_instagram` can read it. The job is the one reader, and it claims the token first: one transaction reads it under a row lock (`SELECT ... FOR UPDATE`) and sets the column to null, committed before the first call to Instagram. From then on the token lives only in the job's memory, so a failed, cancelled (a deploy stops the runner) or killed (SIGKILL, OOM) import leaves nothing to clean up, a database dump holds no Instagram token, a reconnect's fresh token is untouched and claimed by the import that reconnect queued, and two overlapping imports can't both get one (the second is skipped). The price: an import that fails is not retried, the Owner reconnects. `token_expires_at` stays as a record of the connect. Nothing refreshes the token (`GET /refresh_access_token?grant_type=ig_refresh_token` works once it is 24 hours old, and it expires after 60 days): to read the account again, the Owner reconnects, which stores a fresh token and queues a new import. httpx logs redact `access_token` and `client_secret` in query strings.
 - **Mock.** `INSTAGRAM=mock` (the default): the authorize URL points straight at our callback with a fake code, and the import brings three fake posts with plain-color images. Local dev and the demo work without a Meta app.
 
 ### Mock publisher
@@ -290,6 +296,19 @@ Could: only needed for the Could video work (video analysis, Reels). Claude read
 - Runs inside `analyze_asset` on the downloaded file in a temp dir; delete it afterwards. A 300 MB video takes a few seconds to probe and a few more to cut frames on the backend's CPU; the preview transcode is the slow part (tens of seconds), so it runs after the analysis is saved.
 - Docker: when video work starts, install `ffmpeg` from the distro packages in the final stage of the image (per [`.claude/rules/docker.md`](../../.claude/rules/docker.md)). The Must image doesn't need it.
 - No transcription of a video's audio in the MVP; voice notes are transcribed (see [Speech-to-text](#speech-to-text)).
+
+## Video generation (Veo, ADR 0033)
+
+Behind `VideoGenPort` (`app/videogen/`), only built when `VIDEO_GEN_ENABLED=true` (default `false`: no adapter, no Veo call). `VIDEO_GEN=gemini | mock`; the mock returns a bundled 1 s 9:16 MP4 so the whole flow runs without billed calls. Sources: [Veo docs](https://ai.google.dev/gemini-api/docs/veo) and [pricing](https://ai.google.dev/gemini-api/docs/pricing), read 2026-10-19.
+
+- **Key**: `GEMINI_VIDEO_API_KEY` only. The adapter never falls back to `GEMINI_API_KEY`; the same value may be set in both by choice.
+- **Models** (`GEMINI_VIDEO_MODEL`): `veo-3.1-lite-generate-preview` (default, US$0.05/s at 720p), `veo-3.1-fast-generate-preview` (US$0.10/s), `veo-3.1-generate-preview` (US$0.40/s). No free tier; blocked videos are not billed.
+- **Modes**: Lite has no reference images, so the product image is the **first frame** (`source.image`, center-cropped to the clip's ratio in code). Fast and Standard take up to 3 `ASSET` reference images, which force 8 s. Both need `person_generation="allow_adult"`. Clips are 4, 6 or 8 s at 24 fps, 16:9 or 9:16, audio always on.
+- **Call**: `aio.models.generate_videos(model, source=GenerateVideosSource(prompt, image), config)` starts a long-running operation; `aio.operations.get` polls it every 10 s, up to `VIDEO_GEN_TIMEOUT_S` (600; the docs say 11 s to 6 min at peak); `aio.files.download` fetches the MP4. The server keeps a video 2 days, so it is downloaded at once.
+- **Retries**: polling and download retry like the image client. The **submit call never retries**: a retried submit after a timeout could start, and bill, a second clip.
+- **Errors**: `operation.error` and API errors are `VideoGenUnavailable`; a deadline is `VideoGenTimeout`; RAI filtering is `VideoGenBlocked(reason)`; a finished operation without a video is `VideoGenNoVideo`.
+- **Serving**: `PublicVideos` serves the MP4 at `/media/{token}.mp4` (GET and HEAD) for WhatsApp and Zernio to fetch. The 20-clip LRU only bounds clips whose Post is gone: on a miss it serves the clip of any Post still in `InMemoryPosts` (`serve_from`, same bytes object, no extra memory), so the Owner's header link and Zernio's fetch never 404 while the Post exists. No `Range` support yet; check whether they need it when the flag is first turned on.
+- **Unconfirmed**: Veo with reference images at 9:16 (Fast/Standard) and how the 4:5 crop looks as a first frame; one live call settles both.
 
 ## Image generation
 

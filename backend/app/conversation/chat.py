@@ -27,6 +27,7 @@ from app.media.images import prepare_reference
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
 from app.posts.store import InMemoryPosts, Post
+from app.posts.video_maker import VideoMaker
 from app.prompts import load_prompt
 from app.storage import StorageError
 
@@ -44,20 +45,23 @@ from .events import (
     Published,
     StaleButton,
     UnsupportedMedia,
+    VideoSent,
     buttons,
     fallback,
+    header_video_url,
 )
 from .history import Compactor, History
 from .library import BrandLibrary
 from .notes import InMemoryNotes, OwnerNotes
 from .photo_keeper import PhotoKeeper
 from .photos import InMemoryPhotos, Photo, local_now
-from .tools import TOOLS
+from .tools import CREATE_VIDEO, TOOLS
 
 logger = logging.getLogger(__name__)
 
 AGENT = "orchestrator"
 SYSTEM_PROMPT_PATH = Path(__file__).parent / "prompts" / "orchestrator.md"
+VIDEO_PROMPT_PATH = Path(__file__).parent / "prompts" / "video.md"
 MAX_STEPS = 5
 BYTES_PER_MB = 1024 * 1024
 # WhatsApp delivers an album as one message per photo, 1–4 s apart (seen on 2026-10-17).
@@ -71,12 +75,17 @@ EVENT_THINKING: ThinkingLevel = "low"
 LOGGED_REPLY_CHARS = 300
 WEEKDAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 # Tools that act on the Owner's words: an event turn has none.
-OWNER_TOOLS = frozenset({"create_post", "revise_post", "remember", "forget", "update_brand"})
+OWNER_TOOLS = frozenset(
+    {"create_post", "create_video", "revise_post", "remember", "forget", "update_brand"}
+)
 
 
 @cache
-def system_prompt(assistant_name: str) -> str:
-    return load_prompt(SYSTEM_PROMPT_PATH).format(assistant_name=assistant_name)
+def system_prompt(assistant_name: str, with_video: bool = False) -> str:
+    """The instructions; the video section only with `create_video` registered, so the model
+    never reads about a tool it can't call."""
+    prompt = load_prompt(SYSTEM_PROMPT_PATH).format(assistant_name=assistant_name)
+    return f"{prompt}\n\n{load_prompt(VIDEO_PROMPT_PATH)}" if with_video else prompt
 
 
 @dataclass(slots=True)
@@ -111,6 +120,7 @@ class ChatHandler:
         keep_alive_s: float = KEEP_ALIVE_S,
         *,
         notes: OwnerNotes | None = None,
+        videos: VideoMaker | None = None,
         contexts: BusinessContexts | None = None,
         keeper: PhotoKeeper | None = None,
         compactor: Compactor | None = None,
@@ -125,7 +135,9 @@ class ChatHandler:
         self._store = store
         self._buttons = buttons
         self._library = library
-        self._system = system_prompt(assistant_name)
+        self._videos = videos
+        self._tools = [*TOOLS, CREATE_VIDEO] if videos else TOOLS
+        self._system = system_prompt(assistant_name, with_video=videos is not None)
         self._max_photo_mb = max_photo_mb
         self._photo_debounce_s = photo_debounce_s
         self._keep_alive_s = keep_alive_s
@@ -334,7 +346,7 @@ class ChatHandler:
         note = event.note()
         step = user_step(note)
         past = await self._history.get(sender)
-        if isinstance(event, PostSent):
+        if isinstance(event, PostSent | VideoSent):
             post = self._store.get(sender, event.post_id)
             if post is None or post.status != "pending_approval":
                 # Already approved or replaced while this waited for the lock: nothing to ask.
@@ -383,7 +395,7 @@ class ChatHandler:
         await self._remember_turn(sender, past, [step, *turn])
         self._offer(sender, text, offered_post(event))
         log_reply(sender, text)
-        await send_with_buttons(sender, text, buttons(event), channel)
+        await send_with_buttons(sender, text, buttons(event), channel, header_video_url(event))
 
     async def _send_fallback(
         self, sender: str, past: list[Step], event: Event, step: Step, channel: ChannelPort
@@ -398,7 +410,7 @@ class ChatHandler:
         told = user_step(f'{event.note()}\nThe Owner was told: "{text}"')
         await self._remember_turn(sender, past, [told])
         self._offer(sender, text, offered_post(event))
-        await send_with_buttons(sender, text, buttons(event), channel)
+        await send_with_buttons(sender, text, buttons(event), channel, header_video_url(event))
 
     async def _converse(
         self,
@@ -416,7 +428,7 @@ class ChatHandler:
         turn: list[Step] = []
         for _ in range(MAX_STEPS):
             reply = await self._model.reply(
-                AGENT, system, [*past, current, *turn], thinking_level=thinking, tools=TOOLS
+                AGENT, system, [*past, current, *turn], thinking_level=thinking, tools=self._tools
             )
             turn.extend(reply.steps)
             if not reply.function_calls:
@@ -543,6 +555,8 @@ class ChatHandler:
         match call.name:
             case "create_post":
                 return self._posts.create_post(sender, arguments, channel)
+            case "create_video" if self._videos is not None:
+                return self._videos.create_video(sender, arguments, channel)
             case "revise_post":
                 return self._posts.revise_post(sender, arguments, channel)
             case "approve_post":
@@ -602,7 +616,7 @@ def log_reply(sender: str, text: str) -> None:
 def offered_post(event: Event) -> str | None:
     """The post an event's message may ask to publish."""
     match event:
-        case PostSent(post_id=post_id) | PostApproved(post_id=post_id):
+        case PostSent(post_id=post_id) | VideoSent(post_id=post_id) | PostApproved(post_id=post_id):
             return post_id
         case _:
             return None
@@ -635,9 +649,14 @@ def request(photos: list[Photo], text: str) -> str:
 
 
 async def send_with_buttons(
-    sender: str, text: str, attached: list[Button], channel: ChannelPort
+    sender: str,
+    text: str,
+    attached: list[Button],
+    channel: ChannelPort,
+    video_url: str | None = None,
 ) -> None:
-    """`text`, with the event's buttons under it when it has some (T18)."""
+    """`text`, with the event's buttons under it when it has some (T18), and `video_url` as the
+    header of the buttons message when there is one."""
     if not attached:
         await channel.send_text(sender, text)
         return
@@ -645,7 +664,7 @@ async def send_with_buttons(
         # Over the limit of a buttons message's body: the text first, then the buttons.
         await channel.send_text(sender, text)
         text = "👆"
-    await channel.send_buttons(sender, text, attached)
+    await channel.send_buttons(sender, text, attached, header_video_url=video_url)
 
 
 def step_with_photos(

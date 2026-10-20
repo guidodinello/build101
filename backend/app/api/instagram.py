@@ -8,25 +8,43 @@ import logging
 import secrets
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Cookie, Depends, Request
+from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.db.models import SocialAccount
 from app.instagram.base import InstagramError, InstagramPort
 from app.instagram.factory import get_instagram
-from app.instagram.oauth_state import InvalidState, sign_state, verify_state
+from app.instagram.oauth_state import (
+    BINDING_TTL_S,
+    InvalidState,
+    new_binding,
+    sign_ticket,
+    verify_binding,
+    verify_ticket,
+)
 from app.jobs.queue import enqueue
 from app.onboarding.links import onboarding_url
 
-from .errors import ApiError
-from .onboarding import OpenOnboardingDep, SessionDep, SettingsDep, get_onboarding
+from .errors import ApiError, error_response
+from .onboarding import (
+    OpenOnboardingDep,
+    SessionDep,
+    SettingsDep,
+    get_onboarding,
+    get_open_onboarding,
+    is_submitted,
+)
 
 logger = logging.getLogger(__name__)
 
 CALLBACK_PATH = "/oauth/instagram/callback"
+BINDING_COOKIE = "ig_oauth"
+# The cookie goes only to the callback, never to the rest of the API
+BINDING_COOKIE_PATH = CALLBACK_PATH.rsplit("/", 1)[0]
 # Signs the OAuth state when there is no app secret, i.e. INSTAGRAM=mock
 DEV_STATE_SECRET = secrets.token_hex(32)
 CONNECT_EXPIRED = "Se venció la conexión con Instagram. Volvé al formulario y probá de nuevo."
@@ -46,12 +64,44 @@ async def connect_instagram(
     _: OpenOnboardingDep,
     request: Request,
     settings: SettingsDep,
-    instagram: InstagramDep,
 ) -> ConnectResponse:
-    state = sign_state(token, _state_secret(settings))
-    return ConnectResponse(
-        auth_url=instagram.authorize_url(_redirect_uri(request, settings), state)
+    """The wizard navigates to `auth_url`; the start hop sets the cookie that binds the callback."""
+    ticket = sign_ticket(token, _state_secret(settings))
+    start = f"{_backend_url(request, settings)}/api/o/{token}/instagram/start?ticket={ticket}"
+    return ConnectResponse(auth_url=start)
+
+
+@router.get("/api/o/{token}/instagram/start")
+async def start_instagram(
+    token: str,
+    ticket: str,
+    request: Request,
+    session: SessionDep,
+    settings: SettingsDep,
+    instagram: InstagramDep,
+) -> RedirectResponse:
+    """Top-level hop: set the binding cookie on our own origin, then go to the consent screen."""
+    secret = _state_secret(settings)
+    try:
+        verify_ticket(token, ticket, secret)
+    except InvalidState as exc:
+        logger.warning("instagram start with a bad ticket: %s", exc)
+        raise ApiError(400, "invalid_state", CONNECT_EXPIRED) from None
+    await get_open_onboarding(await get_onboarding(token, session), session)
+    nonce, cookie = new_binding(token, secret)
+    response = RedirectResponse(
+        instagram.authorize_url(_redirect_uri(request, settings), nonce), status_code=303
     )
+    response.set_cookie(
+        BINDING_COOKIE,
+        cookie,
+        max_age=BINDING_TTL_S,
+        path=BINDING_COOKIE_PATH,
+        httponly=True,
+        secure=_backend_url(request, settings).startswith("https://"),
+        samesite="lax",
+    )
+    return response
 
 
 @router.get(CALLBACK_PATH)
@@ -63,16 +113,46 @@ async def instagram_callback(
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
-) -> RedirectResponse:
+    binding: Annotated[str | None, Cookie(alias=BINDING_COOKIE)] = None,
+) -> Response:
+    """Every outcome, errors included, clears the cookie: it holds the token for 15 minutes."""
     try:
-        token = verify_state(state or "", _state_secret(settings))
+        token = _bound_token(binding, state, settings)
+        response: Response = await _finish_connect(
+            token, code, error, request, session, settings, instagram
+        )
+    except ApiError as exc:
+        response = error_response(exc)
+    except Exception:
+        logger.exception("instagram callback failed")
+        response = PlainTextResponse("Internal Server Error", status_code=500)
+    response.delete_cookie(BINDING_COOKIE, path=BINDING_COOKIE_PATH)
+    return response
+
+
+def _bound_token(binding: str | None, state: str | None, settings: Settings) -> str:
+    try:
+        return verify_binding(binding or "", state or "", _state_secret(settings))
     except InvalidState as exc:
         logger.warning("instagram callback with a bad state: %s", exc)
         raise ApiError(400, "invalid_state", CONNECT_EXPIRED) from None
+
+
+async def _finish_connect(
+    token: str,
+    code: str | None,
+    error: str | None,
+    request: Request,
+    session: AsyncSession,
+    settings: Settings,
+    instagram: InstagramPort,
+) -> RedirectResponse:
     onboarding = await get_onboarding(token, session)
     business = onboarding.business
     wizard = onboarding_url(settings.frontend_url, token)
-    if onboarding.link.completed_at is not None:
+    # Locked before the check, as in get_open_onboarding: a submit in flight finishes first.
+    await session.refresh(business, with_for_update=True)
+    if await is_submitted(session, business.id):
         # Same rule as the connect endpoint: a submitted form takes no more answers, and the
         # Brand Brain it started would never see this import (ADR 0032).
         logger.info("instagram callback for %s after the onboarding was completed", business.id)
@@ -116,8 +196,13 @@ def _state_secret(settings: Settings) -> str:
     return settings.instagram_app_secret or DEV_STATE_SECRET
 
 
+def _backend_url(request: Request, settings: Settings) -> str:
+    """Where the browser reaches us; a deploy sits behind a proxy, so it sets PUBLIC_BACKEND_URL."""
+    if settings.public_backend_url:
+        return settings.public_backend_url.rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
 def _redirect_uri(request: Request, settings: Settings) -> str:
     """Meta matches it exactly against the app's list, so a deploy uses PUBLIC_BACKEND_URL."""
-    if settings.public_backend_url:
-        return settings.public_backend_url.rstrip("/") + CALLBACK_PATH
-    return str(request.url_for("instagram_callback"))
+    return _backend_url(request, settings) + CALLBACK_PATH
