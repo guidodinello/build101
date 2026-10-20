@@ -7,20 +7,12 @@ import pytest
 from app.background import BackgroundWork
 from app.channels.base import Button
 from app.config import Settings
-from app.conversation.button_router import ButtonRouter
-from app.conversation.chat import ChatHandler
 from app.conversation.events import StaleButton, VideoFailed
-from app.conversation.factory import build_conversation
-from app.conversation.history import InMemoryHistory
-from app.conversation.photos import InMemoryPhotos, Photo, local_now
+from app.conversation.factory import Chat, ChatParts, build_chat, build_conversation
+from app.conversation.photos import Photo, local_now
 from app.copy import messages_es
 from app.media.public import PublicImages, PublicVideos
-from app.posts.drafts import PostDrafter
-from app.posts.lifecycle import PostLifecycle
-from app.posts.maker import PostMaker
-from app.posts.publish import PostPublisher
 from app.posts.store import Post, PostImage, PostVideo
-from app.posts.video_maker import VideoMaker
 from app.publishing.mock import MOCK_ACCOUNT_ID
 from app.rendering.mock import MockRenderer
 from app.videogen.base import (
@@ -79,53 +71,29 @@ class Rig:
     ) -> None:
         self.model, self.video_gen = model, video_gen
         self.channel, self.publisher = FakeChannel(), FakePublisher()
-        photos, store = InMemoryPhotos(), PostLifecycle()
-        images, self.videos = PublicImages(), PublicVideos()
-        self.store = store
+        self.videos = PublicVideos()
         self.background = BackgroundWork()
-        publishing = PostPublisher(
-            self.publisher,
-            store,
-            images,
-            BASE_URL,
-            MOCK_ACCOUNT_ID,
-            background=self.background,
-            videos=self.videos,
-        )
-        maker = PostMaker(
-            PostDrafter(model),
-            CountingImageGen(),
-            MockRenderer(),
-            photos,
-            images,
-            store,
-            BASE_URL,
-            max_posts_per_day=5,
-            background=self.background,
-        )
-        self.maker = (
-            VideoMaker(
-                video_gen, store, self.videos, BASE_URL, max_videos, background=self.background
+        self.chat = build_chat(
+            ChatParts(
+                model=model,
+                image_gen=CountingImageGen(),
+                renderer=MockRenderer(),
+                publisher=self.publisher,
+                images=PublicImages(),
+                background=self.background,
+                public_backend_url=BASE_URL,
+                account_id=MOCK_ACCOUNT_ID,
+                assistant_name="Mora",
+                max_photo_mb=1,
+                max_posts_per_day=5,
+                max_videos_per_day=max_videos,
+                keep_alive_s=60.0,
+                video_gen=video_gen,
+                videos=self.videos,
             )
-            if video_gen
-            else None
         )
-        self.chat = ChatHandler(
-            model,
-            InMemoryHistory(),
-            photos,
-            maker,
-            publishing,
-            store,
-            ButtonRouter(store, maker, publishing, sessions=None, videos=self.maker),
-            None,
-            assistant_name="Mora",
-            max_photo_mb=1,
-            keep_alive_s=60.0,
-            videos=self.maker,
-            background=self.background,
-        )
-        self.publishing = publishing
+        self.store, self.maker = self.chat.lifecycle, self.chat.video_maker
+        self.publishing = self.chat.publishing
 
     def add_post(self, post_id: str = "p1") -> Post:
         photo = Photo("f1", make_image((900, 1200)), "mesa", local_now(), seen=True)
@@ -140,14 +108,14 @@ class Rig:
         return post
 
     async def say(self, text: str = "hacelo video") -> None:
-        await self.chat.handle(message("text", text=text), self.channel)
+        await self.chat.handler.handle(message("text", text=text), self.channel)
         await self.background.join()
 
     async def tap(self, button_id: str) -> None:
         tap = message("interactive").model_copy(
             update={"button": Button(id=button_id, title="x"), "kind": "button"}
         )
-        await self.chat.handle(tap, self.channel)
+        await self.chat.handler.handle(tap, self.channel)
         await self.background.join()
 
     def videos_of(self) -> list[Post]:
@@ -179,17 +147,26 @@ async def test_flag_off_the_model_never_gets_the_tool_or_the_video_prompt() -> N
     assert rig.channel.video_headers == []
 
 
-def test_flag_off_builds_no_video_maker_and_flag_on_builds_one() -> None:
+def test_flag_off_builds_no_video_maker_and_flag_on_builds_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    built: list[Chat] = []
+
+    def spy(parts: ChatParts) -> Chat:
+        chat = build_chat(parts)
+        built.append(chat)
+        return chat
+
+    monkeypatch.setattr("app.conversation.factory.build_chat", spy)
     off = Settings(inbound_handler="chat", gemini_api_key="k", public_backend_url=BASE_URL)
     on = off.model_copy(update={"video_gen_enabled": True, "video_gen": "mock"})
 
-    handler_off = build_conversation(off, PublicImages(), FakePublisher()).handler
-    handler_on = build_conversation(on, PublicImages(), FakePublisher()).handler
+    build_conversation(off, PublicImages(), FakePublisher())
+    build_conversation(on, PublicImages(), FakePublisher())
 
-    assert isinstance(handler_off, ChatHandler) and handler_off._videos is None
-    assert isinstance(handler_on, ChatHandler) and handler_on._videos is not None
-    assert "create_video" in [tool["name"] for tool in handler_on._tools]
-    assert "create_video" not in [tool["name"] for tool in handler_off._tools]
+    chat_off, chat_on = built
+    assert chat_off.video_maker is None
+    assert chat_on.video_maker is not None
 
 
 async def test_request_sends_the_video_with_buttons_and_approval_publishes_a_reel() -> None:
@@ -360,7 +337,7 @@ async def test_revise_post_does_not_touch_a_video_post() -> None:
     rig.add_post()
     await rig.say()
     [video] = rig.videos_of()
-    posts = rig.chat._posts
+    posts = rig.chat.posts
 
     result = posts.revise_post(
         SENDER,
@@ -421,7 +398,7 @@ async def test_another_on_a_video_post_is_stale_with_the_flag_off() -> None:
     )
     rig.store.add(video)
 
-    event = await rig.chat._buttons.handle(SENDER, "post_replace:v1", rig.channel, rig.chat.notify)
+    event = await rig.chat.buttons.handle(SENDER, "post_replace:v1", rig.channel, rig.chat.notify)
 
     assert event == StaleButton()
     assert video.status == "discarded"

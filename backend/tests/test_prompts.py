@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.conversation.chat import system_prompt
+from app.conversation.turns import system_prompt
 from app.prompts import load_prompt
 
 HEADINGS = ("## Writing style", "## Making posts", "## Publishing", "## Rules")

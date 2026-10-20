@@ -6,9 +6,9 @@ from datetime import datetime, timedelta
 import pytest
 
 from app.agents.schemas import AssetAnalysis
-from app.conversation.chat import ChatHandler
 from app.conversation.events import PostSent, StaleButton
-from app.conversation.history import Compactor, ConversationSummary
+from app.conversation.factory import Chat
+from app.conversation.history import Compactor, ConversationSummary, InMemoryHistory
 from app.conversation.notes import InMemoryNotes
 from app.conversation.photo_keeper import PhotoKeeper
 from app.conversation.photos import LOCAL_TZ
@@ -33,16 +33,16 @@ def tool_result(model: ScriptedModel, call: int) -> dict[str, object]:
     return json.loads(model.calls[call][-1]["result"])
 
 
-def yes_names(chat: ChatHandler) -> str | None:
+def yes_names(chat: Chat) -> str | None:
     """The post a bare "sí" would approve now: the one the last reply asked to publish."""
-    return chat._lifecycle.approval_for(SENDER, "sí", attached=False, recent_photos=[]).post_id
+    return chat.lifecycle.approval_for(SENDER, "sí", attached=False, recent_photos=[]).post_id
 
 
-def add_pending_post(chat: ChatHandler, created_at: datetime | None = None) -> Post:
+def add_pending_post(chat: Chat, created_at: datetime | None = None) -> Post:
     post = Post(POST_ID, SENDER, [PostImage("/media/x.jpg", b"jpeg")], "Mesa de roble")
     if created_at:
         post.created_at = created_at
-    chat._lifecycle.add(post)
+    chat.lifecycle.add(post)
     return post
 
 
@@ -62,10 +62,10 @@ async def test_a_yes_to_the_publish_question_publishes(monkeypatch: pytest.Monke
     gate.set()
     await background.join()
 
-    await chat.handle(message("text", text="sí"), channel)
+    await chat.handler.handle(message("text", text="sí"), channel)
 
     assert tool_result(model, 4)["status"] == "publishing"
-    assert chat._lifecycle.get(SENDER, POST_ID).status != "pending_approval"
+    assert chat.lifecycle.get(SENDER, POST_ID).status != "pending_approval"
 
 
 async def test_a_yes_to_another_question_publishes_nothing(
@@ -85,10 +85,10 @@ async def test_a_yes_to_another_question_publishes_nothing(
     gate.set()
     await background.join()
 
-    await chat.handle(message("text", text="sí"), channel)
+    await chat.handler.handle(message("text", text="sí"), channel)
 
     assert tool_result(model, 4) == {"error": "approval_not_explicit"}
-    assert chat._lifecycle.get(SENDER, POST_ID).status == "pending_approval"
+    assert chat.lifecycle.get(SENDER, POST_ID).status == "pending_approval"
 
 
 async def test_a_fallback_publish_question_counts_too() -> None:
@@ -108,10 +108,10 @@ async def test_older_unused_photos_do_not_block_an_approval() -> None:
     approve = call_reply("approve_post", post_id=POST_ID, next="publish_now")
     model = ScriptedModel(replies=[approve, text_reply("¡Dale, lo subo! ⏳"), text_reply("Listo")])
     chat, _ = build(model)
-    chat._photos.add(SENDER, make_image((100, 100)), None)
+    chat.photos.add(SENDER, make_image((100, 100)), None)
     add_pending_post(chat, created_at=datetime.now(LOCAL_TZ) + timedelta(seconds=1))
 
-    await chat.handle(message("text", text="subilo"), FakeChannel())
+    await chat.handler.handle(message("text", text="subilo"), FakeChannel())
 
     assert tool_result(model, 1)["status"] == "publishing"
 
@@ -121,9 +121,9 @@ async def test_photos_sent_after_the_post_make_subilas_a_new_request() -> None:
     model = ScriptedModel(replies=[approve, text_reply("¿Armo uno nuevo?")])
     chat, _ = build(model)
     add_pending_post(chat, created_at=datetime.now(LOCAL_TZ) - timedelta(minutes=1))
-    chat._photos.add(SENDER, make_image((100, 100)), None)
+    chat.photos.add(SENDER, make_image((100, 100)), None)
 
-    await chat.handle(message("text", text="subilas así"), FakeChannel())
+    await chat.handler.handle(message("text", text="subilas así"), FakeChannel())
 
     assert tool_result(model, 1) == {"error": "approval_not_explicit"}
 
@@ -133,8 +133,8 @@ async def test_a_remembered_note_reaches_the_next_system_prompt() -> None:
     model = ScriptedModel(replies=[remember, text_reply("Anotado ✍️"), text_reply("¡Hola!")])
     chat, _ = build(model, notes=InMemoryNotes())
 
-    await chat.handle(message("text", text="nunca pongas precios"), FakeChannel())
-    await chat.handle(message("text", text="hola"), FakeChannel())
+    await chat.handler.handle(message("text", text="nunca pongas precios"), FakeChannel())
+    await chat.handler.handle(message("text", text="hola"), FakeChannel())
 
     assert tool_result(model, 1) == {"saved": "n1"}
     assert "<owner_notes>\n" not in model.systems[0]
@@ -148,8 +148,8 @@ async def test_a_forgotten_note_leaves_the_system_prompt() -> None:
     model = ScriptedModel(replies=[forget, text_reply("Listo"), text_reply("¡Hola!")])
     chat, _ = build(model, notes=notes)
 
-    await chat.handle(message("text", text="ya no quiero carruseles"), FakeChannel())
-    await chat.handle(message("text", text="hola"), FakeChannel())
+    await chat.handler.handle(message("text", text="ya no quiero carruseles"), FakeChannel())
+    await chat.handler.handle(message("text", text="hola"), FakeChannel())
 
     assert tool_result(model, 1) == {"forgotten": True}
     assert "Prefiere carruseles" in model.systems[0]
@@ -174,7 +174,7 @@ async def test_update_brand_needs_the_database() -> None:
     model = ScriptedModel(replies=[update, text_reply("Ok")])
     chat, _ = build(model)
 
-    await chat.handle(message("text", text="quiero sonar más formal"), FakeChannel())
+    await chat.handler.handle(message("text", text="quiero sonar más formal"), FakeChannel())
 
     assert tool_result(model, 1) == {"error": "not_available"}
 
@@ -184,7 +184,7 @@ async def test_list_posts_shows_each_post_and_its_status() -> None:
     chat, _ = build(model)
     add_pending_post(chat)
 
-    await chat.handle(message("text", text="¿qué tengo pendiente?"), FakeChannel())
+    await chat.handler.handle(message("text", text="¿qué tengo pendiente?"), FakeChannel())
 
     [listed] = tool_result(model, 1)["posts"]
     assert (listed["post_id"], listed["status"]) == (POST_ID, "pending_approval")
@@ -194,7 +194,7 @@ async def test_owner_turns_think_more_than_event_turns() -> None:
     model = ScriptedModel(replies=[text_reply("¡Hola!")])
     chat, _ = build(model)
 
-    await chat.handle(message("text", text="hola"), FakeChannel())
+    await chat.handler.handle(message("text", text="hola"), FakeChannel())
     await chat.notify(SENDER, StaleButton(), FakeChannel())
 
     assert model.thinking == ["medium", "low"]
@@ -204,7 +204,7 @@ async def test_the_owner_turn_says_when_it_is() -> None:
     model = ScriptedModel(replies=[text_reply("¡Hola!")])
     chat, _ = build(model, now=lambda: SATURDAY)
 
-    await chat.handle(message("text", text="hola"), FakeChannel())
+    await chat.handler.handle(message("text", text="hola"), FakeChannel())
 
     assert model.calls[0][-1]["content"][1]["text"].startswith("<now>sábado 17/10/2026 14:30</now>")
 
@@ -214,16 +214,18 @@ async def test_old_turns_are_folded_into_the_summary() -> None:
         replies=[text_reply("¡Hola! ¿Qué vendés?")],
         drafts={ConversationSummary: ConversationSummary(summary="Vende mesas de roble.")},
     )
-    chat, background = build(model)
-    chat._compactor = Compactor(chat._history, model, max_tokens=100, keep_tokens=40)
+    history = InMemoryHistory()
+    chat, background = build(
+        model, history=history, compactor=Compactor(history, model, max_tokens=100, keep_tokens=40)
+    )
 
     for text in ("hola", "vendo mesas de roble", "y sillas también"):
-        await chat.handle(message("text", text=text), FakeChannel())
+        await chat.handler.handle(message("text", text=text), FakeChannel())
         await background.join()
-    await chat.handle(message("text", text="¿qué te conté?"), FakeChannel())
+    await chat.handler.handle(message("text", text="¿qué te conté?"), FakeChannel())
 
-    history = await chat._history.get(SENDER)
-    assert await chat._history.summary(SENDER) == "Vende mesas de roble."
+    history = await chat.history.get(SENDER)
+    assert await chat.history.summary(SENDER) == "Vende mesas de roble."
     assert history[0]["type"] == "user_input"
     assert step_text(history[0]) != "hola"
     assert (
@@ -235,16 +237,15 @@ async def test_old_turns_are_folded_into_the_summary() -> None:
 
 async def test_a_failed_summary_keeps_the_history_until_the_hard_limit() -> None:
     model = ScriptedModel(replies=[text_reply("¡Hola!")])  # no summary draft: it fails
-    chat, background = build(model)
-    chat._compactor = Compactor(
-        chat._history, model, max_tokens=50, keep_tokens=20, hard_limit_tokens=10_000
-    )
+    history = InMemoryHistory()
+    compactor = Compactor(history, model, max_tokens=50, keep_tokens=20, hard_limit_tokens=10_000)
+    chat, background = build(model, history=history, compactor=compactor)
 
     for text in ("hola", "vendo mesas"):
-        await chat.handle(message("text", text=text), FakeChannel())
+        await chat.handler.handle(message("text", text=text), FakeChannel())
         await background.join()
 
-    assert step_text((await chat._history.get(SENDER))[0]) == "hola"
+    assert step_text((await chat.history.get(SENDER))[0]) == "hola"
 
 
 async def test_a_photo_is_described_for_the_next_turns() -> None:
@@ -263,9 +264,9 @@ async def test_a_photo_is_described_for_the_next_turns() -> None:
     model = ScriptedModel(replies=[text_reply("¡Linda!")], drafts={AssetAnalysis: analysis})
     chat, background = build(model, keeper=PhotoKeeper(model))
 
-    await chat.handle(message("image", text=None), FakeChannel())
+    await chat.handler.handle(message("image", text=None), FakeChannel())
     await background.join()
-    await chat.handle(message("text", text="¿qué te mandé?"), FakeChannel())
+    await chat.handler.handle(message("text", text="¿qué te mandé?"), FakeChannel())
 
     context = model.calls[-1][-1]["content"][1]["text"]
     assert "- f1 sent" in context

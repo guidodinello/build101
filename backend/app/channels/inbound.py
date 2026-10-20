@@ -43,6 +43,14 @@ class InMemoryDedupeStore:
             return True
 
 
+async def mark_read(message_id: str, channel: ChannelPort) -> None:
+    """Show the Owner their message was read, with the typing indicator; a failure only logs."""
+    try:
+        await channel.mark_read(message_id, typing=True)
+    except ChannelError:
+        logger.warning("mark_read failed for %s", message_id, exc_info=True)
+
+
 class EchoHandler:
     """Placeholder until the conversation router (T23): echoes and describes what arrived."""
 
@@ -50,10 +58,7 @@ class EchoHandler:
         logger.info(
             "inbound %s id=%s from=%s", message.kind, message.message_id, mask(message.sender)
         )
-        try:
-            await channel.mark_read(message.message_id, typing=True)
-        except ChannelError:
-            logger.warning("mark_read failed for %s", message.message_id, exc_info=True)
+        await mark_read(message.message_id, channel)
         await channel.send_text(message.sender, describe(message))
 
 

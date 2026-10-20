@@ -67,7 +67,9 @@ class Rig:
         )
         self.events: list[object] = []
         self.channel = FakeChannel()
-        self.router = ButtonRouter(self.store, self.maker, self.publishing, sessions=None)
+        self.router = ButtonRouter(
+            self.store, self.maker, self.publishing, sessions=None, brand=None
+        )
 
     async def notify(self, sender: str, event: object, channel: object) -> None:
         self.events.append(event)

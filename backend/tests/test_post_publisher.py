@@ -4,16 +4,11 @@ from datetime import datetime
 import pytest
 
 from app.background import BackgroundWork
-from app.conversation.button_router import ButtonRouter
-from app.conversation.chat import ChatHandler
+from app.conversation.factory import ChatParts, build_chat
 from app.conversation.history import InMemoryHistory
-from app.conversation.photos import InMemoryPhotos
 from app.copy import messages_es
 from app.media.public import PublicImages
-from app.posts.drafts import PostDrafter
-from app.posts.lifecycle import PostLifecycle
-from app.posts.maker import PostMaker
-from app.posts.publish import MAX_RETRY_AFTER_S, PostPublisher
+from app.posts.publish import MAX_RETRY_AFTER_S
 from app.posts.store import Post, PostImage, PostVideo
 from app.publishing.base import (
     PublisherError,
@@ -60,47 +55,33 @@ class Rig:
         self.publisher = publisher or FakePublisher()
         self.sleeps: list[float] = []
         self.channel = FakeChannel()
-        self.photos, self.history = InMemoryPhotos(), InMemoryHistory()
-        self.store, self.images = PostLifecycle(), PublicImages(max_images)
+        self.history, self.images = InMemoryHistory(), PublicImages(max_images)
 
         async def sleep(seconds: float) -> None:
             self.sleeps.append(seconds)
 
         self.background = BackgroundWork()
-        self.publishing = PostPublisher(
-            self.publisher,
-            self.store,
-            self.images,
-            BASE_URL,
-            account_id,
-            sleep,
-            background=self.background,
+        self.chat = build_chat(
+            ChatParts(
+                model=model,
+                image_gen=CountingImageGen(),
+                renderer=MockRenderer(),
+                publisher=self.publisher,
+                images=self.images,
+                background=self.background,
+                public_backend_url=BASE_URL,
+                account_id=account_id,
+                assistant_name="Mora",
+                max_photo_mb=1,
+                max_posts_per_day=5,
+                max_videos_per_day=2,
+                history=self.history,
+                keep_alive_s=60.0,
+                publish_sleep=sleep,
+            )
         )
-        maker = PostMaker(
-            PostDrafter(model),
-            CountingImageGen(),
-            MockRenderer(),
-            self.photos,
-            self.images,
-            self.store,
-            BASE_URL,
-            max_posts_per_day=5,
-            background=self.background,
-        )
-        self.chat = ChatHandler(
-            model,
-            self.history,
-            self.photos,
-            maker,
-            self.publishing,
-            self.store,
-            ButtonRouter(self.store, maker, self.publishing, sessions=None),
-            None,
-            assistant_name="Mora",
-            max_photo_mb=1,
-            keep_alive_s=60.0,
-            background=self.background,
-        )
+        self.photos, self.store = self.chat.photos, self.chat.lifecycle
+        self.publishing = self.chat.publishing
 
     def add_post(self, post_id: str, slides: int = 1) -> Post:
         images = [PostImage(self.images.add(make_image((80, 100))), b"jpeg") for _ in range(slides)]
@@ -109,7 +90,7 @@ class Rig:
         return post
 
     async def say(self, text: str) -> None:
-        await self.chat.handle(message("text", text=text), self.channel)
+        await self.chat.handler.handle(message("text", text=text), self.channel)
 
     async def finish(self) -> None:
         await self.background.join()
@@ -325,7 +306,7 @@ async def test_a_voice_note_transcript_counts_as_the_owners_words() -> None:
     assert audio.audio
     audio.audio.provider_transcript = "subilo"
 
-    await rig.chat.handle(audio, rig.channel)
+    await rig.chat.handler.handle(audio, rig.channel)
     await rig.finish()
 
     assert [call["key"] for call in rig.publisher.calls] == ["p1"]

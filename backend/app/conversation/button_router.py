@@ -51,6 +51,7 @@ class ButtonRouter:
         maker: PostMaker,
         publisher: PostPublisher,
         sessions: async_sessionmaker[AsyncSession] | None,
+        brand: BrandFlow | None,
         videos: VideoMaker | None = None,
     ) -> None:
         self._posts = posts
@@ -58,7 +59,7 @@ class ButtonRouter:
         self._publisher = publisher
         self._sessions = sessions
         self._videos = videos
-        self._brand = BrandFlow(sessions) if sessions else None
+        self._brand = brand
         self._handlers: dict[str, Handler] = {
             "noop": self._noop,
             "brand_ok": self._brand_ok,
@@ -72,10 +73,6 @@ class ButtonRouter:
             "post_retry": self._post_retry,
             "photo_post": self._photo_post,
         }
-
-    @property
-    def brand(self) -> BrandFlow | None:
-        return self._brand
 
     async def handle(
         self, sender: str, button_id: str, channel: ChannelPort, notify: Notify

@@ -433,7 +433,9 @@ async def test_a_correction_makes_a_new_version_from_the_previous_one(
 
 
 def router(sessions: async_sessionmaker[AsyncSession]) -> ButtonRouter:
-    return ButtonRouter(PostLifecycle(), maker=None, publisher=None, sessions=sessions)  # type: ignore[arg-type]
+    return ButtonRouter(  # type: ignore[arg-type]
+        PostLifecycle(), maker=None, publisher=None, sessions=sessions, brand=BrandFlow(sessions)
+    )
 
 
 async def test_brand_ok_activates_the_business_once(
