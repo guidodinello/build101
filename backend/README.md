@@ -44,9 +44,9 @@ The backend runs on Railway ([ADR 0017](../docs/decisions/0017-backend-host-rail
 
 ### How it deploys
 
-- **Push to `main`** builds and deploys the service from the connected GitHub repo.
+- **Push to `main`** builds and deploys the service from the connected GitHub repo, only when it changes a file under `backend/` (the watch paths below). Docs-only and frontend-only pushes don't redeploy it.
 - **Manual deploy** from the repo root, with the service linked (`railway link`): `railway up --service backend --detach`. Run it from the repo root and not from `backend/`: the service's root directory is `/backend`, so Railway expects the repo layout in the upload.
-- Each deploy runs the pre-deploy command, then starts the container; Railway switches traffic only after `/health` answers.
+- Each deploy runs the pre-deploy command, then starts the container; Railway switches traffic only after `/health` answers. Then the old deployment gets a SIGTERM and has the draining time to finish its work in flight before the SIGKILL ([Deploys and work in flight](#deploys-and-work-in-flight)).
 
 ### Service settings
 
@@ -59,9 +59,25 @@ Railway "Config as Code" files (`railway.json`, `railway.toml`) are deprecated a
 | Builder / Dockerfile | Dockerfile, `Dockerfile` |
 | Pre-deploy command | `alembic upgrade head` (timeout 300 s) |
 | Healthcheck | `/health`, timeout 60 s |
+| Watch paths | `/backend/**`: only a push that changes the backend redeploys it. Patterns match from the repo root even with the root directory set ([Railway: watch paths](https://docs.railway.com/builds/build-configuration#configure-watch-paths), read 2026-10-20) |
+| Draining time | 150 s, the service variable `RAILWAY_DEPLOYMENT_DRAINING_SECONDS=150`: the time between the old deployment's SIGTERM and its SIGKILL. Railway's default is 0 s ([Railway: deployments](https://docs.railway.com/reference/deployments), read 2026-10-20) |
 | Restart policy | on failure, up to 10 retries |
 | Region / replicas | `us-east4-eqdc4a` × 1 |
 | Domain | Railway-generated (`*.up.railway.app`) |
+
+### Deploys and work in flight
+
+On a deploy the old backend gets a SIGTERM once the new one answers `/health`, and a SIGKILL `RAILWAY_DEPLOYMENT_DRAINING_SECONDS` (150 s) later. It uses that time to finish what it was doing ([#180](https://github.com/guidodinello/build101/issues/180)):
+
+1. uvicorn stops taking connections and gives the requests in flight 10 s to finish (`--timeout-graceful-shutdown 10` in the [`Dockerfile`](Dockerfile)). The webhook answers in well under a second: the Owner's turn runs after the 200, as background work.
+2. The app's shutdown ([`app/main.py`](app/main.py)): the job poller claims no new job, then the background work (Owner turns, Post and video generation, publishes, the wait that groups a photo album, running jobs) gets up to `SHUTDOWN_TIMEOUT_S` (130 s) to finish. What is still running at the deadline is cancelled and logged with its ids: `shutdown deadline passed, cancelling N background tasks: post <id> for ***1234; job <id> (generate_brand) for business <id>; ...`.
+3. The Kapso and Zernio clients close last, so work that ends in step 2 still reaches the Owner.
+
+10 s plus 130 s stays under the 150 s drain, so the process exits on its own before the SIGKILL. Raising one of the three means checking the other two. Still lost on a deploy: work cancelled at the deadline (a job left `running` is failed by the next instance after 5 minutes), and the Posts and chat photos, which still live in memory ([One instance](#one-instance)). A crash or an out-of-memory kill gets no drain at all.
+
+### When to merge backend changes during the pilot
+
+While pilot Owners are active, merge PRs that change `backend/` outside Uruguayan business hours, by default 09:00-20:00 Montevideo time (UTC-3). A deploy still loses the Posts kept in memory and any work that outlasts the drain, and Owners write during business hours. Other PRs don't redeploy the backend (watch paths), so they can merge any time.
 
 ### Environment variables
 
@@ -97,7 +113,7 @@ Redeploy the previous deployment from the Railway dashboard (service, Deployment
 
 ### One instance
 
-State kept in memory is lost on every deploy or restart: running jobs (the job runner marks jobs stuck for more than 5 minutes as failed), the webhook dedupe store, served post images (`/media/*.jpg`) and the in-memory photo and post stores. The orchestrator's history, its conversation summary and the Owner's notes are in Postgres ([ADR 0028](../docs/decisions/0030-orchestrator-memory-and-context.md)), and so are the chat photos once kept as Brand assets. Keep one replica ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)).
+State kept in memory is lost on every deploy or restart: jobs still running at the shutdown deadline, or when the process dies (the job runner marks jobs stuck for more than 5 minutes as failed), the webhook dedupe store, served post images (`/media/*.jpg`) and the in-memory photo and post stores. The orchestrator's history, its conversation summary and the Owner's notes are in Postgres ([ADR 0028](../docs/decisions/0030-orchestrator-memory-and-context.md)), and so are the chat photos once kept as Brand assets. Keep one replica ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)).
 
 ### Switching WhatsApp between Railway and local development
 
