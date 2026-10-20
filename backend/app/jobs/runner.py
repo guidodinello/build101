@@ -91,20 +91,25 @@ class JobRunner:
         self._poll_interval_s = poll_interval_s
         self._checks = checks
         self._background = background
-        self._running: set[asyncio.Task[None]] = set()
+        self._running: dict[asyncio.Task[None], uuid.UUID] = {}
         self._running_ids: set[uuid.UUID] = set()
+        self._interrupted: set[uuid.UUID] = set()
+        self._stopping = False
         self._poller: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         await self.fail_stale()
         self._poller = self._background.start_service(self._poll(), "job poller")
 
-    async def stop(self) -> None:
-        if self._poller:
-            self._poller.cancel()
-        for task in self._running:
-            task.cancel()
-        await asyncio.gather(*self._running, return_exceptions=True)
+    def stop(self) -> None:
+        """Claim no new job (the shutdown): the poller ends after its round. The jobs already
+        running go on; the shutdown's `BackgroundWork.drain` waits for them and the poller."""
+        self._stopping = True
+
+    @property
+    def interrupted(self) -> frozenset[uuid.UUID]:
+        """The jobs the shutdown cancelled at its deadline, unfinished."""
+        return frozenset(self._interrupted)
 
     async def fail_stale(self, older_than: timedelta = STALE_AFTER) -> int:
         """Mark as failed the jobs a previous process left `running` (no retries in the MVP).
@@ -136,9 +141,9 @@ class JobRunner:
         return result.rowcount
 
     async def run_due(self) -> int:
-        """Claim as many queued jobs as there are free slots and start them."""
+        """Claim as many queued jobs as there are free slots and start them; none once stopped."""
         free = self._max_concurrent - len(self._running)
-        if free <= 0:
+        if free <= 0 or self._stopping:
             return 0
         async with self._sessions() as db:
             jobs = (
@@ -159,17 +164,22 @@ class JobRunner:
         for job in jobs:
             self._running_ids.add(job.id)
             task = self._background.start(
-                self._run(job.id, job.kind, job.business_id, job.payload),
-                f"job {job.id} ({job.kind})",
+                self._run(job.id, job.kind, job.business_id, job.payload), task_name(job)
             )
-            self._running.add(task)
-            task.add_done_callback(self._running.discard)
+            self._running[task] = job.id
+            task.add_done_callback(self._ended)
         return len(jobs)
+
+    def _ended(self, task: asyncio.Task[None]) -> None:
+        job_id = self._running.pop(task)
+        # Nothing but the shutdown's deadline cancels a job.
+        if task.cancelled():
+            self._interrupted.add(job_id)
 
     async def _poll(self) -> None:
         last_stale_check = datetime.now(UTC)
         last_checked: dict[str, datetime] = {}
-        while True:
+        while not self._stopping:
             await self._run_checks(last_checked)
             try:
                 if datetime.now(UTC) - last_stale_check >= STALE_CHECK_EVERY:
@@ -242,3 +252,9 @@ class JobRunner:
             await self._notify(business.owner_phone, JobFailed(job_id, kind), self._channel)
         except Exception:
             logger.warning("could not tell the Owner that job %s failed", job_id, exc_info=True)
+
+
+def task_name(job: Job) -> str:
+    """The job's ids, as the logs show them; a niche report belongs to no Business."""
+    name = f"job {job.id} ({job.kind})"
+    return f"{name} for business {job.business_id}" if job.business_id else name

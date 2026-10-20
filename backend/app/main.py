@@ -11,7 +11,7 @@ from app.api.errors import install_error_handlers
 from app.api.instagram import router as instagram_router
 from app.api.onboarding import router as onboarding_router
 from app.background import get_background_work
-from app.channels.router import get_channel, get_owner_notify
+from app.channels.router import close_clients, get_channel, get_owner_notify
 from app.channels.router import router as whatsapp_router
 from app.config import Settings, get_settings
 from app.jobs.setup import build_job_runner
@@ -43,8 +43,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await runner.start()
     yield
     if runner:
-        await runner.stop()
-    await get_background_work().stop()
+        runner.stop()
+    await get_background_work().drain(get_settings().shutdown_timeout_s)
+    # Not in the channel router's lifespan, which ends before this one: work that finishes in the
+    # drain still tells the Owner through these clients.
+    await close_clients()
 
 
 class DocsUrls(TypedDict, total=False):

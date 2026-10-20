@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from collections.abc import Iterator
@@ -6,6 +7,7 @@ from dataclasses import dataclass, field
 import pytest
 from fastapi.testclient import TestClient
 
+from app.background import BackgroundWork, get_background_work
 from app.channels.base import ChannelError, ChannelPort, InboundMessage
 from app.channels.inbound import DbDedupeStore, InMemoryDedupeStore
 from app.channels.kapso_webhook import REPLAY_WINDOW_S
@@ -47,6 +49,8 @@ def handler() -> RecordingHandler:
 
 @pytest.fixture
 def client(handler: RecordingHandler) -> Iterator[TestClient]:
+    background = BackgroundWork()
+    app.dependency_overrides[get_background_work] = lambda: background
     app.dependency_overrides[get_settings] = lambda: Settings(kapso_webhook_secret=SECRET)
     # One fresh store per test: all fixtures share the same message id.
     store = InMemoryDedupeStore()
@@ -64,7 +68,7 @@ def raw_fixture(name: str) -> bytes:
     return json.dumps(body).encode()
 
 
-def post(
+def send(
     client: TestClient,
     raw: bytes,
     *,
@@ -76,6 +80,22 @@ def post(
     if signature is not None:
         headers["x-webhook-signature"] = signature
     return client.post("/webhooks/whatsapp", content=raw, headers=headers)
+
+
+def post(
+    client: TestClient,
+    raw: bytes,
+    *,
+    signature: str | None = None,
+    event: str = EVENT,
+    key: str = "key-1",
+):
+    """`send`, then wait for the turn it started: it runs after the 200, on the app's loop."""
+    response = send(client, raw, signature=signature, event=event, key=key)
+    background = app.dependency_overrides.get(get_background_work, get_background_work)()
+    assert client.portal is not None
+    client.portal.call(background.join)
+    return response
 
 
 def test_valid_signature_is_accepted_and_handled(
@@ -255,6 +275,32 @@ def test_a_failing_handler_is_logged_with_the_message_id_and_no_payload(
         "inbound handling failed: text id=wamid.FAKE0000000000000000000001"
     )
     assert "hola bot" not in caplog.text
+
+
+@dataclass
+class SlowHandler(RecordingHandler):
+    async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
+        await asyncio.sleep(0.2)
+        await super().handle(message, channel)
+
+
+def test_a_turn_still_being_answered_when_the_app_stops_is_finished() -> None:
+    handler = SlowHandler()
+    store = InMemoryDedupeStore()
+    app.dependency_overrides[get_settings] = lambda: Settings(kapso_webhook_secret=SECRET)
+    app.dependency_overrides[get_dedupe_store] = lambda: store
+    app.dependency_overrides[get_clock] = lambda: float(FIXTURE_TIME)
+    app.dependency_overrides[get_inbound_handler] = lambda: handler
+    app.dependency_overrides[get_channel] = lambda: object()
+    raw = raw_fixture("text")
+    try:
+        with TestClient(app) as test_client:
+            assert send(test_client, raw, signature=sign(raw, SECRET)).json() == {"status": "ok"}
+            assert handler.handled == []
+    finally:
+        app.dependency_overrides.clear()
+
+    assert [m.text for m in handler.handled] == ["hola bot"]
 
 
 def test_the_dedupe_store_follows_the_database_setting(monkeypatch: pytest.MonkeyPatch) -> None:

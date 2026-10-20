@@ -31,5 +31,7 @@ COPY --from=builder --chown=appuser:appuser /app /app
 USER appuser
 
 # One worker: jobs run in-process (ADR 0005). Railway injects $PORT; `exec` makes
-# uvicorn PID 1 so it receives SIGTERM on redeploys.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
+# uvicorn PID 1 so it receives SIGTERM on redeploys. After it, requests get 10 s to
+# finish, then the background work SHUTDOWN_TIMEOUT_S: together under Railway's
+# RAILWAY_DEPLOYMENT_DRAINING_SECONDS (README.md § Deploy).
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --timeout-graceful-shutdown 10"]

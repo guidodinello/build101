@@ -1,4 +1,5 @@
-"""`BackgroundWork` (ADR 0005): the one place that starts, joins, stops and logs background tasks.
+"""`BackgroundWork` (ADR 0005): the one place that starts, joins, drains, stops and logs background
+tasks.
 
 The scan at the bottom keeps it the only one: no other module under `app/` calls
 `asyncio.create_task`.
@@ -84,6 +85,52 @@ async def test_stop_cancels_the_work_in_flight() -> None:
 
     assert task.cancelled()
     assert finished == []
+
+
+async def test_drain_waits_for_the_work_what_it_starts_and_a_service_told_to_end() -> None:
+    background, done, stopping = BackgroundWork(), [], asyncio.Event()
+
+    async def poller() -> None:
+        while not stopping.is_set():
+            await asyncio.sleep(0.01)
+
+    async def publish() -> None:
+        await asyncio.sleep(0.05)
+        done.append("publish")
+
+    async def turn() -> None:
+        await asyncio.sleep(0.05)
+        background.start(publish(), "publish")
+        done.append("turn")
+
+    service = background.start_service(poller(), "poller")
+    background.start(turn(), "turn")
+    stopping.set()
+    await background.drain(timeout_s=5)
+
+    assert done == ["turn", "publish"]
+    assert service.done() and not service.cancelled()
+
+
+async def test_drain_cancels_and_logs_by_name_what_is_still_running_at_the_deadline(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    background = BackgroundWork()
+
+    async def stuck() -> None:
+        await asyncio.sleep(60)
+
+    async def quick() -> None:
+        await asyncio.sleep(0)
+
+    late = background.start(stuck(), "post abc12345 for ***1234")
+    background.start(quick(), "publish def67890 for ***1234")
+    with caplog.at_level(logging.WARNING, logger="app.background"):
+        await asyncio.wait_for(background.drain(timeout_s=0.05), timeout=1)
+
+    assert late.cancelled()
+    assert "cancelling 1 background tasks: post abc12345 for ***1234" in caplog.text
+    assert "def67890" not in caplog.text
 
 
 SPAWNERS = {"create_task", "ensure_future"}
