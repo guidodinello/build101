@@ -1,14 +1,25 @@
+import asyncio
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import BrandAsset, Business
-from app.jobs.uploads import asset_id_of, orphaned, sweep_orphaned_uploads
-from app.storage import SIGNED_UPLOAD_URL_TTL, StoredObject
+from app.jobs.queue import enqueue
+from app.jobs.runner import JobContext, JobRunner, PeriodicCheck
+from app.jobs.uploads import (
+    SWEEP_EVERY,
+    asset_id_of,
+    orphaned,
+    sweep_orphaned_uploads,
+    upload_sweep,
+)
+from app.storage import SIGNED_UPLOAD_URL_TTL, StorageError, StoredObject
 from tests.conftest import requires_db
-from tests.fakes import FakeStorage
+from tests.fakes import FakeChannel, FakeStorage, SequenceModel
 
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
 OLD = NOW - SIGNED_UPLOAD_URL_TTL - timedelta(minutes=1)
@@ -109,3 +120,87 @@ async def test_the_sweep_removes_dead_and_unowned_objects_and_never_an_active_on
     assert removed == len(drop) + 1
     left = {key.removeprefix(f"assets/{business_id}/") for key in storage.objects}
     assert left == {*keep, unowned_young, "stray.txt"}
+
+
+@dataclass
+class StuckStorage(FakeStorage):
+    """Storage whose listing hangs until `release` is set, or raises `StorageError` instead."""
+
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+    fail: bool = False
+    listings: int = 0
+
+    async def list_objects(self, bucket: str, prefix: str) -> list[StoredObject]:
+        self.listings += 1
+        if self.fail:
+            raise StorageError("supabase is down")
+        await self.release.wait()
+        return []
+
+
+async def add_businesses(sessions: async_sessionmaker[AsyncSession], count: int) -> None:
+    async with sessions() as db:
+        db.add_all(Business(owner_phone=f"5989900000{n}") for n in range(count))
+        await db.commit()
+
+
+@requires_db
+async def test_a_storage_failure_ends_the_round_after_one_listing(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    await add_businesses(sessions, 3)
+    storage = StuckStorage(fail=True)
+
+    removed = await sweep_orphaned_uploads(sessions, storage)
+
+    assert removed == 0
+    assert storage.listings == 1
+
+
+@requires_db
+async def test_the_check_returns_at_once_and_skips_a_round_while_one_is_running(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    await add_businesses(sessions, 2)
+    storage = StuckStorage()
+    check = upload_sweep(storage)
+
+    await asyncio.wait_for(check(sessions), timeout=1)
+    await asyncio.sleep(0.05)
+    await asyncio.wait_for(check(sessions), timeout=1)
+    await asyncio.sleep(0.05)
+    storage.release.set()
+
+    assert storage.listings == 1
+
+
+@requires_db
+async def test_a_stuck_sweep_does_not_delay_a_due_job(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    storage = StuckStorage()
+    await add_businesses(sessions, 2)
+    ran = asyncio.Event()
+
+    async def job(context: JobContext, payload: dict[str, Any]) -> None:
+        ran.set()
+
+    async with sessions() as db:
+        enqueue(db, "analyze_asset", None, {})
+        await db.commit()
+    model: Any = SequenceModel([])
+    runner = JobRunner(
+        sessions,
+        {"analyze_asset": job},
+        storage,
+        FakeChannel(),
+        model,
+        poll_interval_s=0.01,
+        checks=(PeriodicCheck("upload sweep", SWEEP_EVERY, upload_sweep(storage)),),
+    )
+    await runner.start()
+    try:
+        await asyncio.wait_for(ran.wait(), timeout=2)
+    finally:
+        storage.release.set()
+        await runner.stop()

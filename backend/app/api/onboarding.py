@@ -493,7 +493,7 @@ async def _delete_objects(storage: StoragePort, asset: BrandAsset) -> None:
     try:
         await storage.remove(ASSETS_BUCKET, paths)
     except StorageError:
-        logger.exception("the files of archived asset %s were not deleted", asset.id)
+        logger.exception("the files of asset %s were not deleted", asset.id)
 
 
 async def _check_upload_caps(session: AsyncSession, business_id: uuid.UUID, kind: str) -> None:

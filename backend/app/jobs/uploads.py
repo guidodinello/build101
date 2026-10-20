@@ -15,6 +15,7 @@ Names that don't parse are never touched. Assets still `uploading` are out of sc
 `/complete` still works, and removing the object would turn it into a 409.
 """
 
+import asyncio
 import logging
 import re
 import uuid
@@ -26,7 +27,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import BrandAsset, Business
 from app.onboarding.uploads import EXTENSIONS
-from app.storage import ASSETS_BUCKET, SIGNED_UPLOAD_URL_TTL, StoragePort, StoredObject
+from app.storage import (
+    ASSETS_BUCKET,
+    SIGNED_UPLOAD_URL_TTL,
+    StorageError,
+    StoragePort,
+    StoredObject,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,14 +72,18 @@ async def sweep_orphaned_uploads(
     storage: StoragePort,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> int:
-    """Remove the orphaned objects of every Business; the number removed. One Business failing
-    doesn't stop the others."""
+    """Remove the orphaned objects of every Business; the number removed. A Storage failure ends
+    the round (logged once: with Storage down every Business would fail the same way, after a
+    timeout each); any other failure only skips that Business."""
     async with sessions() as db:
         business_ids = (await db.scalars(select(Business.id))).all()
     removed = 0
     for business_id in business_ids:
         try:
             removed += await _sweep_business(sessions, storage, business_id, now())
+        except StorageError:
+            logger.exception("upload sweep stopped: Storage failed on business %s", business_id)
+            break
         except Exception:
             logger.exception("sweeping the uploads of business %s failed", business_id)
     if removed:
@@ -109,9 +120,21 @@ async def _sweep_business(
 def upload_sweep(
     storage: StoragePort,
 ) -> Callable[[async_sessionmaker[AsyncSession]], Awaitable[object]]:
-    """The `PeriodicCheck.run` of the sweep."""
+    """The `PeriodicCheck.run` of the sweep. The runner awaits its checks before it claims jobs,
+    and a round lists Storage once per Business, so the round runs as a background task: the check
+    returns at once, and skips a round while the previous one is still running."""
+    current: asyncio.Task[int] | None = None  # kept: a task nobody references can be collected
 
-    async def run(sessions: async_sessionmaker[AsyncSession]) -> int:
-        return await sweep_orphaned_uploads(sessions, storage)
+    async def run(sessions: async_sessionmaker[AsyncSession]) -> None:
+        nonlocal current
+        if current is not None and not current.done():
+            return
+        current = asyncio.create_task(sweep_orphaned_uploads(sessions, storage))
+        current.add_done_callback(_log_failure)
 
     return run
+
+
+def _log_failure(task: asyncio.Task[int]) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        logger.error("upload sweep failed", exc_info=task.exception())

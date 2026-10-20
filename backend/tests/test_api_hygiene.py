@@ -4,7 +4,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel, ValidationError
 
 from app.api.errors import install_error_handlers
-from app.config import Settings
+from app.config import Settings, get_settings
+from app.db.session import get_session
 from app.main import app, docs_urls
 from app.onboarding.schemas import MAX_LIST_ITEMS, ProductInput, ProductsInput
 
@@ -72,3 +73,42 @@ def test_a_products_photo_list_is_capped_at_the_schema() -> None:
 
     with pytest.raises(ValidationError):
         ProductInput.model_validate({"name": "Banco", "asset_ids": ids})
+
+
+DEV_TOKEN = "dev-secret"
+
+
+async def post_dev_link(settings: Settings, token: str | bytes) -> int:
+    """POST /dev/onboarding-link on the real app, without a database: the dev gate answers (or
+    the unreachable session fails the test) before any query."""
+
+    async def no_session() -> None:
+        raise AssertionError("the gate must refuse before the database is touched")
+
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_session] = no_session
+    value = token.encode() if isinstance(token, str) else token
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://t"
+        ) as c:
+            response = await c.post(
+                "/dev/onboarding-link",
+                json={"phone": "59899123456"},
+                headers=[(b"x-dev-token", value)],
+            )
+    finally:
+        app.dependency_overrides.clear()
+    return response.status_code
+
+
+async def test_the_dev_endpoints_are_a_404_in_prod_even_when_enabled_with_the_right_token() -> None:
+    settings = Settings(env="prod", enable_dev_endpoints=True, dev_token=DEV_TOKEN)
+
+    assert await post_dev_link(settings, DEV_TOKEN) == 404
+
+
+async def test_a_non_ascii_dev_token_is_a_401_not_a_500() -> None:
+    settings = Settings(enable_dev_endpoints=True, dev_token=DEV_TOKEN)
+
+    assert await post_dev_link(settings, "ñandú") == 401
