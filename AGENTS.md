@@ -18,7 +18,8 @@ How the build101 team works. This file is the single source of truth for the wor
 | [`.claude/skills/`](.claude/skills/README.md) | Agent skills that automate the steps below; plain Markdown, readable by anyone |
 | [`.claude/rules/`](.claude/rules/README.md) | Path-scoped coding rules (Python, database, Docker, CI) |
 | [`.claude/routines/`](.claude/routines/README.md) | Nightly cloud agents (product research, bug hunt) that open draft PRs; backup of their prompts and schedules |
-| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | CI: markdownlint, docs index check, actionlint; one aggregate `CI` check |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | CI: markdownlint, docs index check, actionlint, dependency audit (`pip-audit` on the backend lock, `npm audit --audit-level=high` on the frontend); actions pinned to commit SHAs; one aggregate `CI` check |
+| [`.github/dependabot.yml`](.github/dependabot.yml) | Weekly grouped Dependabot PRs for Actions, `uv`, `npm` and the backend base image |
 | [`scripts/`](scripts/) | Repo tooling (e.g. `check_docs_index.py`) |
 | GitHub issues / PRs | Work items (issues) and changes under review (PRs) |
 

@@ -177,3 +177,12 @@ class NicheReportRow(Base):
     week_start: Mapped[date]
     report: Mapped[dict[str, Any]]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class InboundDelivery(Base):
+    """A WhatsApp message id the webhook accepted: the durable dedupe key (#105)."""
+
+    __tablename__ = "inbound_deliveries"
+
+    external_id: Mapped[str] = mapped_column(primary_key=True)
+    received_at: Mapped[datetime] = mapped_column(server_default=func.now())

@@ -32,6 +32,7 @@ from app.onboarding.uploads import (
     llm_copy_path,
     read_upload,
 )
+from app.ratelimit import limit_onboarding_token
 from app.storage import (
     ASSETS_BUCKET,
     SIGNED_UPLOAD_URL_TTL,
@@ -169,7 +170,7 @@ async def get_open_onboarding(
 OnboardingDep = Annotated[Onboarding, Depends(get_onboarding)]
 OpenOnboardingDep = Annotated[Onboarding, Depends(get_open_onboarding)]
 
-router = APIRouter(prefix="/api/o/{token}")
+router = APIRouter(prefix="/api/o/{token}", dependencies=[Depends(limit_onboarding_token)])
 
 
 @router.get("")
