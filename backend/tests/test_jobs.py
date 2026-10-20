@@ -635,9 +635,13 @@ async def test_a_failed_revision_puts_an_active_business_back(
 ) -> None:
     business = await add_business(sessions, state="active")
     await BrandFlow(sessions).revise(PHONE, "más formales")
+    # The model has no answer: the Strategist fails.
+    jobs, background = runner(
+        sessions, {"generate_brand": generate_brand}, FakeChannel(), SequenceModel([])
+    )
 
-    with pytest.raises(IndexError):  # the model has no answer: the Strategist fails
-        await generate_brand(context(sessions, business, SequenceModel([])), {"correction": "x"})
+    await jobs.run_due()
+    await background.join()
 
     async with sessions() as db:
         restored = await db.get_one(Business, business.id)
@@ -648,9 +652,13 @@ async def test_a_failed_first_brand_stays_generating(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     business = await add_business(sessions)
+    await queue(sessions, "generate_brand", business)
+    jobs, background = runner(
+        sessions, {"generate_brand": generate_brand}, FakeChannel(), SequenceModel([])
+    )
 
-    with pytest.raises(IndexError):
-        await generate_brand(context(sessions, business, SequenceModel([])), {})
+    await jobs.run_due()
+    await background.join()
 
     async with sessions() as db:
         assert (await db.get_one(Business, business.id)).onboarding_state == "generating_brand"

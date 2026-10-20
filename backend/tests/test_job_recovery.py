@@ -4,6 +4,7 @@ a new brand job when the runner starts. The shutdown's drain is in test_jobs.py.
 
 import asyncio
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.channels.base import Button, ChannelError
 from app.conversation.brand import BrandFlow
 from app.conversation.events import JobRetried, StaleButton
+from app.conversation.history import DbHistory
+from app.conversation.outbound import FixedReplies
 from app.copy import messages_es
 from app.db.models import Business, Job
 from app.jobs.brand import generate_brand, queue_stranded_brands
@@ -124,7 +127,9 @@ async def test_a_brand_job_left_running_by_a_dead_process_runs_once_more_then_fa
         # The survivor dies on it too: its run is still going when the next process looks.
         await db.execute(update(Job).where(Job.id == job.id).values(**left_running(attempts=2)))
         await db.commit()
-    assert await runner(sessions, {}, channel)[0].recover_stale() == 1
+    jobs, background = runner(sessions, {}, channel)
+    assert await jobs.recover_stale() == 1
+    await background.join()
     await survivor_work.stop()
 
     failed = await job_row(sessions, job.id)
@@ -153,8 +158,10 @@ async def test_an_abandoned_brand_revision_puts_the_business_back(
             update(Job).where(Job.business_id == business.id).values(**left_running(attempts=2))
         )
         await db.commit()
+    jobs, background = runner(sessions, {}, channel)
 
-    assert await runner(sessions, {}, channel)[0].recover_stale() == 1
+    assert await jobs.recover_stale() == 1
+    await background.join()
 
     async with sessions() as db:
         restored = await db.get_one(Business, business.id)
@@ -164,14 +171,31 @@ async def test_an_abandoned_brand_revision_puts_the_business_back(
     assert channel.buttons == [(PHONE, messages_es.JOB_FAILED, [f"retry:{revision.id}"])]
 
 
+async def test_the_stale_check_doesnt_wait_for_a_turn_the_owner_is_in(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business, channel, history = await add_business(sessions), FakeChannel(), DbHistory(sessions)
+    job = await add_job(sessions, business, **left_running(attempts=2))
+    jobs, background = runner(sessions, {}, channel, notify=FixedReplies(history))
+
+    async with history.lock(PHONE):
+        assert await asyncio.wait_for(jobs.recover_stale(), timeout=1) == 1
+        assert (await job_row(sessions, job.id)).status == "failed"
+    await background.join()
+
+    assert channel.buttons == [(PHONE, messages_es.JOB_FAILED, [f"retry:{job.id}"])]
+
+
 async def test_an_interrupted_photo_analysis_runs_once_more_and_tells_no_one(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     business, channel = await add_business(sessions), FakeChannel()
     first = await add_job(sessions, business, "analyze_asset", **left_running(attempts=1))
     second = await add_job(sessions, business, "analyze_asset", **left_running(attempts=2))
+    jobs, background = runner(sessions, {}, channel)
 
-    assert await runner(sessions, {}, channel)[0].recover_stale() == 2
+    assert await jobs.recover_stale() == 2
+    await background.join()
 
     assert (await job_row(sessions, first.id)).status == "queued"
     assert (await job_row(sessions, second.id)).status == "failed"
@@ -197,36 +221,71 @@ async def test_an_interrupted_instagram_import_fails_without_running_again(
     assert channel.buttons == []
 
 
-async def test_a_run_another_instance_took_for_dead_no_longer_owns_its_row(
-    sessions: async_sessionmaker[AsyncSession],
-) -> None:
-    # A deploy's overlap: the old instance is still on a job the new one requeued and claimed.
-    business, gates = await add_business(sessions), [asyncio.Event(), asyncio.Event()]
-    runs = iter(gates)
-
-    async def slow(context: JobContext, payload: dict[str, Any]) -> dict[str, Any]:
-        gate = next(runs)
-        await gate.wait()
-        return {"run": gates.index(gate)}
-
-    job_id = await queue(sessions, "generate_brand", business)
-    old, old_work = runner(sessions, {"generate_brand": slow}, FakeChannel())
-    assert await old.run_due() == 1
+async def look_dead(sessions: async_sessionmaker[AsyncSession], job_id: uuid.UUID) -> None:
+    """The old instance's run (attempt 1) started long enough ago for the new one to take it for
+    dead."""
     async with sessions() as db:
         await db.execute(update(Job).where(Job.id == job_id).values(**left_running(attempts=1)))
         await db.commit()
-    new, new_work = runner(sessions, {"generate_brand": slow}, FakeChannel())
+
+
+async def test_a_run_another_instance_took_for_dead_no_longer_owns_its_row(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    # A deploy's overlap: the old instance is still on a revision the new one requeued and claimed.
+    business, old_channel = await add_business(sessions, state="active"), FakeChannel()
+    assert await BrandFlow(sessions).revise(PHONE, "más formales")
+    [job] = await brand_jobs(sessions, business)
+    old_gate, new_gate = asyncio.Event(), asyncio.Event()
+
+    async def fails(context: JobContext, payload: dict[str, Any]) -> None:
+        await old_gate.wait()
+        raise RuntimeError("the old run fails")
+
+    async def succeeds(context: JobContext, payload: dict[str, Any]) -> dict[str, Any]:
+        await new_gate.wait()
+        return {"run": "new"}
+
+    old, old_work = runner(sessions, {"generate_brand": fails}, old_channel)
+    assert await old.run_due() == 1
+    await look_dead(sessions, job.id)
+    new, new_work = runner(sessions, {"generate_brand": succeeds}, FakeChannel())
     assert await new.recover_stale() == 1
     assert await new.run_due() == 1
 
-    gates[0].set()
+    old_gate.set()
     await old_work.join()
-    assert (await job_row(sessions, job_id)).status == "running"
-    gates[1].set()
+    taken = await job_row(sessions, job.id)
+    assert (taken.status, taken.attempts, taken.retry_offered_at) == ("running", 2, None)
+    assert old_channel.buttons == []
+    async with sessions() as db:
+        assert (await db.get_one(Business, business.id)).onboarding_state == "generating_brand"
+    new_gate.set()
     await new_work.join()
 
-    done = await job_row(sessions, job_id)
-    assert (done.status, done.result, done.attempts) == ("succeeded", {"run": 1}, 2)
+    done = await job_row(sessions, job.id)
+    assert (done.status, done.result, done.attempts) == ("succeeded", {"run": "new"}, 2)
+
+
+async def test_the_old_instances_shutdown_leaves_a_job_the_new_one_took_over(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business, old_channel = await add_business(sessions), FakeChannel()
+    job_id = await queue(sessions, "generate_brand", business)
+    old, old_work = runner(sessions, {"generate_brand": stuck}, old_channel)
+    assert await old.run_due() == 1
+    await look_dead(sessions, job_id)
+    new, new_work = runner(sessions, {"generate_brand": stuck}, FakeChannel())
+    assert await new.recover_stale() == 1
+    assert await new.run_due() == 1
+
+    old.stop()
+    await asyncio.wait_for(old_work.drain(timeout_s=0.1), timeout=2)
+
+    taken = await job_row(sessions, job_id)
+    assert (taken.status, taken.attempts) == ("running", 2)
+    assert old_channel.buttons == []
+    await new_work.stop()
 
 
 async def test_a_job_queued_again_after_an_interruption_has_no_reintentar_to_tap(
@@ -373,27 +432,45 @@ async def test_the_startup_check_and_a_reintentar_tap_queue_one_job_between_them
     assert await retry_failed(sessions, PHONE, str(failed.id)) is None
 
 
-async def test_a_check_with_no_period_runs_once_when_the_runner_starts(
+async def test_the_startup_check_waits_for_a_route_that_holds_the_business(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    # The Owner writes in that instant: the onboarding gate locks their Business for a moment.
+    business = await add_business(sessions)
+
+    async with sessions() as route:
+        await route.get_one(Business, business.id, with_for_update=True)
+        check = asyncio.create_task(queue_stranded_brands(sessions))
+        await asyncio.sleep(0.2)
+        assert not check.done()
+        await route.rollback()
+
+    assert await check == 1
+
+
+async def test_a_check_with_no_period_runs_until_it_succeeds_once(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     runs: list[datetime] = []
 
-    async def once(sessions: async_sessionmaker[AsyncSession]) -> None:
+    async def flaky(sessions: async_sessionmaker[AsyncSession]) -> None:
         runs.append(datetime.now(UTC))
+        if len(runs) == 1:
+            raise ConnectionError("a blip at startup")
 
     jobs, background = runner(
         sessions,
         {},
         FakeChannel(),
         poll_interval_s=0.01,
-        checks=(PeriodicCheck("once", None, once),),
+        checks=(PeriodicCheck("flaky", None, flaky),),
     )
     await jobs.start()
     await asyncio.sleep(0.1)
     jobs.stop()
     await background.drain(timeout_s=1)
 
-    assert len(runs) == 1
+    assert len(runs) == 2
 
 
 async def test_the_migration_counts_past_runs_and_the_reintentar_already_sent(

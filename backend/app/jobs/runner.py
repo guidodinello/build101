@@ -30,8 +30,8 @@ POLL_INTERVAL_S = 1.0
 # A job still running after this was left by a process that died (a crash, out of memory).
 STALE_AFTER = timedelta(minutes=5)
 STALE_CHECK_EVERY = timedelta(minutes=1)
-# An interrupted job runs once more, and fails if interrupted again: a job that kills its
-# process (out of memory) must not take the next process down too.
+# An interrupted job runs once more, then fails: a job that kills its process (out of memory)
+# takes down at most one more.
 MAX_ATTEMPTS = 2
 INTERRUPTED = "interrupted by a restart"
 MAX_ERROR_CHARS = 1000
@@ -49,16 +49,17 @@ class JobContext:
 
 
 JobFunction = Callable[[JobContext, dict[str, Any]], Awaitable[dict[str, Any] | None]]
-# What the runner undoes for the Business of an abandoned job, e.g. the state a brand revision left.
+# What the runner undoes for the Business of a failed job, e.g. the state a brand revision left.
 Undo = Callable[[async_sessionmaker[AsyncSession], uuid.UUID], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
 class PeriodicCheck:
-    """Work the poller runs on its first round and then every `every` (never again when None, so
-    once per process), e.g. queueing the weekly jobs. The poller awaits a check before it claims
-    jobs, so a check must return at once: it queues, or starts housekeeping that needs no row of
-    its own as a background task (the orphaned-upload sweep, jobs/uploads.py)."""
+    """Work the poller runs on its first round and then every `every` (when None, on each round
+    until it succeeds once: once per process), e.g. queueing the weekly jobs. The poller awaits a
+    check before it claims jobs, so a check must return at once: it queues, or starts
+    housekeeping that needs no row of its own as a background task (the orphaned-upload sweep,
+    jobs/uploads.py)."""
 
     name: str
     every: timedelta | None
@@ -68,13 +69,14 @@ class PeriodicCheck:
 class JobRunner:
     """Runs `jobs` rows with their function from `jobs`, at most `max_concurrent` at a time.
 
-    A failed job of a kind in `notify_on_failure` raises `JobFailed` (its `retry:{job_id}` button
-    goes with it) for the Business's Owner through `notify`; other failures are only logged.
+    A failed job's Business first gets its kind's `undo`. Then a kind in `notify_on_failure`
+    raises `JobFailed` (its `retry:{job_id}` button goes with it) for the Business's Owner through
+    `notify`; other failures are only logged.
 
     A job is interrupted when the shutdown cancels it or its process dies. One of a kind in
     `requeue_if_interrupted` goes back to the queue, up to `MAX_ATTEMPTS` runs in all. Any other
-    is abandoned: failed by the runner, which then does what the job's own failure would have
-    done, its kind's `undo` and the Owner's `JobFailed`.
+    is abandoned: failed by the runner, with the same `undo` and `JobFailed` as a failure of its
+    own.
     """
 
     def __init__(
@@ -138,7 +140,12 @@ class JobRunner:
                     .with_for_update(skip_locked=True)
                 )
             ).all()
-            await self._recover(db, stale)
+            abandoned = await self._recover(db, stale)
+        for job in abandoned:
+            # Not in the poller's round: `JobFailed` waits for any turn the Owner is in.
+            self._background.start(
+                self._after_failure(job.id, job.kind, job.business_id), _task_name(job)
+            )
         return len(stale)
 
     async def run_due(self) -> int:
@@ -193,11 +200,14 @@ class JobRunner:
             last = last_checked.get(check.name)
             if last is not None and (check.every is None or datetime.now(UTC) - last < check.every):
                 continue
-            last_checked[check.name] = datetime.now(UTC)
+            started = datetime.now(UTC)
             try:
                 await check.run(self._sessions)
             except Exception:
                 logger.exception("periodic check %s failed", check.name)
+                if check.every is None:
+                    continue
+            last_checked[check.name] = started
 
     async def _run(
         self,
@@ -231,9 +241,9 @@ class JobRunner:
             logger.exception("job %s (%s) failed", job_id, kind)
             error = repr(exc)[:MAX_ERROR_CHARS]
         async with self._sessions() as db:
-            # Only this run's row still `running`: anything else was decided elsewhere and stays.
-            # A run another instance took for dead and requeued no longer owns the row.
-            await db.execute(
+            # Only while the row is still this run's: once another instance took the job for dead,
+            # this run's outcome is dropped, a failure's `undo` and `JobFailed` with it.
+            owned = await db.scalar(
                 update(Job)
                 .where(Job.id == job_id, Job.status == "running", Job.attempts == attempt)
                 .values(
@@ -242,12 +252,21 @@ class JobRunner:
                     error=error,
                     finished_at=datetime.now(UTC),
                 )
+                .returning(Job.id)
             )
             await db.commit()
         self._running_ids.discard(job_id)
+        if owned is None:
+            logger.warning(
+                "job %s (%s) attempt %d was taken for dead elsewhere: its outcome is dropped",
+                job_id,
+                kind,
+                attempt,
+            )
+            return
         logger.info("job %s (%s): %s", job_id, kind, "failed" if error else "succeeded")
-        if error and kind in self._notify_on_failure and business_id:
-            await self._tell_owner(job_id, kind, business_id)
+        if error:
+            await self._after_failure(job_id, kind, business_id)
 
     async def _interrupted(self, job_id: uuid.UUID, attempt: int) -> None:
         """The shutdown cancelled this run at the drain's deadline: requeue or abandon its job."""
@@ -257,15 +276,21 @@ class JobRunner:
                 .where(Job.id == job_id, Job.status == "running", Job.attempts == attempt)
                 .with_for_update()
             )
-            await self._recover(db, [job] if job else [])
+            abandoned = await self._recover(db, [job] if job else [])
+        for failed in abandoned:
+            await self._after_failure(failed.id, failed.kind, failed.business_id)
 
-    async def _recover(self, db: AsyncSession, interrupted: Sequence[Job]) -> None:
-        """Put each interrupted job back in the queue or abandon it; commits `db`."""
+    async def _recover(self, db: AsyncSession, interrupted: Sequence[Job]) -> list[Job]:
+        """Put each interrupted job back in the queue or abandon it; commits `db` and returns the
+        abandoned ones."""
         for job in interrupted:
             if job.kind in self._requeue_if_interrupted and job.attempts < MAX_ATTEMPTS:
-                job.status, job.started_at = "queued", None
+                job.status = "queued"
+                job.started_at = None
             else:
-                job.status, job.error, job.finished_at = "failed", INTERRUPTED, datetime.now(UTC)
+                job.status = "failed"
+                job.error = INTERRUPTED
+                job.finished_at = datetime.now(UTC)
         await db.commit()
         for job in interrupted:
             logger.warning(
@@ -275,11 +300,14 @@ class JobRunner:
                 job.attempts,
                 "queued again" if job.status == "queued" else "failed",
             )
-            if job.status == "failed" and job.business_id:
-                await self._abandon(job.id, job.kind, job.business_id)
+        return [job for job in interrupted if job.status == "failed"]
 
-    async def _abandon(self, job_id: uuid.UUID, kind: str, business_id: uuid.UUID) -> None:
-        """What the job's own failure would have done, which its interrupted run never reached."""
+    async def _after_failure(
+        self, job_id: uuid.UUID, kind: str, business_id: uuid.UUID | None
+    ) -> None:
+        """The kind's `undo`, then the Owner's `JobFailed`; nothing for a job of no Business."""
+        if business_id is None:
+            return
         if undo := self._undo.get(kind):
             await undo(self._sessions, business_id)
         if kind in self._notify_on_failure:

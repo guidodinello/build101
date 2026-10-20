@@ -36,18 +36,10 @@ async def generate_brand(context: JobContext, payload: dict[str, Any]) -> dict[s
     `payload["correction"]` (the Owner's words after "Corregir algo", or an `update_brand`
     change) runs revise mode on the latest version.
     """
-    if context.business_id is None:
+    business_id = context.business_id
+    if business_id is None:
         raise ValueError("generate_brand needs a business")
-    try:
-        return await _generate_brand(context, context.business_id, payload.get("correction"))
-    except Exception:
-        await resume_revision(context.sessions, context.business_id)
-        raise
-
-
-async def _generate_brand(
-    context: JobContext, business_id: uuid.UUID, correction: str | None
-) -> dict[str, Any]:
+    correction: str | None = payload.get("correction")
     await _wait_for_analyses(context, business_id)
 
     async with context.sessions() as db:
@@ -89,7 +81,9 @@ async def _generate_brand(
 async def resume_revision(
     sessions: async_sessionmaker[AsyncSession], business_id: uuid.UUID
 ) -> None:
-    """A failed revision of a confirmed brand puts the Business back where it was (ADR 0030)."""
+    """A failed revision of a confirmed brand puts the Business back where it was (ADR 0030).
+
+    The runner's `undo` for a failed brand job (`UNDO` in setup.py)."""
     async with sessions() as db:
         business = await db.get_one(Business, business_id, with_for_update=True)
         if resume_after_failed_revision(business):
@@ -101,8 +95,9 @@ async def queue_stranded_brands(sessions: async_sessionmaker[AsyncSession]) -> i
 
     One whose last brand job is queued or running waits for it, and one whose last brand job
     failed with Reintentar sent waits for the Owner. Any other gets a copy of its last brand job,
-    or a first one: a restart interrupted its job before the runner requeued interrupted jobs, or
-    the Owner was never told it failed (#178). The runner runs this once, when it starts.
+    which ended with no Reintentar sent or tapped (failed as interrupted, or its failure message
+    never reached the Owner), or a first one when it has none. The runner runs this once per
+    process, when it starts.
     """
     queued = 0
     async with sessions() as db:
@@ -110,10 +105,12 @@ async def queue_stranded_brands(sessions: async_sessionmaker[AsyncSession]) -> i
             await db.scalars(
                 select(Business)
                 .where(Business.onboarding_state == OnboardingState.GENERATING_BRAND)
-                # Whoever holds a lock on one (a route, another instance's check) moves it on.
-                # NO KEY: a Reintentar tap's new job checks its foreign key with a KEY SHARE lock
-                # on the Business, so FOR UPDATE would deadlock with the wait for its job below.
-                .with_for_update(skip_locked=True, key_share=True)
+                .order_by(Business.id)
+                # Waits for a route that holds one rather than skip it, since the check runs once;
+                # in id order, so two checks can't deadlock. NO KEY: a Reintentar tap's new job
+                # checks its foreign key with a KEY SHARE lock on the Business, so FOR UPDATE
+                # would deadlock with the wait for its job below.
+                .with_for_update(key_share=True)
             )
         ).all()
         for business in stuck:
