@@ -15,7 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.channels.base import ChannelError, ChannelPort
+from app.channels.base import ChannelPort
 from app.channels.router import get_channel, get_owner_notify
 from app.config import Settings, get_settings
 from app.conversation.events import BrandGenerating, Notify
@@ -580,7 +580,7 @@ async def _check_complete(session: AsyncSession, business: Business) -> None:
 async def _send_brand_generating(notify: Notify, channel: ChannelPort, owner_phone: str) -> None:
     try:
         await notify(owner_phone, BrandGenerating(), channel)
-    except ChannelError:
+    except Exception:
         logger.exception("brand_generating was not sent")
 
 

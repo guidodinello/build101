@@ -6,7 +6,7 @@ buttons, the WhatsApp body limit and the text/buttons split live here and nowher
 
 import logging
 
-from app.channels.base import Button, ChannelError, ChannelPort
+from app.channels.base import Button, ChannelPort
 from app.channels.inbound import mask
 from app.copy import messages_es
 from app.llm.client import user_step
@@ -96,7 +96,7 @@ class FixedReplies:
     (`INBOUND_HANDLER=echo`) and for tests.
 
     Same contract as `ChatHandler.notify`: the note goes in the sender's history under its lock,
-    and a failure is logged, except that a verbatim event's `ChannelError` reaches the caller.
+    and a failure is logged, except that a verbatim event's failure reaches the caller.
     """
 
     def __init__(self, history: History) -> None:
@@ -110,9 +110,7 @@ class FixedReplies:
                     await send(channel, sender, text, event)
                 # After the send: a message that never reached the Owner leaves no note.
                 await self._history.extend(sender, [user_step(event.note())])
-        except ChannelError:
+        except Exception:
             if verbatim(event):
                 raise
-            logger.exception("%s event failed for %s", type(event).__name__, mask(sender))
-        except Exception:
             logger.exception("%s event failed for %s", type(event).__name__, mask(sender))

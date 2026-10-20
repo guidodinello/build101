@@ -16,7 +16,7 @@ from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.background import BackgroundWork
-from app.channels.base import ChannelError, ChannelPort
+from app.channels.base import ChannelPort
 from app.conversation.events import JobFailed, Notify
 from app.db.models import Business, Job
 from app.llm.client import ChatModel
@@ -240,5 +240,5 @@ class JobRunner:
             return
         try:
             await self._notify(business.owner_phone, JobFailed(job_id, kind), self._channel)
-        except ChannelError:
+        except Exception:
             logger.warning("could not tell the Owner that job %s failed", job_id, exc_info=True)
