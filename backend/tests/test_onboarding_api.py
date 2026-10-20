@@ -16,12 +16,13 @@ from app.config import Settings, get_settings
 from app.conversation.history import InMemoryHistory
 from app.conversation.outbound import FixedReplies
 from app.copy import messages_es
-from app.db.models import BrandAsset, Business, Job, MagicLink
+from app.db.models import BrandAsset, Business, Job, MagicLink, PilotSender
 from app.db.session import get_session
 from app.jobs.uploads import sweep_orphaned_uploads
 from app.main import app
 from app.onboarding import uploads
 from app.onboarding.links import hash_token
+from app.pilot import PilotList, get_pilot_list
 from app.storage import StorageError, get_storage
 from tests.conftest import make_image, requires_db
 from tests.fakes import CountingStorage, FakeChannel, FakeStorage
@@ -688,6 +689,59 @@ async def test_complete_starts_the_brand_and_tells_the_owner_once(
         kinds = (await db.scalars(select(Job.kind).order_by(Job.created_at))).all()
     assert business and business.onboarding_state == "generating_brand"
     assert kinds.count("generate_brand") == 1
+
+
+async def ready_to_complete(client: httpx.AsyncClient, storage: FakeStorage) -> str:
+    token = await new_link(client)
+    await client.put(f"/api/o/{token}/business", json=BUSINESS)
+    await client.put(
+        f"/api/o/{token}/products", json={"products": [{"name": "Mesa", "description": ""}]}
+    )
+    for _ in range(3):
+        await upload(client, storage, token)
+    return token
+
+
+async def test_a_number_not_on_the_pilot_list_cannot_complete_the_form(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    channel: FakeChannel,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    app.dependency_overrides[get_pilot_list] = lambda: PilotList(
+        frozenset({"59800000009"}), None, open_when_empty=False
+    )
+    token = await ready_to_complete(client, storage)
+
+    response = await client.post(f"/api/o/{token}/complete")
+    state = (await client.get(f"/api/o/{token}")).json()
+
+    assert response.status_code == 403
+    assert error_code(response) == "not_in_pilot"
+    assert response.json()["error"]["message"] == onboarding.NOT_IN_PILOT
+    assert state["completed"] is False
+    assert channel.sent == []
+    async with sessions() as db:
+        business = await db.scalar(select(Business))
+        kinds = (await db.scalars(select(Job.kind))).all()
+    assert business and business.onboarding_state == "awaiting_web_form"
+    assert "generate_brand" not in kinds
+
+
+async def test_a_number_in_pilot_senders_completes_the_form(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    async with sessions() as db:
+        db.add(PilotSender(phone=PHONE))
+        await db.commit()
+    app.dependency_overrides[get_pilot_list] = lambda: PilotList(
+        frozenset(), sessions, open_when_empty=False
+    )
+    token = await ready_to_complete(client, storage)
+
+    response = await client.post(f"/api/o/{token}/complete")
+
+    assert (response.status_code, response.json()) == (202, {"status": "generating_brand"})
 
 
 async def test_products_link_their_own_photos(

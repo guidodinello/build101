@@ -186,3 +186,12 @@ class InboundDelivery(Base):
 
     external_id: Mapped[str] = mapped_column(primary_key=True)
     received_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class PilotSender(Base):
+    """A WhatsApp number let into the closed pilot (#186), added by hand in the SQL editor."""
+
+    __tablename__ = "pilot_senders"
+
+    phone: Mapped[str] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())

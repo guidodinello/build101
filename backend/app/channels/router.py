@@ -16,6 +16,7 @@ from app.conversation.factory import Conversation, build_conversation
 from app.copy import messages_es
 from app.db.session import get_sessionmaker
 from app.media.public import get_public_images, get_public_videos
+from app.pilot import PilotGate, PilotList, get_pilot_list
 from app.publishing.factory import get_publisher
 from app.ratelimit import TURNS_BURST, TURNS_PER_MINUTE, RateLimiter
 
@@ -54,19 +55,21 @@ def get_clock() -> float:
 
 @cache
 def get_conversation() -> Conversation:
+    settings = get_settings()
     conversation = build_conversation(
-        get_settings(), get_public_images(), get_publisher(), get_public_videos()
+        settings, get_public_images(), get_publisher(), get_public_videos()
     )
-    # In front of everything the factory builds, the no-database chat handler included (#106).
-    # `notify` is not wrapped: it carries events raised by code, not the Owner's turns.
-    return replace(
-        conversation,
-        handler=RateLimitedHandler(
-            conversation.handler,
-            RateLimiter(TURNS_BURST, TURNS_PER_MINUTE),
-            messages_es.RATE_LIMITED,
-        ),
+    # In front of everything the factory builds, the no-database chat handler included: the rate
+    # limit (#106) and, before it, the pilot list (#186), so a number off the list never gets the
+    # limit's notice either. `notify` is not wrapped: it carries events raised by code, not the
+    # Owner's turns.
+    limited = RateLimitedHandler(
+        conversation.handler,
+        RateLimiter(TURNS_BURST, TURNS_PER_MINUTE),
+        messages_es.RATE_LIMITED,
     )
+    gate = PilotGate(limited, get_pilot_list(), messages_es.waitlist(settings.assistant_name))
+    return replace(conversation, handler=gate)
 
 
 def get_inbound_handler() -> InboundHandler:
@@ -83,6 +86,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Built at boot so a missing GEMINI_API_KEY or PUBLIC_BACKEND_URL stops the app, instead of
     # turning every webhook into a 500. Tests swap the handler through dependency_overrides.
     app.dependency_overrides.get(get_inbound_handler, get_inbound_handler)()
+    pilot: PilotList = app.dependency_overrides.get(get_pilot_list, get_pilot_list)()
+    await pilot.log_at_boot()
     yield
     # Close the HTTP clients only if a request ever built them.
     for cached, get in ((get_channel, get_channel), (get_publisher, get_publisher)):

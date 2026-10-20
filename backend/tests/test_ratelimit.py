@@ -8,6 +8,7 @@ from app.channels.inbound import EchoHandler, RateLimitedHandler
 from app.channels.router import get_conversation, get_inbound_handler
 from app.config import Settings
 from app.copy import messages_es
+from app.pilot import PilotGate
 from app.ratelimit import KeyedLocks, RateLimiter, TtlMap
 from tests.fakes import FakeChannel
 
@@ -238,13 +239,15 @@ def test_the_real_inbound_handler_is_wrapped_in_the_sender_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Router tests override get_inbound_handler, so only this one sees the production wiring
-    # (`get_conversation` wraps the handler).
+    # (`get_conversation` wraps the handler, behind the pilot list).
     get_conversation.cache_clear()
     monkeypatch.setattr(
         "app.channels.router.get_settings", lambda: Settings(inbound_handler="echo")
     )
     try:
-        handler = get_inbound_handler()
+        gate = get_inbound_handler()
+        assert isinstance(gate, PilotGate)
+        handler = gate._inner
         assert isinstance(handler, RateLimitedHandler)
         assert isinstance(handler._inner, EchoHandler)
         assert handler._notice == messages_es.RATE_LIMITED

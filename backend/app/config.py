@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     frontend_origins: str = "http://localhost:3000"
     whatsapp_bot_number: str | None = None  # for wa.me links, digits only
+    # The closed pilot (#186): comma-separated WhatsApp numbers let in, on top of the rows of
+    # pilot_senders. With neither, nobody gets in with ENV=prod and everyone does elsewhere
+    pilot_senders: str = ""
 
     enable_dev_endpoints: bool = False
     dev_token: str | None = None

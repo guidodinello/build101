@@ -16,6 +16,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.base import ChannelPort
+from app.channels.inbound import mask
 from app.channels.router import get_channel, get_owner_notify
 from app.config import Settings, get_settings
 from app.conversation.events import BrandGenerating, Notify
@@ -33,6 +34,7 @@ from app.onboarding.uploads import (
     llm_copy_path,
     read_upload,
 )
+from app.pilot import PilotList, get_pilot_list
 from app.ratelimit import limit_onboarding_token
 from app.storage import (
     ASSETS_BUCKET,
@@ -86,6 +88,10 @@ UPLOAD_MISSING = "El archivo no terminó de subir. Probá de nuevo."
 MISSING_BUSINESS = "Nos faltan los datos de tu negocio."
 MISSING_PRODUCTS = f"Sumá entre 1 y {schemas.MAX_PRODUCTS} productos."
 MISSING_PHOTOS = f"Sumá al menos {MIN_PHOTOS} fotos."
+NOT_IN_PILOT = (
+    "Por ahora estamos en un piloto cerrado con pocos negocios. Cuando abramos más lugares lo vas "
+    "a ver en nuestra web."
+)
 
 
 def file_too_big(max_mb: int) -> str:
@@ -402,6 +408,7 @@ async def complete_onboarding(
     background: BackgroundTasks,
     channel: Annotated[ChannelPort, Depends(get_channel)],
     notify: Annotated[Notify, Depends(get_owner_notify)],
+    pilot: Annotated[PilotList, Depends(get_pilot_list)],
 ) -> schemas.CompleteResponse:
     link, business = onboarding.link, onboarding.business
     # The lock serializes a double submit; any completed link of the Business counts, so a
@@ -413,6 +420,10 @@ async def complete_onboarding(
             await session.commit()
         return schemas.CompleteResponse(status="generating_brand")
 
+    # The PilotGate sends no new link to a number off the list, but one sent earlier still works.
+    if not await pilot.allows(business.owner_phone):
+        logger.info("form of %s refused: not on the pilot list", mask(business.owner_phone))
+        raise ApiError(403, "not_in_pilot", NOT_IN_PILOT)
     await _check_complete(session, business)
     link.completed_at = datetime.now(UTC)
     form_submitted(business)
