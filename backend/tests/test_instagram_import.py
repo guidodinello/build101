@@ -23,10 +23,11 @@ from app.jobs.instagram import import_instagram_job
 from app.jobs.runner import JobContext
 from app.main import app
 from app.onboarding.links import hash_token
+from app.pilot import get_pilot_list
 from app.storage import get_storage
 from tests.conftest import requires_db
 from tests.fakes import EventLog, FakeChannel, FakeStorage, SequenceModel
-from tests.test_onboarding_api import new_link, upload
+from tests.test_onboarding_api import new_link, off_the_pilot_list, upload
 
 pytestmark = requires_db
 
@@ -361,6 +362,20 @@ async def test_the_start_hop_refuses_a_completed_onboarding(
     response = await client.get(f"/api/o/{token}/instagram/start", params={"ticket": ticket})
 
     assert response.status_code == 409
+
+
+async def test_the_start_hop_refuses_a_number_not_on_the_pilot_list(
+    client: httpx.AsyncClient,
+) -> None:
+    token = await new_link(client)
+    ticket = sign_ticket(token, DEV_STATE_SECRET)
+    app.dependency_overrides[get_pilot_list] = off_the_pilot_list
+
+    response = await client.get(f"/api/o/{token}/instagram/start", params={"ticket": ticket})
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "not_in_pilot"
+    assert "set-cookie" not in response.headers
 
 
 def job_context(

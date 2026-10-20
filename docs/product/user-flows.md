@@ -125,7 +125,7 @@ Questionnaire (step 6):
 
 Posts per week is no longer asked: nothing schedules yet (T30), and the Brand Brain defaults to 3.
 
-On submit: `POST /api/o/{token}/complete` → state `generating_brand` → Flow 3 starts in the background. A number not on the pilot list can't submit (`403 not_in_pilot`): no brand generation starts.
+On submit: `POST /api/o/{token}/complete` → state `generating_brand` → Flow 3 starts in the background. A number not on the pilot list can't save a step or submit (`403 not_in_pilot` from its first save): nothing is uploaded, analysed or imported, and no brand generation starts.
 
 ## Flow 3 — Brand Brain generation and confirmation (Must)
 

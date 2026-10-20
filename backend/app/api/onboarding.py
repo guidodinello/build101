@@ -128,6 +128,7 @@ class Onboarding:
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 StorageDep = Annotated[StoragePort, Depends(get_storage)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+PilotDep = Annotated[PilotList, Depends(get_pilot_list)]
 
 
 async def get_onboarding(token: str, session: SessionDep) -> Onboarding:
@@ -159,15 +160,27 @@ async def is_submitted(session: AsyncSession, business_id: uuid.UUID) -> bool:
     return completed is not None
 
 
+async def _check_pilot(pilot: PilotList, business: Business) -> None:
+    """The PilotGate sends no new link to a number off the list, but one sent earlier still works,
+    so every write checks the list before anything is saved, uploaded, analysed or imported."""
+    if not await pilot.allows(business.owner_phone):
+        logger.info("wizard of %s refused: not on the pilot list", mask(business.owner_phone))
+        raise ApiError(403, "not_in_pilot", NOT_IN_PILOT)
+
+
 async def get_open_onboarding(
-    onboarding: Annotated[Onboarding, Depends(get_onboarding)], session: SessionDep
+    onboarding: Annotated[Onboarding, Depends(get_onboarding)],
+    session: SessionDep,
+    pilot: PilotDep,
 ) -> Onboarding:
-    """The link is reusable until the form is submitted (user-flows.md, Flow 1).
+    """The link is reusable until the form is submitted (user-flows.md, Flow 1), for a number on
+    the pilot list.
 
     The Business row is locked before the check, like `/complete` does before stamping a link: a
     write that passed the check waits there and can't commit after the form was submitted (the
     brand job would not see it). The lock lasts until the request's transaction ends.
     """
+    await _check_pilot(pilot, onboarding.business)
     await session.refresh(onboarding.business, with_for_update=True)
     if await is_submitted(session, onboarding.business.id):
         raise ApiError(409, "onboarding_completed", ALREADY_COMPLETED)
@@ -408,7 +421,7 @@ async def complete_onboarding(
     background: BackgroundTasks,
     channel: Annotated[ChannelPort, Depends(get_channel)],
     notify: Annotated[Notify, Depends(get_owner_notify)],
-    pilot: Annotated[PilotList, Depends(get_pilot_list)],
+    pilot: PilotDep,
 ) -> schemas.CompleteResponse:
     link, business = onboarding.link, onboarding.business
     # The lock serializes a double submit; any completed link of the Business counts, so a
@@ -420,10 +433,7 @@ async def complete_onboarding(
             await session.commit()
         return schemas.CompleteResponse(status="generating_brand")
 
-    # The PilotGate sends no new link to a number off the list, but one sent earlier still works.
-    if not await pilot.allows(business.owner_phone):
-        logger.info("form of %s refused: not on the pilot list", mask(business.owner_phone))
-        raise ApiError(403, "not_in_pilot", NOT_IN_PILOT)
+    await _check_pilot(pilot, business)
     await _check_complete(session, business)
     link.completed_at = datetime.now(UTC)
     form_submitted(business)

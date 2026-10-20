@@ -33,6 +33,7 @@ from app.ratelimit import limit_onboarding_token
 from .errors import ApiError, error_response
 from .onboarding import (
     OpenOnboardingDep,
+    PilotDep,
     SessionDep,
     SettingsDep,
     get_onboarding,
@@ -80,6 +81,7 @@ async def start_instagram(
     session: SessionDep,
     settings: SettingsDep,
     instagram: InstagramDep,
+    pilot: PilotDep,
 ) -> RedirectResponse:
     """Top-level hop: set the binding cookie on our own origin, then go to the consent screen."""
     secret = _state_secret(settings)
@@ -88,7 +90,7 @@ async def start_instagram(
     except InvalidState as exc:
         logger.warning("instagram start with a bad ticket: %s", exc)
         raise ApiError(400, "invalid_state", CONNECT_EXPIRED) from None
-    await get_open_onboarding(await get_onboarding(token, session), session)
+    await get_open_onboarding(await get_onboarding(token, session), session, pilot)
     nonce, cookie = new_binding(token, secret)
     response = RedirectResponse(
         instagram.authorize_url(_redirect_uri(request, settings), nonce), status_code=303

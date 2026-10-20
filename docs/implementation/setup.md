@@ -92,7 +92,7 @@ Plan B only (Meta Cloud API direct, if Kapso fails its first-hour test; [integra
 
 ## Pilot numbers
 
-The bot runs as a closed pilot (#186): only numbers on the pilot list can start onboarding, talk to the bot, finish the wizard or publish. Any other number gets one fixed reply a day (`waitlist` in the [copy deck](../product/conversation-design.md#fixed-messages-copy-deck)) and nothing else: no Business, no wizard link, no AI call, no job, and nothing stored about it beyond a masked log line. A Business whose number leaves the list gets the same reply; its data is kept, and it comes back as it was when the number is added again.
+The bot runs as a closed pilot (#186): only numbers on the pilot list can start onboarding, talk to the bot, use the wizard or publish. Any other number gets one fixed reply a day (`waitlist` in the [copy deck](../product/conversation-design.md#fixed-messages-copy-deck)) and nothing else: no Business, no wizard link, no AI call, no job, and nothing stored about it beyond a masked log line. A Business whose number leaves the list gets the same reply; its data is kept, and it comes back as it was when the number is added again.
 
 The list is the `pilot_senders` table plus `PILOT_SENDERS`. In production, use the table: a change takes effect within a minute (the backend reads it at most once a minute) with no deploy, and a deploy still drops in-flight work today ([BUG-2](../research/audit-2026-10/bugs-reliability.md)). `PILOT_SENDERS` is for the setup without a database, where it is the only source, and for local development; changing it on Railway means a redeploy. With both empty, nobody gets in with `ENV=prod` (the boot log warns `pilot list is empty with ENV=prod`) and everyone does elsewhere.
 

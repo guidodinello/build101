@@ -96,14 +96,15 @@ async def new_link(client: httpx.AsyncClient, **body: Any) -> str:
     return response.json()["token"]
 
 
-async def upload(
+async def uploaded_to_storage(
     client: httpx.AsyncClient,
     storage: FakeStorage,
     token: str,
     kind: str = "photo",
     data: bytes | None = None,
     content_type: str = "image/jpeg",
-) -> dict[str, Any]:
+) -> str:
+    """The asset id of a file the browser put in Storage, before the wizard completes it."""
     data = data if data is not None else make_image((1200, 900))
     ticket = await client.post(
         f"/api/o/{token}/uploads",
@@ -115,9 +116,20 @@ async def upload(
         },
     )
     assert ticket.status_code == 200, ticket.text
-    asset_id = ticket.json()["asset_id"]
     path = ticket.json()["upload_url"].split("/upload/assets/")[1].split("?")[0]
     storage.put("assets", path, data)
+    return ticket.json()["asset_id"]
+
+
+async def upload(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    token: str,
+    kind: str = "photo",
+    data: bytes | None = None,
+    content_type: str = "image/jpeg",
+) -> dict[str, Any]:
+    asset_id = await uploaded_to_storage(client, storage, token, kind, data, content_type)
     completed = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
     assert completed.status_code == 200, completed.text
     return completed.json()
@@ -691,6 +703,55 @@ async def test_complete_starts_the_brand_and_tells_the_owner_once(
     assert kinds.count("generate_brand") == 1
 
 
+WIZARD_WRITES = [
+    ("PUT", "/business", BUSINESS),
+    ("PUT", "/products", {"products": [{"name": "Silla", "description": ""}]}),
+    ("PUT", "/brand", {"three_words": ["cálido"], "colors": ["#112233"]}),
+    ("PUT", "/preferences", PREFERENCES),
+    (
+        "POST",
+        "/uploads",
+        {"kind": "photo", "filename": "a.jpg", "content_type": "image/jpeg", "size_bytes": 1},
+    ),
+    ("POST", "/assets/{asset_id}/complete", None),
+    ("DELETE", "/assets/{asset_id}", None),
+    ("POST", "/instagram/connect", {}),
+]
+
+
+def off_the_pilot_list() -> PilotList:
+    return PilotList(frozenset({"59800000009"}), None, open_when_empty=False)
+
+
+@pytest.mark.parametrize(("method", "path", "body"), WIZARD_WRITES)
+async def test_a_number_not_on_the_pilot_list_saves_uploads_and_imports_nothing(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    sessions: async_sessionmaker[AsyncSession],
+    method: str,
+    path: str,
+    body: dict[str, Any] | None,
+) -> None:
+    token = await new_link(client)
+    asset_id = await uploaded_to_storage(client, storage, token)
+    app.dependency_overrides[get_pilot_list] = off_the_pilot_list
+
+    response = await client.request(
+        method, f"/api/o/{token}{path.format(asset_id=asset_id)}", json=body
+    )
+
+    assert response.status_code == 403
+    assert error_code(response) == "not_in_pilot"
+    assert response.json()["error"]["message"] == onboarding.NOT_IN_PILOT
+    async with sessions() as db:
+        business = await db.scalar(select(Business))
+        assets = (await db.scalars(select(BrandAsset))).all()
+        jobs = (await db.scalars(select(Job))).all()
+    assert business and (business.name, business.onboarding_data) == (None, {})
+    assert [(asset.status, asset.archived_at) for asset in assets] == [("uploading", None)]
+    assert jobs == []
+
+
 async def ready_to_complete(client: httpx.AsyncClient, storage: FakeStorage) -> str:
     token = await new_link(client)
     await client.put(f"/api/o/{token}/business", json=BUSINESS)
@@ -708,10 +769,8 @@ async def test_a_number_not_on_the_pilot_list_cannot_complete_the_form(
     channel: FakeChannel,
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
-    app.dependency_overrides[get_pilot_list] = lambda: PilotList(
-        frozenset({"59800000009"}), None, open_when_empty=False
-    )
     token = await ready_to_complete(client, storage)
+    app.dependency_overrides[get_pilot_list] = off_the_pilot_list
 
     response = await client.post(f"/api/o/{token}/complete")
     state = (await client.get(f"/api/o/{token}")).json()
@@ -887,23 +946,7 @@ async def submitted_business_with_a_sibling_link(
     return first, second, assets[0]["id"]
 
 
-@pytest.mark.parametrize(
-    ("method", "path", "body"),
-    [
-        ("PUT", "/business", BUSINESS),
-        ("PUT", "/products", {"products": [{"name": "Silla", "description": ""}]}),
-        ("PUT", "/brand", {"three_words": ["cálido"], "colors": ["#112233"]}),
-        ("PUT", "/preferences", PREFERENCES),
-        (
-            "POST",
-            "/uploads",
-            {"kind": "photo", "filename": "a.jpg", "content_type": "image/jpeg", "size_bytes": 1},
-        ),
-        ("POST", "/assets/{asset_id}/complete", None),
-        ("DELETE", "/assets/{asset_id}", None),
-        ("POST", "/instagram/connect", {}),
-    ],
-)
+@pytest.mark.parametrize(("method", "path", "body"), WIZARD_WRITES)
 async def test_a_sibling_link_takes_no_edits_once_the_form_is_submitted(
     client: httpx.AsyncClient,
     storage: FakeStorage,
