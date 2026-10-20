@@ -12,7 +12,7 @@
 
 ## Setup before going on stage
 
-- [ ] Backend deployed, `/health` OK; `PUBLISHER=zernio`; IG connected for `{BUSINESS}`.
+- [ ] Backend deployed, `/ready` answers 200 (`database`, `job_runner` and `publisher` ok, `commit` = `main`); IG connected for `{BUSINESS}`.
 - [ ] **Two businesses ready:**
   - *Live onboarding*: the presenter's phone is reset to `new` (`/dev/businesses/{id}/reset`).
   - *Seeded*: `{BUSINESS}` already `active` with a pre-generated Brand Brain (from `/dev/seed/demo`), used if brand generation is slow.
@@ -50,7 +50,7 @@ Narrator:
 1. Owner writes "subila" (no button needed) → "arriba ✅" → "¡Publicado! 🎉 <link>".
 2. Open `{IG_HANDLE}` on the projector: **the Post is live.**
 
-> Fallback: if publishing fails, switch `PUBLISHER=mock`, show the generated Post and the "would publish" log, and open the pre-published post from rehearsal.
+> Fallback: if publishing fails, show the generated Post in the chat and open the pre-published post from rehearsal, or play the backup video. There is no `PUBLISHER=mock` switch: production refuses it ([mvp.md](mvp.md#demo-fallbacks)).
 
 ### 3:35 – Close (20 s)
 >

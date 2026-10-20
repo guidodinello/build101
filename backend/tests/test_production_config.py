@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app.channels.router import get_inbound_handler
+from app.channels.router import get_channel, get_inbound_handler
 from app.config import (
     Settings,
     adapters_in_use,
@@ -53,6 +53,13 @@ def production(**changes: Any) -> dict[str, Any]:
     return {name: value for name, value in config.items() if value is not None}
 
 
+def set_production_env(monkeypatch: pytest.MonkeyPatch, **changes: Any) -> None:
+    """A complete production config in the environment, the way Railway passes it."""
+    for name, value in production(**changes).items():
+        monkeypatch.setenv(name.upper(), value)
+    get_settings.cache_clear()
+
+
 def problems(**changes: Any) -> set[str]:
     """The settings a complete config with `changes` is refused for; the error names each."""
     settings = Settings(**production(**changes))
@@ -61,10 +68,6 @@ def problems(**changes: Any) -> set[str]:
         check_production(settings)
     assert all(name in str(error.value) for name in found)
     return set(found)
-
-
-def test_a_complete_production_config_starts() -> None:
-    check_production(Settings(**production()))
 
 
 @pytest.mark.parametrize("publisher", [None, "mock"], ids=["unset", "mock"])
@@ -123,8 +126,9 @@ def test_prod_refuses_to_start_without_a_setting_it_needs(setting: str) -> None:
     assert problems(**{setting: None}) == {setting.upper()}
 
 
-def test_an_empty_setting_counts_as_unset() -> None:
-    assert problems(kapso_webhook_secret="") == {"KAPSO_WEBHOOK_SECRET"}
+@pytest.mark.parametrize("blank", ["", " ", "\t"], ids=["empty", "space", "tab"])
+def test_a_blank_setting_counts_as_unset(blank: str) -> None:
+    assert problems(kapso_webhook_secret=blank) == {"KAPSO_WEBHOOK_SECRET"}
 
 
 def test_the_video_key_is_needed_only_while_reels_are_on() -> None:
@@ -144,12 +148,17 @@ def test_the_video_key_is_needed_only_while_reels_are_on() -> None:
         ("frontend_origins", " , "),
         ("frontend_origins", "https://neitorai.vercel.app,http://localhost:3000"),
         ("frontend_origins", "http://127.0.0.1:3000"),
+        ("frontend_url", "http://127.0.1.1:3000"),
+        ("frontend_url", "http://[0:0:0:0:0:0:0:1]:3000"),
+        ("frontend_url", "http://localhost.:3000"),
+        ("frontend_url", "http://app.localhost:3000"),
+        ("frontend_origins", "http://192.168.1.5:3000"),
         ("public_backend_url", "http://localhost:8000"),
         ("renderer_url", "http://localhost:3000"),
         ("renderer_url", "neitorai.vercel.app"),
     ],
 )
-def test_prod_refuses_a_frontend_or_public_url_on_localhost(
+def test_prod_refuses_a_frontend_or_public_url_that_is_not_public(
     setting: str, value: str | None
 ) -> None:
     assert problems(**{setting: value}) == {setting.upper()}
@@ -228,6 +237,29 @@ def test_the_app_refuses_to_start_in_prod_with_the_mock_publisher(
 
     with pytest.raises(ValueError, match="PUBLISHER"), TestClient(app):
         pass
+
+
+def test_a_complete_production_config_starts_and_logs_the_adapters_by_name_only(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    set_production_env(monkeypatch)
+    monkeypatch.setattr("app.main.build_job_runner", lambda *_: None)
+    get_channel.cache_clear()
+    app.dependency_overrides[get_inbound_handler] = lambda: None
+    try:
+        with caplog.at_level(logging.INFO), TestClient(app) as client:
+            assert client.get("/health").json() == {"status": "ok"}
+    finally:
+        app.dependency_overrides.clear()
+        get_channel.cache_clear()
+
+    lines = [record.getMessage() for record in caplog.records if record.name == "app.main"]
+    assert (
+        "adapters in use: IMAGE_GEN=gemini RENDERER=takumi PUBLISHER=zernio INSTAGRAM=meta "
+        "VIDEO_GEN=off INBOUND_HANDLER=chat WHATSAPP_CHANNEL=kapso"
+    ) in lines
+    for value in SECRETS.values():
+        assert value not in caplog.text
 
 
 def test_the_app_starts_locally_on_mocks_and_logs_the_adapters_by_name_only(

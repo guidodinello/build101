@@ -11,7 +11,7 @@ FastAPI. JSON in and out, `snake_case` fields. Errors use `{"error": {"code": ".
 | Web app (owner) | Magic-link token in the path: `/api/o/{token}/...`. Server hashes it, looks up `magic_links`, checks expiry → `business_id` |
 | Dev tools | Header `X-Dev-Token: $DEV_TOKEN`, only if `ENABLE_DEV_ENDPOINTS=true` and `ENV` is not `prod` (404 otherwise) |
 
-CORS: allow every origin in `FRONTEND_ORIGINS` (comma-separated: Vercel URL + `http://localhost:3000`).
+CORS: allow every origin in `FRONTEND_ORIGINS` (comma-separated). Production lists only the Vercel URL, since `ENV=prod` refuses to start on a localhost origin; `http://localhost:3000` is for local runs.
 
 ## Endpoints
 

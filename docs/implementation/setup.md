@@ -16,10 +16,10 @@
 
 | Variable | Example | Notes |
 |---|---|---|
-| `ENV` | `local` \| `prod` | **Must be `prod` in production**: it turns off `/dev/*` (even with `ENABLE_DEV_ENDPOINTS=true`) and the API docs. The default is `local` |
+| `ENV` | `local` \| `prod` | **Must be `prod` in production**: it turns off `/dev/*` (even with `ENABLE_DEV_ENDPOINTS=true`) and the API docs, and the backend refuses to start on a mock adapter, a missing production setting or a localhost URL ([backend/README.md](../../backend/README.md#environment-variables)). The default is `local` |
 | `PUBLIC_BACKEND_URL` | `https://api-example.up.railway.app` | Railway-generated domain ([ADR 0017](../decisions/0017-backend-host-railway.md)). Used in logs/webhook docs, and for the URLs of generated images until Supabase Storage is in (T56) |
 | `FRONTEND_URL` | `https://neitorai.vercel.app` | Magic links + Zernio redirect |
-| `FRONTEND_ORIGINS` | `https://neitorai.vercel.app,http://localhost:3000` | CORS |
+| `FRONTEND_ORIGINS` | `https://neitorai.vercel.app` | CORS, comma-separated. `http://localhost:3000` is for local runs only: with `ENV=prod` the backend refuses to start on a localhost origin |
 | `DATABASE_URL` | `postgresql+asyncpg://...pooler.supabase.com:5432/postgres` | Session pooler |
 | `SUPABASE_URL` | `https://xxxx.supabase.co` | |
 | `SUPABASE_SERVICE_ROLE_KEY` | `eyJ...` | Backend only |
@@ -33,7 +33,7 @@
 | `KAPSO_PHONE_NUMBER_ID` | `...` | The connected number we send from: the sandbox now, the free US number later |
 | `KAPSO_BASE_URL` | `https://api.kapso.ai/meta/whatsapp/v24.0` | Optional; this is the default |
 | `KAPSO_TEST_RECIPIENT`, `KAPSO_TEST_MEDIA_ID` | `...` | Only for `uv run pytest -m live`: a verified recipient phone, and a media id taken from an inbound message |
-| `IMAGE_GEN` | `gemini` \| `openai` \| `mock` | Image service ([ADR 0019](../decisions/0019-image-provider-gemini.md)); `openai` is the fallback, `mock` the dev and stage fallback |
+| `IMAGE_GEN` | `gemini` \| `openai` \| `mock` | Image service ([ADR 0019](../decisions/0019-image-provider-gemini.md)); `openai` is the fallback, `mock` the dev fallback (refused with `ENV=prod`) |
 | `GEMINI_API_KEY` | `...` | From a Google project with billing linked: unpaid use trains on the images |
 | `GEMINI_IMAGE_MODEL` | `gemini-nano-banana-2.1` | |
 | `TRANSCRIBE_FALLBACK` | `gemini` \| `none` \| `mock` | Voice notes without Kapso's transcript ([ADR 0021](../decisions/0021-voice-notes-kapso-transcript-gemini-fallback.md)) |
@@ -42,7 +42,7 @@
 | `IMAGE_GEN_MAX_CONCURRENCY` | `4` | Process-wide limit on image-service calls (variations and carousel slides) |
 | `OPENAI_API_KEY` | `sk-...` | Fallback only; the OpenAI org may need Organization Verification |
 | `OPENAI_IMAGE_MODEL` | `gpt-image-2.5-sunburst` | Fallback only |
-| `PUBLISHER` | `zernio` \| `mock` | Default `mock`, so a missing env never posts for real. Demo fallback switch |
+| `PUBLISHER` | `zernio` \| `mock` | Default `mock`, so a missing env never posts for real. With `ENV=prod` the backend refuses to start on `mock`, and `/ready` fails on it |
 | `ZERNIO_API_KEY` | `sk_...` | |
 | `ZERNIO_BASE_URL` | `https://zernio.com/api/v1` | Optional; this is the default |
 | `ZERNIO_PROFILE_ID`, `ZERNIO_ACCOUNT_ID` | `...` | The single demo Instagram account's Zernio profile and account ids. Temporary: they stand in for `social_accounts` until T02 exists ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). With `PUBLISHER=zernio`, publishing from the chat (T57) needs `ZERNIO_ACCOUNT_ID` and an HTTPS `PUBLIC_BACKEND_URL` (a `cloudflared` tunnel or Railway, not free ngrok) that Zernio can fetch the post images from; without the account id the bot says publishing isn't connected |

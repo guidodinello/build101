@@ -68,9 +68,7 @@ def docs_urls(settings: Settings) -> DocsUrls:
 app = FastAPI(title="Neitor AI", lifespan=lifespan, **docs_urls(get_settings()))
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        origin.strip() for origin in get_settings().frontend_origins.split(",") if origin.strip()
-    ],
+    allow_origins=get_settings().frontend_origin_list,
     allow_methods=["*"],
     allow_headers=["*"],
 )

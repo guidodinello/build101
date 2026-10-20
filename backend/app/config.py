@@ -1,3 +1,4 @@
+import ipaddress
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -87,11 +88,14 @@ class Settings(BaseSettings):
     def whatsapp_url(self) -> str:
         return f"https://wa.me/{self.whatsapp_bot_number or ''}"
 
+    @property
+    def frontend_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.frontend_origins.split(",") if origin.strip()]
 
-# Kept working for the demo, never in front of a real Owner: the mock publisher answers that a
-# Post is live when nothing reached Instagram
+
+# Kept working for local runs and rehearsals, never in front of a real Owner: the mock publisher
+# answers that a Post is live when nothing reached Instagram
 DEMO_FALLBACKS = frozenset({"mock", "echo", "simulator"})
-LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
 
 
 def adapters_in_use(settings: Settings) -> dict[str, str]:
@@ -132,12 +136,12 @@ def production_problems(settings: Settings) -> dict[str, str]:
     }
     if settings.video_gen_enabled:
         required["GEMINI_VIDEO_API_KEY"] = settings.gemini_video_api_key
-    problems |= {name: "not set" for name, value in required.items() if not value}
+    problems |= {name: "not set" for name, value in required.items() if not (value or "").strip()}
     public_urls = {
         "PUBLIC_BACKEND_URL": [settings.public_backend_url or ""],
         "RENDERER_URL": [settings.renderer_url or ""],
         "FRONTEND_URL": [settings.frontend_url],
-        "FRONTEND_ORIGINS": settings.frontend_origins.split(","),
+        "FRONTEND_ORIGINS": settings.frontend_origin_list,
     }
     for name, urls in public_urls.items():
         listed = [url.strip() for url in urls if url.strip()]
@@ -150,10 +154,15 @@ def production_problems(settings: Settings) -> dict[str, str]:
 
 def _is_public(url: str) -> bool:
     try:
-        host = urlsplit(url).hostname
+        host = (urlsplit(url).hostname or "").rstrip(".")
     except ValueError:
         return False
-    return host is not None and host not in LOCAL_HOSTS
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_global
+    except ValueError:
+        return host != "localhost" and not host.endswith(".localhost")
 
 
 def check_production(settings: Settings) -> None:

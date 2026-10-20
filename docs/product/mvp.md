@@ -85,7 +85,7 @@ Priority uses MoSCoW for the 24h build: **Must** = the demo fails without it; **
 | F5.2 | Publish now to Instagram via the unified publishing API; reply with the permalink | Must |
 | F5.3 | Schedule for a date/time (provider-side scheduling) | Should |
 | F5.4 | Facebook Page cross-post | Could |
-| F5.5 | Mock publisher (demo fallback, local dev) | Must |
+| F5.5 | Mock publisher (local dev and rehearsals) | Must |
 | F5.6 | Approve and publish by writing ("subilo", "dale, publicalo"); schedule by writing ("subilo mañana a la tarde") | Must (publish) / Should (schedule) |
 
 ### F6 — Web app
@@ -135,14 +135,16 @@ Paid ads, email, SEO, analytics and comment/DM replies (both in the [roadmap](..
 | Risk on stage | Fallback |
 |---|---|
 | WhatsApp webhook/number fails | Run the same flow from `/dev/chat` (web simulator). Same orchestrator, same buttons. |
-| Publishing provider fails or IG token expires | Switch `PUBLISHER=mock`; show the generated post + "would publish" log. Keep a **pre-published post** on the IG account as proof. |
-| Image service fails, blocks or is slow | Switch `IMAGE_GEN=openai` (fallback provider, [ADR 0019](../decisions/0019-image-provider-gemini.md)), only if T43 is built and the OpenAI org is verified; otherwise `IMAGE_GEN=mock` (the Owner's photo, resized). Keep variations generated during rehearsal as proof. |
+| Publishing provider fails or IG token expires | Show the generated post in the chat and open the **pre-published post** on the IG account as proof; the backup video shows the publish. No `PUBLISHER=mock` switch (see below). |
+| Image service fails, blocks or is slow | Switch `IMAGE_GEN=openai` (fallback provider, [ADR 0019](../decisions/0019-image-provider-gemini.md)), only if T43 is built and the OpenAI org is verified; otherwise show the variations generated during rehearsal as proof. |
 | Brand generation is slow on stage | Keep a pre-generated Brand Brain for the demo business; if generation passes ~60 s, load it with the dev seed and continue from the brand summary. |
 | LLM latency spikes during the post | Narrate the wait with the progress message; the pre-published post on the IG account is the proof if it doesn't arrive. |
 | Conference Wi-Fi | Mobile hotspot; the backend is deployed, not local. |
 
+The mock adapters (`PUBLISHER=mock`, `IMAGE_GEN=mock`, ...) are for local runs and rehearsals only, not a stage fallback. The deployed backend runs with `ENV=prod`, which refuses to start on one, and Railway's `/ready` healthcheck fails on the mock publisher, so a deploy that switches to a mock never takes traffic and the previous deployment keeps serving ([backend/README.md](../../backend/README.md#environment-variables)). The mock publisher tells the Owner a Post is live when nothing reached Instagram, so it never runs where a real Owner can see it.
+
 ## Definition of done for the hackathon
 
 - All **Must** features work end-to-end on the deployed environment (Vercel + backend host + Supabase) with the demo business.
-- The demo script ([demo-script.md](demo-script.md)) has been rehearsed twice end to end, including one fallback switch.
+- The demo script ([demo-script.md](demo-script.md)) has been rehearsed twice end to end, including one fallback from the table above.
 - `README.md` explains how to run it locally in under 10 minutes.

@@ -100,7 +100,7 @@ flowchart TB
 1. **Deterministic where it matters, LLM where it helps.** Button taps, onboarding steps, approval, and publishing are plain code. The LLM handles free text, planning, writing and design choices.
 2. **Agents are functions, not processes.** Each specialist is an async function: typed input (Pydantic) → one Gemini call with structured output → typed output. Only the orchestrator runs a tool-use loop.
 3. **Long work runs in background jobs.** The webhook returns `200` in < 1 s. The orchestrator's tools *enqueue* jobs and return immediately; jobs send their own WhatsApp messages when they finish.
-4. **Ports for everything external.** `ChannelPort` (WhatsApp through Kapso / Simulator), `PublisherPort` (Provider / Mock), `ImageGenPort` (Gemini / OpenAI / Mock), `TranscriberPort` (Gemini / Mock). Switching is an env var, which is also our demo fallback.
+4. **Ports for everything external.** `ChannelPort` (WhatsApp through Kapso / Simulator), `PublisherPort` (Provider / Mock), `ImageGenPort` (Gemini / OpenAI / Mock), `TranscriberPort` (Gemini / Mock). Switching is an env var; the mocks serve local runs and rehearsals, and `ENV=prod` refuses to start on one.
 5. **Per-business serialization.** Inbound messages for the same business are processed one at a time (an in-process `asyncio.Lock` per business ID). Different businesses run concurrently.
 6. **Everything is logged.** Every LLM call writes an `agent_runs` row (agent, input, output, tokens, latency, error). It's our debugger during the hackathon.
 

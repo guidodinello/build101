@@ -1,4 +1,5 @@
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from datetime import timedelta
 from typing import Any
@@ -11,18 +12,23 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.api import ready
 from app.api.ready import POLLED_WITHIN, get_database, get_job_runner
 from app.background import BackgroundWork
-from app.channels.router import get_inbound_handler
+from app.channels.router import get_channel, get_inbound_handler
 from app.config import Settings, get_settings
-from app.db.session import create_engine
+from app.db.session import create_engine, get_sessionmaker
 from app.jobs.runner import JobRunner, PeriodicCheck
 from app.main import app
-from tests.conftest import requires_db
+from tests.conftest import TEST_DATABASE_URL, requires_db
 from tests.fakes import EventLog, FakeChannel, FakeStorage, SequenceModel
+from tests.test_production_config import set_production_env
 
 COMMIT = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
-REAL = Settings(publisher="zernio", railway_git_commit_sha=COMMIT)
 # Nothing listens on port 1: the connection is refused at once
 UNREACHABLE = "postgresql+asyncpg://postgres:db-password@127.0.0.1:1/unreachable"
+
+
+def real() -> Settings:
+    """Built in each test, after conftest has stopped Settings from reading backend/.env."""
+    return Settings(publisher="zernio", railway_git_commit_sha=COMMIT)
 
 
 def new_runner(
@@ -80,6 +86,14 @@ def checks(response: httpx.Response) -> dict[str, str]:
     return response.json()["checks"]
 
 
+def ready_soon(client: TestClient) -> httpx.Response:
+    """/ready, asked again until it answers 200 or 2 s pass."""
+    deadline = time.monotonic() + 2
+    while (response := client.get("/ready")).status_code != 200 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return response
+
+
 @requires_db
 async def test_ready_when_the_database_answers_the_runner_polls_and_the_publisher_is_real(
     sessions: async_sessionmaker[AsyncSession],
@@ -87,7 +101,7 @@ async def test_ready_when_the_database_answers_the_runner_polls_and_the_publishe
     runner = new_runner(sessions)
     await runner.start()
     try:
-        response = await get_ready(REAL, sessions, await polled(runner))
+        response = await get_ready(real(), sessions, await polled(runner))
     finally:
         await runner.stop()
 
@@ -107,7 +121,7 @@ async def test_not_ready_when_the_database_is_unreachable(
     runner = new_runner(sessions)
     await runner.start()
     try:
-        response = await get_ready(REAL, unreachable, await polled(runner))
+        response = await get_ready(real(), unreachable, await polled(runner))
     finally:
         await runner.stop()
 
@@ -116,8 +130,8 @@ async def test_not_ready_when_the_database_is_unreachable(
 
 
 async def test_not_ready_without_a_database(unreachable: async_sessionmaker[AsyncSession]) -> None:
-    unset = await get_ready(REAL, None, None)
-    down = await get_ready(REAL, unreachable, None)
+    unset = await get_ready(real(), None, None)
+    down = await get_ready(real(), unreachable, None)
 
     assert unset.status_code == down.status_code == 503
     assert checks(unset)["database"] == checks(down)["database"] == "fail"
@@ -134,8 +148,8 @@ async def test_not_ready_when_the_job_runner_is_off_or_stopped(
     await runner.stop()
     await background.stop()
 
-    off = await get_ready(REAL, sessions, None)
-    stopped = await get_ready(REAL, sessions, runner)
+    off = await get_ready(real(), sessions, None)
+    stopped = await get_ready(real(), sessions, runner)
 
     for response in (off, stopped):
         assert response.status_code == 503
@@ -160,7 +174,7 @@ async def test_not_ready_when_the_job_runner_stopped_polling(
         await polled(runner)
         await asyncio.sleep(0.1)
         monkeypatch.setattr(ready, "POLLED_WITHIN", timedelta(milliseconds=50))
-        response = await get_ready(REAL, sessions, runner)
+        response = await get_ready(real(), sessions, runner)
     finally:
         await runner.stop()
 
@@ -178,7 +192,7 @@ async def test_not_ready_on_the_mock_publisher() -> None:
 async def test_ready_shows_check_names_and_the_commit_only(
     unreachable: async_sessionmaker[AsyncSession],
 ) -> None:
-    response = await get_ready(REAL, unreachable, None)
+    response = await get_ready(real(), unreachable, None)
 
     assert response.json() == {
         "status": "fail",
@@ -218,3 +232,25 @@ def test_the_running_app_reports_its_own_runner_and_database() -> None:
         "checks": {"database": "fail", "job_runner": "fail", "publisher": "fail"},
         "commit": None,
     }
+
+
+@requires_db
+def test_the_app_in_production_is_ready_once_its_job_runner_polls(
+    sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert TEST_DATABASE_URL
+    set_production_env(monkeypatch, database_url=TEST_DATABASE_URL)
+    monkeypatch.setattr("app.main.build_job_runner", lambda *_: new_runner(get_sessionmaker()))
+    get_channel.cache_clear()
+    get_sessionmaker.cache_clear()
+    app.dependency_overrides[get_inbound_handler] = lambda: None
+    try:
+        with TestClient(app) as client:
+            response = ready_soon(client)
+    finally:
+        app.dependency_overrides.clear()
+        get_channel.cache_clear()
+        get_sessionmaker.cache_clear()
+
+    assert response.status_code == 200
+    assert response.json()["checks"] == {"database": "ok", "job_runner": "ok", "publisher": "ok"}
