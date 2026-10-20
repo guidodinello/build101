@@ -49,6 +49,12 @@ def sign(raw: bytes, secret: str) -> str:
     return hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
 
 
+def migration_statements(migration: Path) -> list[str]:
+    """A migration's SQL split the way its Alembic revision splits it."""
+    statements = re.split(r";\s*$", migration.read_text(), flags=re.MULTILINE)
+    return [statement for statement in statements if statement.strip()]
+
+
 @pytest.fixture
 async def sessions() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     """A fresh schema per test, from the migrations' SQL in order."""
@@ -58,8 +64,7 @@ async def sessions() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
         await connection.execute(text("drop schema public cascade"))
         await connection.execute(text("create schema public"))
         for migration in MIGRATIONS:
-            for statement in re.split(r";\s*$", migration.read_text(), flags=re.MULTILINE):
-                if statement.strip():
-                    await connection.exec_driver_sql(statement)
+            for statement in migration_statements(migration):
+                await connection.exec_driver_sql(statement)
     yield async_sessionmaker(engine, expire_on_commit=False)
     await engine.dispose()
