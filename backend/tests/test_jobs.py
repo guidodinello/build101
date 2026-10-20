@@ -39,6 +39,7 @@ from app.jobs.asset import analyze_asset
 from app.jobs.brand import generate_brand
 from app.jobs.queue import enqueue, retry_failed
 from app.jobs.runner import JobContext, JobRunner
+from app.jobs.setup import NOTIFY_ON_FAILURE, REQUEUE_IF_INTERRUPTED, UNDO
 from app.llm.client import Step, user_step
 from app.media.public import PublicImages
 from app.posts.lifecycle import PostLifecycle
@@ -105,7 +106,9 @@ def runner(
         channel,
         model or SequenceModel([]),
         notify or FixedReplies(DbHistory(sessions)),
-        notify_on_failure=frozenset({"generate_brand"}),
+        NOTIFY_ON_FAILURE,
+        REQUEUE_IF_INTERRUPTED,
+        UNDO,
         background=background,
         **options,
     ), background
@@ -292,10 +295,10 @@ async def test_a_job_still_running_at_the_deadline_is_cancelled_and_logged_with_
         await asyncio.wait_for(background.drain(timeout_s=0.1), timeout=2)
 
     assert f"job {job_id} (generate_brand) for business {business.id}" in caplog.text
-    assert (await job_row(sessions, job_id)).status == "running"
+    assert (await job_row(sessions, job_id)).status == "queued"
 
 
-async def test_jobs_left_running_by_a_restart_are_failed(
+async def test_only_jobs_left_running_long_enough_are_taken_for_dead(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     business = await add_business(sessions)
@@ -304,19 +307,21 @@ async def test_jobs_left_running_by_a_restart_are_failed(
             business_id=business.id,
             kind="analyze_asset",
             status="running",
+            attempts=1,
             started_at=datetime.now(UTC) - timedelta(minutes=10),
         )
         fresh = Job(
             business_id=business.id,
             kind="analyze_asset",
             status="running",
+            attempts=1,
             started_at=datetime.now(UTC),
         )
         db.add_all([stale, fresh])
         await db.commit()
 
-    assert await runner(sessions, {}, FakeChannel())[0].fail_stale() == 1
-    assert (await job_row(sessions, stale.id)).status == "failed"
+    assert await runner(sessions, {}, FakeChannel())[0].recover_stale() == 1
+    assert (await job_row(sessions, stale.id)).status == "queued"
     assert (await job_row(sessions, fresh.id)).status == "running"
 
 

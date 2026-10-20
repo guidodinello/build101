@@ -1,18 +1,19 @@
 """Background jobs in the backend process (ADR 0005, overview.md § Background jobs).
 
 Jobs are rows in `jobs`. The runner polls for `queued` rows, so a job starts only after the
-transaction that queued it commits, and the jobs queued before a restart still run.
+transaction that queued it commits, and the jobs queued before a restart still run. A job a
+restart interrupts goes back to the queue once if it is safe to repeat (#178).
 """
 
 import asyncio
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any
 
-from sqlalchemy import CursorResult, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.background import BackgroundWork
@@ -26,9 +27,13 @@ logger = logging.getLogger(__name__)
 
 MAX_CONCURRENT_JOBS = 4
 POLL_INTERVAL_S = 1.0
-# A job still running after this was left by a process that died (a deploy, a dev reload).
+# A job still running after this was left by a process that died (a crash, out of memory).
 STALE_AFTER = timedelta(minutes=5)
 STALE_CHECK_EVERY = timedelta(minutes=1)
+# An interrupted job runs once more, and fails if interrupted again: a job that kills its
+# process (out of memory) must not take the next process down too.
+MAX_ATTEMPTS = 2
+INTERRUPTED = "interrupted by a restart"
 MAX_ERROR_CHARS = 1000
 
 
@@ -44,17 +49,19 @@ class JobContext:
 
 
 JobFunction = Callable[[JobContext, dict[str, Any]], Awaitable[dict[str, Any] | None]]
+# What the runner undoes for the Business of an abandoned job, e.g. the state a brand revision left.
+Undo = Callable[[async_sessionmaker[AsyncSession], uuid.UUID], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
 class PeriodicCheck:
-    """Work the poller runs on its first round and then every `every`, e.g. queueing the
-    weekly jobs. The poller awaits a check before it claims jobs, so a check must return at
-    once: it queues, or starts housekeeping that needs no row of its own as a background task
-    (the orphaned-upload sweep, jobs/uploads.py)."""
+    """Work the poller runs on its first round and then every `every` (never again when None, so
+    once per process), e.g. queueing the weekly jobs. The poller awaits a check before it claims
+    jobs, so a check must return at once: it queues, or starts housekeeping that needs no row of
+    its own as a background task (the orphaned-upload sweep, jobs/uploads.py)."""
 
     name: str
-    every: timedelta
+    every: timedelta | None
     run: Callable[[async_sessionmaker[AsyncSession]], Awaitable[object]]
 
 
@@ -63,6 +70,11 @@ class JobRunner:
 
     A failed job of a kind in `notify_on_failure` raises `JobFailed` (its `retry:{job_id}` button
     goes with it) for the Business's Owner through `notify`; other failures are only logged.
+
+    A job is interrupted when the shutdown cancels it or its process dies. One of a kind in
+    `requeue_if_interrupted` goes back to the queue, up to `MAX_ATTEMPTS` runs in all. Any other
+    is abandoned: failed by the runner, which then does what the job's own failure would have
+    done, its kind's `undo` and the Owner's `JobFailed`.
     """
 
     def __init__(
@@ -74,6 +86,8 @@ class JobRunner:
         model: ChatModel,
         notify: Notify,
         notify_on_failure: frozenset[str] = frozenset(),
+        requeue_if_interrupted: frozenset[str] = frozenset(),
+        undo: Mapping[str, Undo] | None = None,
         max_concurrent: int = MAX_CONCURRENT_JOBS,
         poll_interval_s: float = POLL_INTERVAL_S,
         checks: tuple[PeriodicCheck, ...] = (),
@@ -87,6 +101,8 @@ class JobRunner:
         self._model = model
         self._notify = notify
         self._notify_on_failure = notify_on_failure
+        self._requeue_if_interrupted = requeue_if_interrupted
+        self._undo = undo or {}
         self._max_concurrent = max_concurrent
         self._poll_interval_s = poll_interval_s
         self._checks = checks
@@ -96,7 +112,7 @@ class JobRunner:
         self._stopping = False
 
     async def start(self) -> None:
-        await self.fail_stale()
+        await self.recover_stale()
         self._background.start_service(self._poll(), "job poller")
 
     def stop(self) -> None:
@@ -104,34 +120,26 @@ class JobRunner:
         running go on; the shutdown's `BackgroundWork.drain` waits for them and the poller."""
         self._stopping = True
 
-    async def fail_stale(self, older_than: timedelta = STALE_AFTER) -> int:
-        """Mark as failed the jobs a previous process left `running` (no retries in the MVP).
+    async def recover_stale(self, older_than: timedelta = STALE_AFTER) -> int:
+        """Requeue or abandon the jobs a process that died left `running`; returns how many.
 
         This process's own jobs are skipped however long they take: they are alive.
         """
         cutoff = datetime.now(UTC) - older_than
         async with self._sessions() as db:
-            # An UPDATE returns a CursorResult at runtime; the stubs only say Result.
-            result = cast(
-                CursorResult[Any],
-                await db.execute(
-                    update(Job)
+            stale = (
+                await db.scalars(
+                    select(Job)
                     .where(
                         Job.status == "running",
                         Job.started_at < cutoff,
                         Job.id.not_in(self._running_ids),
                     )
-                    .values(
-                        status="failed",
-                        error="interrupted by a restart",
-                        finished_at=datetime.now(UTC),
-                    )
-                ),
-            )
-            await db.commit()
-        if result.rowcount:
-            logger.warning("marked %d stale running jobs as failed", result.rowcount)
-        return result.rowcount
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+            await self._recover(db, stale)
+        return len(stale)
 
     async def run_due(self) -> int:
         """Claim as many queued jobs as there are free slots and start them; none once stopped."""
@@ -153,11 +161,13 @@ class JobRunner:
             for job in jobs:
                 job.status = "running"
                 job.started_at = datetime.now(UTC)
+                job.attempts += 1
             await db.commit()
         for job in jobs:
             self._running_ids.add(job.id)
             task = self._background.start(
-                self._run(job.id, job.kind, job.business_id, job.payload), _task_name(job)
+                self._run(job.id, job.kind, job.business_id, job.payload, job.attempts),
+                _task_name(job),
             )
             self._running.add(task)
             task.add_done_callback(self._running.discard)
@@ -171,7 +181,7 @@ class JobRunner:
             try:
                 if datetime.now(UTC) - last_stale_check >= STALE_CHECK_EVERY:
                     last_stale_check = datetime.now(UTC)
-                    await self.fail_stale()
+                    await self.recover_stale()
                 await self.run_due()
             except Exception:
                 logger.exception("polling for jobs failed")
@@ -181,7 +191,7 @@ class JobRunner:
         """Each periodic check that is due; one failing doesn't stop the others or the jobs."""
         for check in self._checks:
             last = last_checked.get(check.name)
-            if last is not None and datetime.now(UTC) - last < check.every:
+            if last is not None and (check.every is None or datetime.now(UTC) - last < check.every):
                 continue
             last_checked[check.name] = datetime.now(UTC)
             try:
@@ -190,7 +200,12 @@ class JobRunner:
                 logger.exception("periodic check %s failed", check.name)
 
     async def _run(
-        self, job_id: uuid.UUID, kind: str, business_id: uuid.UUID | None, payload: dict[str, Any]
+        self,
+        job_id: uuid.UUID,
+        kind: str,
+        business_id: uuid.UUID | None,
+        payload: dict[str, Any],
+        attempt: int,
     ) -> None:
         context = JobContext(
             job_id,
@@ -208,15 +223,19 @@ class JobRunner:
             if function is None:
                 raise LookupError(f"no function for job kind {kind!r}")
             result = await function(context, payload)
+        except asyncio.CancelledError:
+            await self._interrupted(job_id, attempt)
+            raise
         except Exception as exc:
             # The task's boundary: nobody awaits it, so the row and the log carry the error.
             logger.exception("job %s (%s) failed", job_id, kind)
             error = repr(exc)[:MAX_ERROR_CHARS]
         async with self._sessions() as db:
-            # Only a row still `running`: anything else was decided elsewhere and stays.
+            # Only this run's row still `running`: anything else was decided elsewhere and stays.
+            # A run another instance took for dead and requeued no longer owns the row.
             await db.execute(
                 update(Job)
-                .where(Job.id == job_id, Job.status == "running")
+                .where(Job.id == job_id, Job.status == "running", Job.attempts == attempt)
                 .values(
                     status="failed" if error else "succeeded",
                     result=result,
@@ -230,6 +249,42 @@ class JobRunner:
         if error and kind in self._notify_on_failure and business_id:
             await self._tell_owner(job_id, kind, business_id)
 
+    async def _interrupted(self, job_id: uuid.UUID, attempt: int) -> None:
+        """The shutdown cancelled this run at the drain's deadline: requeue or abandon its job."""
+        async with self._sessions() as db:
+            job = await db.scalar(
+                select(Job)
+                .where(Job.id == job_id, Job.status == "running", Job.attempts == attempt)
+                .with_for_update()
+            )
+            await self._recover(db, [job] if job else [])
+
+    async def _recover(self, db: AsyncSession, interrupted: Sequence[Job]) -> None:
+        """Put each interrupted job back in the queue or abandon it; commits `db`."""
+        for job in interrupted:
+            if job.kind in self._requeue_if_interrupted and job.attempts < MAX_ATTEMPTS:
+                job.status, job.started_at = "queued", None
+            else:
+                job.status, job.error, job.finished_at = "failed", INTERRUPTED, datetime.now(UTC)
+        await db.commit()
+        for job in interrupted:
+            logger.warning(
+                "job %s (%s) interrupted on attempt %d: %s",
+                job.id,
+                job.kind,
+                job.attempts,
+                "queued again" if job.status == "queued" else "failed",
+            )
+            if job.status == "failed" and job.business_id:
+                await self._abandon(job.id, job.kind, job.business_id)
+
+    async def _abandon(self, job_id: uuid.UUID, kind: str, business_id: uuid.UUID) -> None:
+        """What the job's own failure would have done, which its interrupted run never reached."""
+        if undo := self._undo.get(kind):
+            await undo(self._sessions, business_id)
+        if kind in self._notify_on_failure:
+            await self._tell_owner(job_id, kind, business_id)
+
     async def _tell_owner(self, job_id: uuid.UUID, kind: str, business_id: uuid.UUID) -> None:
         async with self._sessions() as db:
             business = await db.get_one(Business, business_id)
@@ -239,6 +294,13 @@ class JobRunner:
             await self._notify(business.owner_phone, JobFailed(job_id, kind), self._channel)
         except Exception:
             logger.warning("could not tell the Owner that job %s failed", job_id, exc_info=True)
+            return
+        async with self._sessions() as db:
+            # So the startup check of stuck brands leaves this one to the Owner's Reintentar.
+            await db.execute(
+                update(Job).where(Job.id == job_id).values(retry_offered_at=datetime.now(UTC))
+            )
+            await db.commit()
 
 
 def _task_name(job: Job) -> str:
