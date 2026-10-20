@@ -324,7 +324,7 @@ Every place where the audit found the docs (or a process rule) saying one thing 
 ### DOC-13: Review and CI blind spots: Tenki skips prompts and migrations, no frontend CI, Dependabot ignores uv and npm
 
 - **Severity**: medium · **Effort**: S · **Confidence**: high · **Verified**: adjusted
-- **Status (2026-10-20)**: partly fixed, by [#118](https://github.com/guidodinello/build101/pull/118); [#155](https://github.com/guidodinello/build101/pull/155) (open); details in [status.md](status.md).
+- **Status (2026-10-20)**: partly fixed, by [#118](https://github.com/guidodinello/build101/pull/118); [#155](https://github.com/guidodinello/build101/pull/155); details in [status.md](status.md).
 - **Evidence**:
   - [tenki-review.yml:15-21](../../../.github/workflows/tenki-review.yml): triggers only on `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, so prompt `.md` and migration `.sql` changes get no AI review; :46-48 one review per PR, so pushes after the first aren't re-reviewed.
   - [ci.yml:6-7](../../../.github/workflows/ci.yml): "Add the frontend job in its own PR"; :146-151 the CI gate needs no frontend job.

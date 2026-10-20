@@ -134,7 +134,7 @@ Move to [procrastinate](https://procrastinate.readthedocs.io/en/stable/) (psycop
 ### ARCH-3: Inbound WhatsApp messages are not persisted: acknowledged with 200, then handled in a BackgroundTask, with in-memory dedupe
 
 - **Severity**: medium · **Effort**: M · **Confidence**: high · **Verified**: adjusted
-- **Status (2026-10-20)**: in flight, by [#155](https://github.com/guidodinello/build101/pull/155) (open); details in [status.md](status.md).
+- **Status (2026-10-20)**: partly fixed, by [#155](https://github.com/guidodinello/build101/pull/155); details in [status.md](status.md).
 - **Evidence**:
   - [channels/router.py:109-117](../../../backend/app/channels/router.py): in-memory dedupe, then `background_tasks.add_task` and an immediate 200.
   - [channels/inbound.py:28-43](../../../backend/app/channels/inbound.py): `InMemoryDedupeStore`, "replaced by T02", although T02 is done.
@@ -346,7 +346,7 @@ Move to [procrastinate](https://procrastinate.readthedocs.io/en/stable/) (psycop
 ### ARCH-16: RLS is disabled on 18 of 19 public tables, including `conversation_steps`, `owner_notes` and `magic_links`
 
 - **Severity**: low · **Effort**: S · **Confidence**: high · **Verified**: adjusted
-- **Status (2026-10-20)**: in flight, by [#158](https://github.com/guidodinello/build101/pull/158) (open); details in [status.md](status.md).
+- **Status (2026-10-20)**: fixed, by [#158](https://github.com/guidodinello/build101/pull/158); details in [status.md](status.md).
 - **Evidence**:
   - [ADR 0003](../../decisions/0003-database-supabase-sqlalchemy.md), lines 13 and 19: "RLS off for the demo"; "turn RLS on first".
   - [0002_instagram_import.sql:11-13](../../../backend/migrations/versions/0002_instagram_import.sql): RLS is enabled only on `social_accounts`.
