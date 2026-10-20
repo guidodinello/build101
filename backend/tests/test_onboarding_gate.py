@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.channels.base import ChannelPort, InboundMessage
 from app.channels.kapso_webhook import parse_message
+from app.conversation import onboarding
 from app.conversation.onboarding import OnboardingGate
 from app.copy import messages_es
 from app.db.models import Business, MagicLink
@@ -186,3 +187,19 @@ async def test_two_first_messages_at_once_make_one_business(rig: Rig) -> None:
         count = await db.scalar(select(func.count()).select_from(Business))
     assert count == 1
     assert rig.replies() == [messages_es.welcome(ASSISTANT)]
+
+
+async def test_the_per_sender_state_stays_bounded_under_many_numbers(
+    sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(onboarding, "MAX_TRACKED_KEYS", 3)
+    chat, channel = FakeChat(), FakeChannel()
+    gate = OnboardingGate(chat, sessions, FRONTEND, ASSISTANT)
+
+    for number in range(10):
+        await gate.handle(message("text", text="Hola", sender=f"598990000{number:02d}"), channel)
+
+    assert len(channel.sent) == 10  # every number still got its welcome
+    assert len(gate._welcomed_at) == 3
+    assert len(gate._last_prompt) == 3
+    assert len(gate._locks) == 0  # no lock outlives its turn

@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import cache
@@ -9,13 +10,23 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 
 from app.config import Settings, get_settings
 from app.conversation.factory import build_inbound_handler
+from app.copy import messages_es
+from app.db.session import get_sessionmaker
 from app.media.public import get_public_images, get_public_videos
 from app.publishing.factory import get_publisher
+from app.ratelimit import TURNS_BURST, TURNS_PER_MINUTE, RateLimiter
 
 from .base import ChannelPort, InboundMessage
 from .factory import build_channel
-from .inbound import DedupeStore, InboundHandler, InMemoryDedupeStore, mask
-from .kapso_webhook import MESSAGE_RECEIVED_EVENT, parse_message, verify_signature
+from .inbound import (
+    DbDedupeStore,
+    DedupeStore,
+    InboundHandler,
+    InMemoryDedupeStore,
+    RateLimitedHandler,
+    mask,
+)
+from .kapso_webhook import MESSAGE_RECEIVED_EVENT, is_stale, parse_message, verify_signature
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +38,25 @@ def get_channel() -> ChannelPort:
 
 @cache
 def get_dedupe_store() -> DedupeStore:
+    # With the database the ids survive a deploy (#105); without it a restart forgets them.
+    if get_settings().database_url:
+        return DbDedupeStore(get_sessionmaker())
     return InMemoryDedupeStore()
+
+
+def get_clock() -> float:
+    """Seconds since the epoch; a dependency so tests can stand at the fixtures' time."""
+    return time.time()
 
 
 @cache
 def get_inbound_handler() -> InboundHandler:
-    return build_inbound_handler(
+    handler = build_inbound_handler(
         get_settings(), get_public_images(), get_publisher(), get_public_videos()
+    )
+    # In front of everything the factory builds, the no-database chat handler included (#106).
+    return RateLimitedHandler(
+        handler, RateLimiter(TURNS_BURST, TURNS_PER_MINUTE), messages_es.RATE_LIMITED
     )
 
 
@@ -89,6 +112,7 @@ async def whatsapp_webhook(
     dedupe: Annotated[DedupeStore, Depends(get_dedupe_store)],
     handler: Annotated[InboundHandler, Depends(get_inbound_handler)],
     channel: Annotated[ChannelPort, Depends(get_channel)],
+    now: Annotated[float, Depends(get_clock)],
     x_webhook_event: Annotated[str | None, Header()] = None,
     x_webhook_signature: Annotated[str | None, Header()] = None,
     x_idempotency_key: Annotated[str | None, Header()] = None,
@@ -106,6 +130,12 @@ async def whatsapp_webhook(
     except (ValueError, KeyError, TypeError):
         logger.warning("unparseable %s payload", x_webhook_event, exc_info=True)
         return {"status": "ignored"}
+
+    # A validly signed body can be replayed later: anything past the window is acknowledged (a
+    # 4xx would make Kapso retry) and dropped.
+    if is_stale(message, now):
+        logger.warning("stale message %s ignored", message.message_id)
+        return {"status": "stale"}
 
     # Dedupe on the WhatsApp message id; the idempotency key stands in when it is missing.
     if not await dedupe.first_seen(message.message_id):
