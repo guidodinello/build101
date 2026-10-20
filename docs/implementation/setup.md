@@ -79,7 +79,7 @@ Plan B only (Meta Cloud API direct, if Kapso fails its first-hour test; [integra
 | `SUPABASE_URL` | the project URL, same as the backend's; read at build time for the CSP (`img-src` / `connect-src`), required on Vercel, optional locally |
 | `NEXT_PUBLIC_DEV_TOKEN` | same as `DEV_TOKEN` (simulator only; acceptable for a demo, remove for production) |
 | `NEXT_PUBLIC_WHATSAPP_URL` | `https://wa.me/56920403095` (same number as `WHATSAPP_BOT_NUMBER`; used by the landing CTAs and the expired-link screen, which has no onboarding state) |
-| `ENABLE_MOCK_API` | `true` locally to serve an in-memory mock of the onboarding API at `/mock-api` (then `NEXT_PUBLIC_API_URL=http://localhost:3000/mock-api`); never set in production |
+| `ENABLE_MOCK_API` | `true` locally to serve an in-memory mock of the onboarding API at `/mock-api` (then `NEXT_PUBLIC_API_URL=http://localhost:3000/mock-api`); never set in production (it also refuses when `VERCEL_ENV` is `production`, and serves stored files with `nosniff` and `Content-Disposition: attachment`) |
 
 ## Supabase Storage
 

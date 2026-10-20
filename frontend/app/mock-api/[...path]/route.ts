@@ -1,6 +1,7 @@
 import * as mock from "@/lib/mock-backend";
 
-const enabled = () => process.env.ENABLE_MOCK_API === "true";
+// Dev only: it stores uploads in memory and serves them from the app's own origin.
+const enabled = () => process.env.ENABLE_MOCK_API === "true" && process.env.VERCEL_ENV !== "production";
 
 type Context = RouteContext<"/mock-api/[...path]">;
 
@@ -63,7 +64,15 @@ async function storage(request: Request, assetId: string | undefined) {
 
   const file = mock.readFile(assetId);
   if (!file) return notFound();
-  return new Response(file.bytes, { headers: { "Content-Type": file.contentType } });
+  // The stored type is whatever the client declared: never let the browser render it as a page.
+  // `<img>` ignores Content-Disposition, so wizard previews still work.
+  return new Response(file.bytes, {
+    headers: {
+      "Content-Type": file.contentType,
+      "X-Content-Type-Options": "nosniff",
+      "Content-Disposition": "attachment",
+    },
+  });
 }
 
 function notFound() {

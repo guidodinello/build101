@@ -55,7 +55,7 @@ Set for Production and Preview (`vercel env add KEY production`, value on stdin)
 | `NEXT_PUBLIC_API_URL` | the Railway backend, `https://backend-production-6e67.up.railway.app` |
 | `SUPABASE_URL` | the Supabase project URL, same as the backend's; read at build time for the CSP, and the Vercel build fails without it |
 | `NEXT_PUBLIC_WHATSAPP_URL` | `https://wa.me/56920403095`, the shared Kapso sandbox number (same as the backend's `WHATSAPP_BOT_NUMBER`) |
-| `ENABLE_MOCK_API` | `false` |
+| `ENABLE_MOCK_API` | `false` (the mock also answers 404 whenever `VERCEL_ENV` is `production`) |
 | `NEXT_PUBLIC_DEV_TOKEN` | unset (the simulator is not used in production) |
 | `RENDER_SECRET` | a random secret, the same as the backend's `RENDERER_SECRET`; without it `/api/render` answers 503 |
 | `ENABLE_TEMPLATE_PREVIEW` | `false` |
