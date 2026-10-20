@@ -18,7 +18,8 @@ How the build101 team works. This file is the single source of truth for the wor
 | [`.claude/skills/`](.claude/skills/README.md) | Agent skills that automate the steps below; plain Markdown, readable by anyone |
 | [`.claude/rules/`](.claude/rules/README.md) | Path-scoped coding rules (Python, database, Docker, CI) |
 | [`.claude/routines/`](.claude/routines/README.md) | Nightly cloud agents (product research, bug hunt) that open draft PRs; backup of their prompts and schedules |
-| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | CI: markdownlint, docs index check, actionlint; one aggregate `CI` check |
+| [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | CI: markdownlint, docs index check, actionlint, frontend typecheck + lint, dependency audit (`pip-audit` on the backend lock, `npm audit --audit-level=high` on the frontend); actions pinned to commit SHAs; one aggregate `CI` check |
+| [`.github/dependabot.yml`](.github/dependabot.yml) | Weekly grouped Dependabot PRs for Actions, `uv`, `npm` and the backend base image |
 | [`scripts/`](scripts/) | Repo tooling (e.g. `check_docs_index.py`) |
 | GitHub issues / PRs | Work items (issues) and changes under review (PRs) |
 
@@ -84,7 +85,7 @@ Not every change walks all seven steps: a typo fix goes straight to 5. Anything 
   2. [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`, ...). Keep PRs small.
   3. New dependency or integration: read the official docs first, pin the version, and record an ADR if it is a stack choice or carries lock-in.
   4. Follow the matching rule file in [`.claude/rules/`](.claude/rules/README.md) (Python, database, Docker, CI). Claude Code loads them automatically; everyone else reads the one matching the files they touch.
-  5. Backend commands run from `backend/` (per [python.md](.claude/rules/python.md)): `uv run ruff check .` clean and `uv run pytest tests/ -v` green before committing; never call `python3` directly, use `uv run python`.
+  5. Backend commands run from `backend/` (per [python.md](.claude/rules/python.md)): `uv run ruff check .` clean, `uv run pyright` at 0 errors and `uv run pytest tests/ -v` green before committing; never call `python3` directly, use `uv run python`.
 - **Done when**: acceptance criteria met, lint clean, tests green, and the `CI` check is green on the PR.
 - **With Claude Code**: `configure-dependency` for new dependencies (writes the ADR when it implies a stack choice). Frontend work: `impeccable` for design (`/impeccable init` once to write `PRODUCT.md`, then `shape` before building and `polish` before the PR), `shadcn` for components, `vercel-react-best-practices` while writing React, `next-dev-loop` to verify each change in the running app, and `web-design-guidelines` as a UI/accessibility check before opening the PR. **Without it**: same steps by hand.
 

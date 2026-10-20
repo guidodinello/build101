@@ -50,11 +50,18 @@ YES_FILLER = frozenset(
     | {"esta", "asi", "todo", "que", "lo", "la", "re", "mil", "muy"}
 )
 YES_EMOJI = frozenset({"👍", "👌", "✅", "🙌", "💪"})
-# The question a reply ends on when it offers to publish: "¿Lo subo?", "¿Lo publico ya?".
+# The question a reply ends on when it offers to publish: "¿Lo subo?", "¿Lo publico ya?"
+# (`asks_to_publish` checks it is the reply's last sentence).
 PUBLISH_QUESTION = re.compile(
     r"\b(lo|la|los|las) (subo|publico|subimos|publicamos)\b"
     r"|\b(subirlo|subirla|subirlos|subirlas|publicarlo|publicarla|publicarlos|publicarlas)\b"
 )
+KEYCAP = re.compile(r"[0-9#*]\ufe0f?\u20e3")  # "1️⃣": a digit that is an emoji
+# Everything after the last word: spaces, "?", "!", emoji, WhatsApp's _*~ formatting.
+TRAILING_NOISE = re.compile(r"[\W_]+$")
+# A sentence ends at ".", "!", "?" or "…" before a space, at a line break, or at "?¿" / "!¡":
+# not at the dot of "$1.500" or "x.com".
+SENTENCE_END = re.compile(r"[.!?…]+\s|\n|(?<=[?!])(?=[¿¡])")
 ORDINAL_FILLER = frozenset({"el", "la", "lo", "los", "las", "numero", "opcion", "subi", "subo"})
 CAPTION_START_CHARS = 60
 
@@ -94,8 +101,17 @@ def is_yes(text: str) -> bool:
 
 
 def asks_to_publish(text: str) -> bool:
-    """Whether the assistant's message asks the Owner if it should publish a post."""
-    return "?" in text and PUBLISH_QUESTION.search(plain(text)) is not None
+    """Whether the assistant's message ends by asking the Owner if it should publish a post.
+
+    Only the last sentence counts: a publish question in the middle of a reply (or followed by
+    another question) must not turn the Owner's next "bien" into an approval.
+    """
+    body = plain(KEYCAP.sub("", text))
+    ending = TRAILING_NOISE.search(body)
+    if ending is None or "?" not in ending.group():  # "¿Lo subo? 🙌" still ends on its question
+        return False
+    last_sentence = SENTENCE_END.split(body[: ending.start()])[-1]
+    return PUBLISH_QUESTION.search(last_sentence) is not None
 
 
 def ordinal(text: str, count: int) -> int | None:

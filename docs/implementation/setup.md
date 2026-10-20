@@ -16,7 +16,7 @@
 
 | Variable | Example | Notes |
 |---|---|---|
-| `ENV` | `local` \| `prod` | |
+| `ENV` | `local` \| `prod` | **Must be `prod` in production**: it turns off `/dev/*` (even with `ENABLE_DEV_ENDPOINTS=true`) and the API docs. The default is `local` |
 | `PUBLIC_BACKEND_URL` | `https://api-example.up.railway.app` | Railway-generated domain ([ADR 0017](../decisions/0017-backend-host-railway.md)). Used in logs/webhook docs, and for the URLs of generated images until Supabase Storage is in (T56) |
 | `FRONTEND_URL` | `https://neitorai.vercel.app` | Magic links + Zernio redirect |
 | `FRONTEND_ORIGINS` | `https://neitorai.vercel.app,http://localhost:3000` | CORS |
@@ -47,7 +47,7 @@
 | `ZERNIO_BASE_URL` | `https://zernio.com/api/v1` | Optional; this is the default |
 | `ZERNIO_PROFILE_ID`, `ZERNIO_ACCOUNT_ID` | `...` | The single demo Instagram account's Zernio profile and account ids. Temporary: they stand in for `social_accounts` until T02 exists ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). With `PUBLISHER=zernio`, publishing from the chat (T57) needs `ZERNIO_ACCOUNT_ID` and an HTTPS `PUBLIC_BACKEND_URL` (a `cloudflared` tunnel or Railway, not free ngrok) that Zernio can fetch the post images from; without the account id the bot says publishing isn't connected |
 | `INSTAGRAM` | `mock` \| `meta` | Reading the Owner's Instagram for the Brand Brain ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)). `mock` (default) connects at once and imports three fake posts; `meta` uses our Meta app with Instagram Login (setup in [integrations.md](../architecture/integrations.md#reading-the-owners-instagram-adr-0028): the *Instagram API with Instagram Login* product, the account added as Instagram Tester with the invite accepted, and `$PUBLIC_BACKEND_URL/oauth/instagram/callback` registered as a redirect URI) |
-| `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | `...` | The Instagram app id and secret from the Meta app's Instagram Login settings. Required with `INSTAGRAM=meta`; the secret also signs the OAuth `state` |
+| `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | `...` | The Instagram app id and secret from the Meta app's Instagram Login settings. Required with `INSTAGRAM=meta`; the secret also signs the start ticket and the binding cookie of the OAuth flow |
 | `INSTAGRAM_GRAPH_VERSION` | `v24.0` | Version of `graph.instagram.com` calls |
 | `INSTAGRAM_IMPORT_MAX_POSTS`, `INSTAGRAM_IMPORT_MAX_IMAGES` | `100`, `24` | Posts whose captions and engagement feed the Brand Strategist, and the newest images imported as Brand assets (each one an Asset Analyst call) |
 | `ZERNIO_TEST_IMAGE_URL` | `https://raw.githubusercontent.com/guidodinello/build101/main/backend/tests/fixtures/zernio-live-test.jpg` | Only for `uv run pytest -m live`: a public HTTPS URL serving the fixture JPEG with no redirect. Before the PR merges, put the branch name in place of `main` (the branch is deleted after the squash merge). The live publish posts to the real demo Instagram: delete the post by hand |
@@ -56,7 +56,7 @@
 | `ENABLE_DEV_ENDPOINTS` | `true` | `/dev/*` |
 | `DEV_TOKEN` | random | Header `X-Dev-Token` |
 | `MAX_CONCURRENT_JOBS` | `4` | |
-| `MAX_PHOTO_MB` | `10` | Rejected before the signed upload URL is issued; a WhatsApp photo over it gets `photo_too_big` without being downloaded (or after, when Kapso doesn't say its size) |
+| `MAX_PHOTO_MB` | `10` | Rejected before the signed upload URL is issued; a WhatsApp photo over it gets `photo_too_big` without being downloaded (or after, when Kapso doesn't say its size). A WhatsApp photo over 25 megapixels gets `photo_too_large` before it is decoded, and WhatsApp photos and carousel references decode under the same limit as onboarding uploads (2 at a time) |
 | `MAX_AUDIO_MB` | `3` | Voice notes over it get `audio_too_long` (~25 min of WhatsApp Opus) |
 | `MAX_VIDEO_MB` | `300` | Could (video work). Must not exceed the Supabase Storage global file size limit |
 | `DASHBOARD_LINK_TTL_DAYS` | `7` | Should (read-only dashboard). Dashboard magic links expire after this |
@@ -76,15 +76,17 @@ Plan B only (Meta Cloud API direct, if Kapso fails its first-hour test; [integra
 | Variable | Example |
 |---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` / prod backend URL |
+| `SUPABASE_URL` | the project URL, same as the backend's; read at build time for the CSP (`img-src` / `connect-src`), required on Vercel, optional locally |
 | `NEXT_PUBLIC_DEV_TOKEN` | same as `DEV_TOKEN` (simulator only; acceptable for a demo, remove for production) |
 | `NEXT_PUBLIC_WHATSAPP_URL` | `https://wa.me/56920403095` (same number as `WHATSAPP_BOT_NUMBER`; used by the landing CTAs and the expired-link screen, which has no onboarding state) |
-| `ENABLE_MOCK_API` | `true` locally to serve an in-memory mock of the onboarding API at `/mock-api` (then `NEXT_PUBLIC_API_URL=http://localhost:3000/mock-api`); never set in production |
+| `ENABLE_MOCK_API` | `true` locally to serve an in-memory mock of the onboarding API at `/mock-api` (then `NEXT_PUBLIC_API_URL=http://localhost:3000/mock-api`); never set in production (it also refuses when `VERCEL_ENV` is `production`, and serves stored files with `nosniff` and `Content-Disposition: attachment`) |
 
 ## Supabase Storage
 
 - **Free** plan is enough for the Must scope ([ADR 0016](../decisions/0016-demo-scope-one-post.md)): the wizard and the chat only store photos and logos (≤ 10 MB each).
 - Only if the Could video work starts: switch to **Pro** (Free caps files at 50 MB, [research/media-uploads.md](../research/media-uploads.md#storage-supabase)) and set Storage settings → global file size limit **300 MB** (same as `MAX_VIDEO_MB`).
 - Buckets: `assets` (private; photos and logos, plus videos and derived frames later) and `renders` (public; the generated post images). The browser uploads straight to `assets` with signed upload URLs issued by the backend; photos and logos (≤ 10 MB) go in a single request, and only videos (Could) would need resumable (TUS) uploads. Create both buckets by hand in the dashboard (Storage → New bucket) before the first upload.
+- **Required bucket config (`assets`).** Set a `file_size_limit` of **10 MB** (same as `MAX_PHOTO_MB`) and `allowed_mime_types` = `image/jpeg, image/png, image/webp, image/heic`. The backend re-checks both when the browser calls `/complete` (it stops reading an object past `MAX_PHOTO_MB` and opens it only as its declared type), but the signed upload URL doesn't enforce the size the browser declared, so the bucket is the first line of defense and keeps oversized or foreign files out of storage altogether. If the Could video work starts, the limit has to allow `MAX_VIDEO_MB` and `video/mp4, video/quicktime` as well.
 
 ## Run locally
 
@@ -125,9 +127,10 @@ docker run -d --name build101-pg -p 54329:5432 -e POSTGRES_PASSWORD=postgres \
 TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:54329/build101_test uv run pytest
 uv run pytest -m live           # hits Gemini (text, images, transcription, conversation evals) and Kapso; needs GEMINI_API_KEY
 uv run ruff check . && uv run ruff format --check .
+uv run pyright                  # type check (standard mode), 0 errors
 
 cd frontend
-npm run lint && npm run build
+npm run typecheck && npm run lint && npm run build
 ```
 
 ## Deploy

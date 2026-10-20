@@ -1,6 +1,6 @@
 # Backend API
 
-FastAPI. JSON in and out, `snake_case` fields. Errors use `{"error": {"code": "...", "message": "..."}}` with a proper HTTP status. OpenAPI is served at `/docs`; the frontend's `lib/api.ts` types are written by hand from this document (no codegen in the hackathon).
+FastAPI. JSON in and out, `snake_case` fields. Errors use `{"error": {"code": "...", "message": "..."}}` with a proper HTTP status. OpenAPI is served at `/docs` (and `/redoc`, `/openapi.json`) unless `ENV=prod`, where all three are off; the frontend's `lib/api.ts` has a Zod schema per response, written by hand from this document, and parses every response with it; its types are inferred from the schemas ([ADR 0034](../decisions/0034-zod-api-response-schemas.md), no codegen).
 
 ## Authentication
 
@@ -9,7 +9,7 @@ FastAPI. JSON in and out, `snake_case` fields. Errors use `{"error": {"code": ".
 | WhatsApp webhook (Kapso) | `X-Webhook-Signature`: hex HMAC-SHA256 of the **raw body** with `KAPSO_WEBHOOK_SECRET` (confirmed 2026-10-17, [Kapso's docs](https://docs.kapso.ai/docs/platform/webhooks/security.md)). `401` on a mismatch, a missing header or no configured secret. Plan B (Meta direct): `X-Hub-Signature-256` HMAC with `META_APP_SECRET` |
 | Zernio webhook | `X-Zernio-Signature` HMAC with `ZERNIO_WEBHOOK_SECRET` |
 | Web app (owner) | Magic-link token in the path: `/api/o/{token}/...`. Server hashes it, looks up `magic_links`, checks expiry → `business_id` |
-| Dev tools | Header `X-Dev-Token: $DEV_TOKEN`, only if `ENABLE_DEV_ENDPOINTS=true` |
+| Dev tools | Header `X-Dev-Token: $DEV_TOKEN`, only if `ENABLE_DEV_ENDPOINTS=true` and `ENV` is not `prod` (404 otherwise) |
 
 CORS: allow every origin in `FRONTEND_ORIGINS` (comma-separated: Vercel URL + `http://localhost:3000`).
 
@@ -26,7 +26,7 @@ CORS: allow every origin in `FRONTEND_ORIGINS` (comma-separated: Vercel URL + `h
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/webhooks/whatsapp` | Plan B (Meta direct) only. Verification: if `hub.mode == "subscribe"` and `hub.verify_token == META_VERIFY_TOKEN`, return `hub.challenge` as plain text, else 403. Whether Kapso needs a verification handshake is part of the first-hour test |
-| POST | `/webhooks/whatsapp` | Bodies over 256 KiB get `413` (checked from `Content-Length`, and while reading when it is missing), before the signature check. Then verify signature → dedupe → enqueue handling as a background task → return `200` immediately; a failure inside the background handler is logged with the message id and kind, and is not retried by Kapso (durable retry belongs to the job runner, T16). Only `X-Webhook-Event: whatsapp.message.received` is handled; other events (and payloads that don't parse) get `200` and are ignored, so Kapso doesn't retry. Dedupe key: `message.id` (the `wamid`), or `X-Idempotency-Key` when the id is missing. Payload shapes in [integrations.md](integrations.md#whatsapp) |
+| POST | `/webhooks/whatsapp` | Bodies over 256 KiB get `413` (checked from `Content-Length`, and while reading when it is missing), before the signature check. Then verify signature → drop a message whose `timestamp` is more than 1 hour old (`200 {"status": "stale"}`: the HMAC covers the body only, so a captured body stays valid forever) → dedupe → enqueue handling as a background task, behind a per-sender limit (a token bucket, burst 30, 10 a minute; an album announcement costs no turn and doesn't end a throttled stretch, but has a small bucket of its own, burst 5 and 2 a minute, over which it is dropped silently). A turn over the limit never reaches the chat handler or the LLM: the Owner gets one short "Me llegaron muchos mensajes juntos" reply per throttled stretch → return `200` immediately; a failure inside the background handler is logged with the message id and kind, and is not retried by Kapso (durable retry belongs to the job runner, T16). Only `X-Webhook-Event: whatsapp.message.received` is handled; other events (and payloads that don't parse) get `200` and are ignored, so Kapso doesn't retry. Dedupe key: `message.id` (the `wamid`), or `X-Idempotency-Key` when the id is missing. With the database the key is a row in `inbound_deliveries` (kept 48 h, pruned by a background task so the request does no DELETE), so it survives a restart; without it, a 10k-entry in-memory LRU. A message with no `timestamp` is processed, dedupe still applies. Payload shapes in [integrations.md](integrations.md#whatsapp) |
 
 ### Zernio webhook
 
@@ -44,22 +44,25 @@ All under `/api/o/{token}`. The token is the onboarding magic link. The Instagra
 | PUT | `/api/o/{token}/business` | `{name, category, one_liner, location?, description?, website?, instagram_handle?}` | `OnboardingState`. `description`, `website` and `instagram_handle` left out keep their value, so a save doesn't erase what the Instagram import filled in; the wizard no longer asks for the handle (the connect fills it) |
 | PUT | `/api/o/{token}/products` | `{products: [{id?, name, description, price?, category?, asset_ids?}]}` (1–5) | `OnboardingState`: upserts `products` rows in the given order; rows left out are archived. `asset_ids` (≤ 5, ready photos of this Business) replaces the Owner's links of that Product in `asset_products` (`source = 'owner'`; the Asset Analyst's links stay); left out, the links don't change. More than 5 Products → `422 too_many_products`; more than 5 photos → `422 too_many_product_photos`; an id that isn't a ready photo of the Business → `422 unknown_asset` |
 | PUT | `/api/o/{token}/brand` | `{three_words: [str] (1–3), colors: [hex...], no_brand_yet?: bool}` | `OnboardingState`. `no_brand_yet = true` ("Todavía no tengo logo ni colores") allows an empty `colors` list; the Brand Strategist uses the neutral default palette, and the colors are chosen later in the chat (F2.9, Could) |
-| POST | `/api/o/{token}/uploads` | `UploadRequest` (below) | `UploadTicket`: see [Uploads](#uploads). The wizard accepts `logo` and `photo` only, at most 15 photos (`422 too_many_photos`) |
+| POST | `/api/o/{token}/uploads` | `UploadRequest` (below) | `UploadTicket`: see [Uploads](#uploads). The wizard accepts `logo` and `photo` only. Caps per Business: 15 photos and 3 logos in use (`422 too_many_photos` / `422 too_many_logos`), and 30 photos and 10 logos uploaded over its lifetime, deleted ones included, so deleting never frees an unlimited number of uploads (same codes, with their own `message`) |
 | POST | `/api/o/{token}/assets/{asset_id}/complete` | — | `Asset` (logo includes `palette`) |
-| DELETE | `/api/o/{token}/assets/{asset_id}` | — | `204`: archives the asset (the ✕ on a wizard thumbnail) |
+| DELETE | `/api/o/{token}/assets/{asset_id}` | — | `204`: archives the asset (the ✕ on a wizard thumbnail) and deletes its files from Storage (the original, the JPEG made from a HEIC, and the agents' copy); a Storage failure is logged and doesn't change the `204` |
 | PUT | `/api/o/{token}/preferences` | `Questionnaire` (below) | `OnboardingState` |
-| POST | `/api/o/{token}/instagram/connect` | `{}` | `{"auth_url": "..."}`: Instagram's authorize URL for our Meta app (scope `instagram_business_basic`), with `redirect_uri = {PUBLIC_BACKEND_URL}/oauth/instagram/callback` and a signed `state` valid 15 minutes. With `INSTAGRAM=mock` the URL points straight at the callback with a fake code. `409 onboarding_completed` after `/complete` |
+| POST | `/api/o/{token}/instagram/connect` | `{}` | `{"auth_url": "..."}`: the backend's own start hop, `{PUBLIC_BACKEND_URL}/api/o/{token}/instagram/start?ticket=...`, which the wizard navigates to (`window.location.assign`). The ticket is signed, bound to the link and valid 2 minutes. `409 onboarding_completed` after `/complete` |
+| GET | `/api/o/{token}/instagram/start` | `ticket` | `303` to Instagram's authorize URL for our Meta app (scope `instagram_business_basic`, `redirect_uri = {PUBLIC_BACKEND_URL}/oauth/instagram/callback`), with a random `state` (a nonce: no magic-link token in it) and a `Set-Cookie: ig_oauth=...` (HttpOnly, SameSite=Lax, `Secure` on https, `Path=/oauth/instagram`, 15 minutes) that binds the callback to this browser. With `INSTAGRAM=mock` the redirect points straight at the callback with a fake code. A forged, foreign or expired ticket is `400 invalid_state`; `409 onboarding_completed` after `/complete`. Why a hop: a cookie set by the wizard's cross-site `fetch` to `/connect` is dropped by Safari and iOS, while a top-level navigation sets a first-party cookie that Instagram's redirect back carries |
 | POST | `/api/o/{token}/complete` | — | `202 {"status": "generating_brand"}`. Validates required fields (name, category, 1–5 products, at least 3 ready photos counting the ones imported from Instagram, at most 15 uploaded from the web; logo optional but recommended), sets state, enqueues `generate_brand`, sends `brand_generating` on WhatsApp. Calling it again after it succeeded returns `202` and does nothing |
 
 The Instagram callback is not under `/api/o/{token}`: Meta redirects the browser to one fixed URL, registered in the app.
 
 | Method | Path | Query | Response |
 |---|---|---|---|
-| GET | `/oauth/instagram/callback` | `code`, `state`, or `error` when the Owner refused | `303` to `{FRONTEND_URL}/o/{token}?step=instagram&connected=1` after exchanging the code for a long-lived token, upserting `social_accounts` (`provider = 'meta'`, `status = 'connected'`, `handle`), filling `businesses.instagram_handle` if empty and enqueuing `import_instagram`. `connected=0` when the Owner refused or Meta failed. A forged or expired `state` is `400 invalid_state`; the link's own errors (`404`, `410`) as below. When the link's onboarding is already completed it changes nothing (no account, no import) and redirects to `{FRONTEND_URL}/o/{token}`, which shows the done screen |
+| GET | `/oauth/instagram/callback` | `code`, `state`, or `error` when the Owner refused | `303` to `{FRONTEND_URL}/o/{token}?step=instagram&connected=1` after exchanging the code for a long-lived token, upserting `social_accounts` (`provider = 'meta'`, `status = 'connected'`, `handle`), filling `businesses.instagram_handle` if empty and enqueuing `import_instagram`. `connected=0` when the Owner refused or Meta failed. The callback requires the `ig_oauth` cookie: it takes the magic-link token from it (signed with the app secret, never from `state`) and its nonce must equal `state`. A missing, forged, expired or foreign cookie, or a `state` that doesn't match it, is `400 invalid_state`; the cookie is cleared on every outcome of the callback, errors included. The link's own errors (`404`, `410`) as below. When the link's onboarding is already completed it changes nothing (no account, no import) and redirects to `{FRONTEND_URL}/o/{token}`, which shows the done screen |
 
 The wizard's `assets` list the Owner's uploads (`source = 'web'`) and the photos imported from Instagram (`source = 'instagram'`, photos only). Imported photos show in the wizard's photo step, where the Owner can drop any of them (`DELETE …/assets/{id}`), and count toward the minimum of 3; the cap of 15 applies to web uploads only. `instagram` in `OnboardingState` is the Business's latest `social_accounts` row for Instagram (`not_connected` when there is none).
 
-Link errors: an unknown token is `404 link_not_found`, an expired one `410 link_expired`, and every write after `/complete` succeeded is `409 onboarding_completed` (`GET` still works and shows `completed: true`). A body that doesn't validate is `422 invalid_request`; a Supabase Storage failure is `502 storage_unavailable`.
+Rate limit: every `/api/o/{token}/...` route (the Instagram `connect` and `start` hop included) allows a burst of 120 calls per token and refills 120 a minute, keyed on the token's hash and counted before the token is looked up; past it the route answers `429 rate_limited` (no `Retry-After`). The wizard's worst minute (a poll every 3 s while photos are analyzed, two calls per photo) is about 55 calls. The limits are in-process, per the single instance ([ADR 0005](../decisions/0005-single-instance-in-process-jobs.md)), and bounded: past 10,000 tracked keys the least recently used bucket is forgotten.
+
+Link errors: an unknown token is `404 link_not_found`, an expired one `410 link_expired`, and every write after `/complete` succeeded is `409 onboarding_completed`, through any onboarding link of the Business, including ones never used (`GET` still works and shows `completed: true`). A body that doesn't validate is `422 invalid_request` with `details` (a list of `{type, loc, msg}`, never the submitted value; the request lists have a hard ceiling of 20 items, above the 5-product and 5-photo caps the route answers with their own codes); a Supabase Storage failure is `502 storage_unavailable`.
 
 ```ts
 type OnboardingState = {
@@ -117,7 +120,7 @@ The wizard (`/api/o/{token}`, Must, photos and logo only) and the dashboard (`/a
 | Method | Path | Body | Response |
 |---|---|---|---|
 | POST | `/api/{o\|b}/{token}/uploads` | `UploadRequest` | `UploadTicket`. Validates type and size, creates a `brand_assets` row with `status = 'uploading'`, returns a signed upload URL for `assets/{business_id}/{asset_id}.{ext}` |
-| POST | `/api/{o\|b}/{token}/assets/{asset_id}/complete` | — | `Asset`. Checks the object exists in Storage (else `409 upload_missing`), sets `status = 'ready'` and `size_bytes`, converts HEIC to JPEG (`pillow-heif`), writes the copy the agents read (`{asset_id}-llm.jpg`, ≤ 1536 px), runs logo palette extraction synchronously, enqueues `analyze_asset` for photos and videos. A file that isn't an image, or is over the limit once uploaded, is `422 unsupported_file` and the asset `failed` |
+| POST | `/api/{o\|b}/{token}/assets/{asset_id}/complete` | — | `Asset`. Only assets uploaded through `/uploads` (the web form) can be completed; any other asset (imported from Instagram, kept from a WhatsApp chat) is `404 asset_not_found`, like an unknown or archived one. Checks the object exists in Storage (else `409 upload_missing`), sets `status = 'ready'` and `size_bytes`, converts HEIC to JPEG (`pillow-heif`), writes the copy the agents read (`{asset_id}-llm.jpg`, ≤ 1536 px), runs logo palette extraction synchronously, enqueues `analyze_asset` for photos and videos. A file that isn't an image, or is over the limit once uploaded, is `422 unsupported_file` and the asset `failed`; the object is read as a stream and dropped as soon as it passes the limit, so it is never held whole in memory. An image over 25 megapixels is `422 image_too_large` (also `failed`). A retry on an asset that already `failed` answers `422 upload_failed` ("No pudimos usar ese archivo. Subí uno nuevo.") without reading it again, whatever made it fail, so the Owner uploads a new file |
 
 1. `POST .../uploads` → `UploadTicket`.
 2. The browser uploads to `upload_url`: a single `PUT` when `resumable = false`, or TUS with `x-signature: upload_token` when `resumable = true`. Photos and logos (≤ 10 MB) are always `resumable = false`; TUS is only for videos (Could).
@@ -130,7 +133,7 @@ Accepted files:
 | `photo`, `logo` | `image/jpeg`, `image/png`, `image/webp`, `image/heic` | 10 MB |
 | `video` (Could: dashboard only, not the wizard) | `video/mp4`, `video/quicktime` (MOV) | 300 MB |
 
-Anything else → `422 unsupported_file` with a Spanish `message` the UI shows as is. Video duration and size in pixels are read with `ffprobe` during `analyze_asset`, not at upload.
+Anything else → `422 unsupported_file` with a Spanish `message` the UI shows as is. The bytes must be the declared type: `/complete` opens the file with only that format enabled, so a TIFF declared as `image/png` is `422 unsupported_file` and the asset `failed`. Video duration and size in pixels are read with `ffprobe` during `analyze_asset`, not at upload.
 
 ```ts
 type UploadRequest = { kind: "logo" | "photo" | "video"; filename: string; content_type: string;
@@ -257,7 +260,9 @@ class InboundMessage(BaseModel):       # app/channels/base.py; one per webhook d
 
 # app/channels/inbound.py: the seams T02 and T23 replace
 class DedupeStore(Protocol):
-    async def first_seen(self, key: str) -> bool: ...      # atomic; True the first time
+    # atomic; True the first time. DbDedupeStore (INSERT ... ON CONFLICT DO NOTHING on
+    # inbound_deliveries) with DATABASE_URL, InMemoryDedupeStore without it
+    async def first_seen(self, key: str) -> bool: ...
 
 class InboundHandler(Protocol):
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None: ...

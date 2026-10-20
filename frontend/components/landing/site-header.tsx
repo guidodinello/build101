@@ -2,10 +2,10 @@ import { CtaLink } from "@/components/landing/cta-link";
 import { cn } from "@/lib/utils";
 
 const NAV_LINKS = [
-  { href: "#how", label: "How it works" },
-  { href: "#team", label: "The team" },
-  { href: "#pricing", label: "Pricing" },
-  { href: "#faq", label: "FAQ" },
+  { href: "#how", label: "Cómo funciona" },
+  { href: "#team", label: "El equipo" },
+  { href: "#pricing", label: "Precios" },
+  { href: "#faq", label: "Preguntas" },
 ];
 
 export function NeitorAvatar({ className }: { className?: string }) {
@@ -32,15 +32,15 @@ export function SiteHeader() {
             aria-hidden="true"
             className="absolute -right-px -bottom-px size-3 rounded-full bg-green-500 ring-[2.5px] ring-white"
           />
-          <span className="sr-only">Neitor AI, back to top</span>
+          <span className="sr-only">Neitor AI, volver arriba</span>
         </a>
         <div className="mr-auto flex min-w-0 flex-col gap-0.5">
           <span className="font-heading text-lg leading-tight font-extrabold tracking-tight">Neitor AI</span>
           <span className="truncate text-[13px] leading-tight font-medium text-ld-subtle">
-            your marketing team · online
+            tu equipo · en línea
           </span>
         </div>
-        <nav aria-label="Main" className="flex items-center gap-6.5">
+        <nav aria-label="Principal" className="flex items-center gap-6.5">
           {NAV_LINKS.map((link) => (
             <a
               key={link.href}
@@ -51,7 +51,7 @@ export function SiteHeader() {
             </a>
           ))}
           <CtaLink size="sm" className="whitespace-nowrap">
-            Get started
+            Empezá
           </CtaLink>
         </nav>
       </div>

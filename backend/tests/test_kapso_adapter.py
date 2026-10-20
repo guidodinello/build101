@@ -228,3 +228,14 @@ async def test_send_buttons_converts_markdown_bold_in_the_body() -> None:
     await channel.send_buttons("59899000001", "**¿Lo subo?**", [Button(id="ok", title="Sí")])
 
     assert json.loads(requests[0].content)["interactive"]["body"] == {"text": "*¿Lo subo?*"}
+
+
+async def test_download_media_ignores_a_non_string_mime_type() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "dl.test":
+            return httpx.Response(200, content=b"x", headers={"content-type": "image/png"})
+        return httpx.Response(200, json={"download_url": "https://dl.test/f", "mime_type": 5})
+
+    channel, _ = channel_with(handler)
+
+    assert await channel.download_media("media-9") == (b"x", "image/png")

@@ -7,6 +7,7 @@ from app.media.images import (
     LIGHT_BACKING,
     POST_SIZE,
     REFERENCE_MAX_SIDE,
+    UnreadableImage,
     add_logo,
     fit_logo,
     image_mime,
@@ -188,3 +189,8 @@ def test_logo_for_render_trims_the_margins_and_reads_its_tone() -> None:
     assert image_mime(png) == "image/png"
     assert tone == "dark"
     assert logo_for_render(make_image((300, 100), color="white"))[1] == "light"
+
+
+def test_prepare_reference_does_not_decode_formats_we_do_not_accept() -> None:
+    with pytest.raises(UnreadableImage):
+        prepare_reference(make_image((60, 40), format="TIFF"))

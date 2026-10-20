@@ -33,7 +33,7 @@ export function Bubble({ from, time, className, rowClassName, timeClassName, chi
   );
 }
 
-export function Timestamp({ time, read, className }: { time: string; read?: boolean; className?: string }) {
+export function Timestamp({ time, read, className }: { time: string; read?: boolean; className?: string | undefined }) {
   return (
     <span
       className={cn(
@@ -43,7 +43,7 @@ export function Timestamp({ time, read, className }: { time: string; read?: bool
       )}
     >
       {time}
-      {read && <CheckCheckIcon className="size-4 text-sky-300" aria-label="Read" />}
+      {read && <CheckCheckIcon className="size-4 text-sky-300" aria-label="Leído" />}
     </span>
   );
 }

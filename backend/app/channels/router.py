@@ -1,22 +1,34 @@
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from functools import cache
-from typing import Annotated, Any
+from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 
 from app.config import Settings, get_settings
 from app.conversation.events import Notify
 from app.conversation.factory import Conversation, build_conversation
+from app.copy import messages_es
+from app.db.session import get_sessionmaker
 from app.media.public import get_public_images, get_public_videos
 from app.publishing.factory import get_publisher
+from app.ratelimit import TURNS_BURST, TURNS_PER_MINUTE, RateLimiter
 
-from .base import ChannelPort, InboundMessage
+from .base import ChannelError, ChannelPort, InboundMessage
 from .factory import build_channel
-from .inbound import DedupeStore, InboundHandler, InMemoryDedupeStore, mask
-from .kapso_webhook import MESSAGE_RECEIVED_EVENT, parse_message, verify_signature
+from .inbound import (
+    DbDedupeStore,
+    DedupeStore,
+    InboundHandler,
+    InMemoryDedupeStore,
+    RateLimitedHandler,
+    mask,
+)
+from .kapso_webhook import MESSAGE_RECEIVED_EVENT, is_stale, parse_message, verify_signature
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +40,31 @@ def get_channel() -> ChannelPort:
 
 @cache
 def get_dedupe_store() -> DedupeStore:
+    # With the database the ids survive a deploy (#105); without it a restart forgets them.
+    if get_settings().database_url:
+        return DbDedupeStore(get_sessionmaker())
     return InMemoryDedupeStore()
+
+
+def get_clock() -> float:
+    """Seconds since the epoch; a dependency so tests can stand at the fixtures' time."""
+    return time.time()
 
 
 @cache
 def get_conversation() -> Conversation:
-    return build_conversation(
+    conversation = build_conversation(
         get_settings(), get_public_images(), get_publisher(), get_public_videos()
+    )
+    # In front of everything the factory builds, the no-database chat handler included (#106).
+    # `notify` is not wrapped: it carries events raised by code, not the Owner's turns.
+    return replace(
+        conversation,
+        handler=RateLimitedHandler(
+            conversation.handler,
+            RateLimiter(TURNS_BURST, TURNS_PER_MINUTE),
+            messages_es.RATE_LIMITED,
+        ),
     )
 
 
@@ -48,7 +78,7 @@ def get_owner_notify() -> Notify:
 
 
 @asynccontextmanager
-async def lifespan(app: Any) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Built at boot so a missing GEMINI_API_KEY or PUBLIC_BACKEND_URL stops the app, instead of
     # turning every webhook into a 500. Tests swap the handler through dependency_overrides.
     app.dependency_overrides.get(get_inbound_handler, get_inbound_handler)()
@@ -99,6 +129,7 @@ async def whatsapp_webhook(
     dedupe: Annotated[DedupeStore, Depends(get_dedupe_store)],
     handler: Annotated[InboundHandler, Depends(get_inbound_handler)],
     channel: Annotated[ChannelPort, Depends(get_channel)],
+    now: Annotated[float, Depends(get_clock)],
     x_webhook_event: Annotated[str | None, Header()] = None,
     x_webhook_signature: Annotated[str | None, Header()] = None,
     x_idempotency_key: Annotated[str | None, Header()] = None,
@@ -113,9 +144,15 @@ async def whatsapp_webhook(
 
     try:
         message = parse_message(json.loads(raw_body), fallback_id=x_idempotency_key)
-    except (ValueError, KeyError, TypeError):
+    except (ChannelError, ValueError, KeyError, TypeError):
         logger.warning("unparseable %s payload", x_webhook_event, exc_info=True)
         return {"status": "ignored"}
+
+    # A validly signed body can be replayed later: anything past the window is acknowledged (a
+    # 4xx would make Kapso retry) and dropped.
+    if is_stale(message, now):
+        logger.warning("stale message %s ignored", message.message_id)
+        return {"status": "stale"}
 
     # Dedupe on the WhatsApp message id; the idempotency key stands in when it is missing.
     if not await dedupe.first_seen(message.message_id):

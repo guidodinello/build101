@@ -7,6 +7,7 @@ in the conversation history and answers. Primitives only, so `posts/` can import
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Literal
 
 from app.channels.base import ChannelPort
 from app.copy import messages_es
@@ -16,7 +17,7 @@ from app.copy import messages_es
 class PostSent:
     post_id: str
     image_count: int
-    style: str  # "photos" or "design"
+    style: Literal["photos", "design"]
     photo_ids: tuple[str, ...]
     headlines: tuple[str, ...]  # one per slide of a design; empty for photos as they are
     text: str  # caption + hashtags, as the Owner received it
@@ -37,7 +38,7 @@ class PostSent:
 @dataclass(frozen=True, slots=True)
 class PostFailed:
     post_id: str
-    style: str
+    style: Literal["photos", "design"]
     photo_ids: tuple[str, ...]
     brief: str
 
@@ -136,6 +137,12 @@ class UnsupportedMedia:
 class PhotoUnreadable:
     def note(self) -> str:
         return "[photo unreadable] The photo could not be opened."
+
+
+@dataclass(frozen=True, slots=True)
+class PhotoTooLarge:
+    def note(self) -> str:
+        return "[photo too large] It has more megapixels than we can read."
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,6 +300,7 @@ Event = (
     | UnsupportedMedia
     | PhotoUnreadable
     | PhotoTooBig
+    | PhotoTooLarge
     | StaleButton
     | BrandConfirmed
     | BrandFixAsked
@@ -365,6 +373,8 @@ def fallback(event: Event) -> str | None:
             return messages_es.PHOTO_UNREADABLE
         case PhotoTooBig(max_mb=max_mb):
             return messages_es.photo_too_big(max_mb)
+        case PhotoTooLarge():
+            return messages_es.PHOTO_TOO_LARGE
         case StaleButton():
             return messages_es.STALE_BUTTON
         case BrandConfirmed():

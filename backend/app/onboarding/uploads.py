@@ -1,22 +1,26 @@
+import asyncio
 from dataclasses import dataclass
 from io import BytesIO
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from app.media.images import prepare_reference
+from app.media.images import (
+    MAX_PIXELS,
+    ImageTooLarge,
+    UnreadableImage,
+    decode_slot,
+    reference_from,
+)
 
 HEIC = "image/heic"
 EXTENSIONS = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", HEIC: "heic"}
+# What Pillow must find in the bytes for each accepted type: a file that is really another format
+# (TIFF, PSD, ...) never reaches those parsers.
+PIL_FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP", HEIC: "HEIF"}
 PALETTE_SIZE = 5
 PALETTE_SAMPLE_SIDE = 128
 OPAQUE_ALPHA = 128
 JPEG_QUALITY = 90
-# A 50 MP phone photo fits. Checked before decoding: a small PNG can expand to hundreds of MB.
-MAX_PIXELS = 60_000_000
-
-
-class UnreadableImage(Exception):
-    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,20 +41,28 @@ def llm_copy_path(business_id: object, asset_id: object) -> str:
     return f"{business_id}/{asset_id}-llm.jpg"
 
 
+async def read_upload(data: bytes, content_type: str, kind: str) -> ProcessedUpload:
+    """`process_upload` in a thread, at most MAX_CONCURRENT_DECODES at a time. The others wait on
+    the event loop, not in a thread, so they don't hold the pool other work needs."""
+    async with decode_slot():
+        return await asyncio.to_thread(process_upload, data, content_type, kind)
+
+
 def process_upload(data: bytes, content_type: str, kind: str) -> ProcessedUpload:
-    """Read an uploaded photo or logo once it is in Storage. CPU-bound: run it in a thread."""
+    """Read an uploaded photo or logo once it is in Storage. CPU-bound: use `read_upload`."""
     try:
-        with Image.open(BytesIO(data)) as source:
+        with Image.open(BytesIO(data), formats=[PIL_FORMATS[content_type]]) as source:
             if source.width * source.height > MAX_PIXELS:
-                raise UnreadableImage(f"{source.width}x{source.height} is over {MAX_PIXELS} px")
+                raise ImageTooLarge(f"{source.width}x{source.height} is over {MAX_PIXELS} px")
             image = ImageOps.exif_transpose(source)
             image.load()
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+    # ValueError: pillow_heif's error for a truncated HEIF.
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         raise UnreadableImage(str(exc)) from exc
     return ProcessedUpload(
         width=image.width,
         height=image.height,
-        llm_copy=prepare_reference(data),
+        llm_copy=reference_from(image),
         jpeg=_to_jpeg(image) if content_type == HEIC else None,
         palette=logo_palette(image) if kind == "logo" else None,
     )
@@ -67,6 +79,8 @@ def logo_palette(image: Image.Image) -> list[str]:
     used = sorted(quantized.getcolors() or [], reverse=True)
     colors: list[str] = []
     for _, index in used:
+        if not isinstance(index, int):  # a P-mode image's getcolors yields palette indexes
+            continue
         r, g, b, a = rgba[index * 4 : index * 4 + 4]
         color = f"#{r:02x}{g:02x}{b:02x}"
         if a >= OPAQUE_ALPHA and color not in colors:

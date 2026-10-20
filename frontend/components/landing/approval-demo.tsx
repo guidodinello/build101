@@ -14,7 +14,7 @@ export function ApprovalDemo() {
   return (
     <>
       <Bubble from="neitor" className="max-w-120 overflow-hidden px-3.5 pt-3.5 pb-0 sm:max-w-120">
-        <p className="mx-1.5 mt-0.5 mb-3">On it. Here&apos;s your post for Saturday:</p>
+        <p className="mx-1.5 mt-0.5 mb-3">Dale. Acá tenés tu post para el sábado:</p>
         <div className="overflow-hidden rounded-[18px] shadow-[0_0_0_1px_var(--color-ld-line)]">
           <div className="flex items-center gap-2.5 px-3 py-2.5">
             <span
@@ -27,23 +27,23 @@ export function ApprovalDemo() {
               <span className="text-sm font-bold">roble.taller</span>
               <span className="text-xs font-medium text-ld-subtle">Montevideo</span>
             </span>
-            <Label className="ml-auto">Example</Label>
+            <Label className="ml-auto">Ejemplo</Label>
           </div>
           <div className="bg-[#e9dcc6] px-5.5 pt-5.5 pb-6.5">
             <Image
               src={oakTable}
-              alt="The owner's oak table, framed in the shop's brand colors"
+              alt="La mesa de roble del taller, enmarcada en los colores de la marca"
               sizes="(min-width: 640px) 440px, 80vw"
               placeholder="blur"
               className="h-80 w-full rounded-md object-cover object-[50%_85%] shadow-[0_22px_34px_-20px_rgb(70_40_20/0.65)]"
             />
           </div>
           <p className="px-3.5 pt-3 pb-3.5 text-[15px] leading-snug">
-            <strong>roble.taller</strong> Solid oak, finished by hand in our workshop. Our new round table is ready
-            for its home: come see it this Saturday, 10 to 14.
+            <strong>roble.taller</strong> Roble macizo, terminado a mano en nuestro taller. Nuestra nueva mesa redonda ya está
+            lista para su casa: vení a verla este sábado de 10 a 14.
           </p>
         </div>
-        <Timestamp time="11:43 PM" className="mx-1 mt-2 mb-2.5" />
+        <Timestamp time="23:43" className="mx-1 mt-2 mb-2.5" />
         {reply === null ? (
           <div className="-mx-3.5 flex">
             <button
@@ -52,14 +52,14 @@ export function ApprovalDemo() {
               className="flex min-h-13 flex-1 items-center justify-center gap-2 border-t border-ld-line text-base font-bold text-ld-accent-ink transition-colors outline-none hover:bg-[#f5f8f5] focus-visible:bg-[#f5f8f5] focus-visible:ring-3 focus-visible:ring-ld-forest/40 focus-visible:ring-inset"
             >
               <CheckIcon className="size-4.5" strokeWidth={2.6} aria-hidden="true" />
-              Approve
+              Aprobar
             </button>
             <button
               type="button"
               onClick={() => setReply("change")}
               className="flex min-h-13 flex-1 items-center justify-center border-t border-l border-ld-line text-base font-bold text-ld-forest transition-colors outline-none hover:bg-[#f5f8f5] focus-visible:bg-[#f5f8f5] focus-visible:ring-3 focus-visible:ring-ld-forest/40 focus-visible:ring-inset"
             >
-              Change something
+              Cambiar
             </button>
           </div>
         ) : null}
@@ -68,22 +68,22 @@ export function ApprovalDemo() {
       <div aria-live="polite">
         {reply === "approve" ? (
           <>
-            <Bubble from="owner" time="11:44 PM" rowClassName="motion-safe:animate-rise">
-              <strong>Approve</strong>
+            <Bubble from="owner" time="23:44" rowClassName="motion-safe:animate-rise">
+              <strong>Aprobar</strong>
             </Bubble>
-            <Bubble from="neitor" time="11:44 PM" rowClassName="motion-safe:animate-rise motion-safe:[animation-delay:.4s]">
-              Done. It goes live <strong>Saturday at 10:00</strong> on your Instagram. Sleep well.
+            <Bubble from="neitor" time="23:44" rowClassName="motion-safe:animate-rise motion-safe:[animation-delay:.4s]">
+              Listo. Sale el <strong>sábado a las 10:00</strong> en tu Instagram. Que descanses.
             </Bubble>
           </>
         ) : null}
         {reply === "change" ? (
           <>
-            <Bubble from="owner" time="11:44 PM" rowClassName="motion-safe:animate-rise">
-              <strong>Change something</strong>
+            <Bubble from="owner" time="23:44" rowClassName="motion-safe:animate-rise">
+              <strong>Cambiar</strong>
             </Bubble>
-            <Bubble from="neitor" time="11:44 PM" rowClassName="motion-safe:animate-rise motion-safe:[animation-delay:.4s]">
-              Sure. Tell me what to change, by text or voice note: the photo, the words, the day. I&apos;ll send a new
-              version.
+            <Bubble from="neitor" time="23:44" rowClassName="motion-safe:animate-rise motion-safe:[animation-delay:.4s]">
+              Dale. Decime qué le cambio, por texto o audio: la foto, el texto, el día. Te mando una versión
+              nueva.
             </Bubble>
           </>
         ) : null}

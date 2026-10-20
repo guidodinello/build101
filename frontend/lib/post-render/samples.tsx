@@ -6,7 +6,7 @@ import { postRenderer } from "./fonts";
 import type { Brand, Family, SlideRole, SlideSpec } from "./spec";
 
 export const SAMPLE_PHOTO_DIR = "components/landing/photos";
-const PHOTOS = ["oak-table.jpg", "workshop-hands.jpg", "workshop.jpg"];
+const PHOTOS = ["oak-table.jpg", "workshop-hands.jpg", "workshop.jpg"] as const;
 
 export const SAMPLE_BRAND: Brand = {
   name: "Taller Roble",
@@ -52,7 +52,9 @@ async function panoramaSlice(index: number, count: number): Promise<string> {
 export async function sampleSpec(family: Family, index: number, withLogo: boolean): Promise<SlideSpec> {
   const count = SAMPLE_SLIDES.length;
   const slide = SAMPLE_SLIDES[index - 1];
-  const image = family === "panorama" ? await panoramaSlice(index, count) : await photoUri(PHOTOS[(index - 1) % PHOTOS.length]);
+  if (!slide) throw new RangeError(`sample slide index out of range: ${index}`);
+  const photo = PHOTOS[(index - 1) % PHOTOS.length] ?? PHOTOS[0];
+  const image = family === "panorama" ? await panoramaSlice(index, count) : await photoUri(photo);
   return {
     family,
     index,

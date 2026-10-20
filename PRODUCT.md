@@ -10,7 +10,7 @@ web
 
 Small business owners in Latin America (first market: Uruguay) who know social media sells but have no time, skill or budget to run it. Primary persona: the owner of a small furniture business in Montevideo, 50s, 2–4 employees, an Instagram account updated "when she can". Lives in WhatsApp all day (clients, suppliers, staff), sends voice notes, does not use dashboards. Has good product photos on the phone, a logo and a clear sense of style, but no "content strategy". Wants more inquiries and a professional feed with zero extra work; fears posts that look fake or "not like us" and losing control of the account.
 
-Secondary audience for the landing page: hackathon judges and early investors evaluating the product (the landing copy is in English for them).
+Secondary audience for the landing page: hackathon judges and early investors evaluating the product. The landing copy is in Rioplatense Spanish like the rest of the product: the owner is who it's for, and the product speaking the owner's language is part of the pitch.
 
 ## Product Purpose
 
@@ -38,7 +38,7 @@ Every competitor makes the owner operate software (Sintra, Predis, Canva, Meta B
 ## Brand Commitments
 
 - Name: **Neitor AI** (user-confirmed 2026-10-18).
-- In-product voice is Rioplatense Spanish (vos), warm and plain; the landing page is in English.
+- Owner-facing voice, landing page included, is Rioplatense Spanish (vos), warm and plain.
 - No jargon toward owners: "your brand", not "Brand Brain", in owner-facing copy.
 
 ## Evidence on Hand

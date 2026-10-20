@@ -6,6 +6,8 @@ One live loop, scoped by [ADR 0016](decisions/0016-demo-scope-one-post.md): a sh
 
 ## Phase 1: Pilot with one owner (2–4 weeks)
 
+The [2026-10-19 audit](research/audit-2026-10/README.md) proposes a prioritized plan for this phase (2 weeks to pass a pilot gate, 30 days to make Posts durable and costs measurable, 90 days for retention and revenue) in its [roadmap](research/audit-2026-10/summary.md#roadmap-2-builders); its findings are recommendations, and anything that changes this roadmap goes through an ADR.
+
 - Run it on the pilot owner's real account every day; log every correction the owner makes
 - Finish the MVP's *Should* items: weekly plan on request and every Monday with Uruguayan commercial dates, ideas on request, revisions, scheduling by writing, matching the owner's style, read-only dashboard ([ADR 0016](decisions/0016-demo-scope-one-post.md))
 - Replies to comments and DMs, sales flow and a WhatsApp alert to the owner on each sale, through our own Meta app with Instagram Login ([ADR 0013](decisions/0013-focus-marketing.md), [ADR 0015](decisions/0015-instagram-login.md))

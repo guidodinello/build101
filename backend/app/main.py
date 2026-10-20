@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import TypedDict
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,15 +13,17 @@ from app.api.onboarding import router as onboarding_router
 from app.background import get_background_work
 from app.channels.router import get_channel, get_owner_notify
 from app.channels.router import router as whatsapp_router
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.jobs.setup import build_job_runner
-from app.log_redaction import RedactQueryTokens
+from app.log_redaction import RedactAccessLog, RedactQueryTokens
 from app.media.public import router as media_router
 
 # uvicorn configures only its own loggers; without this, `app.*` INFO lines are dropped.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(name)s — %(message)s")
 # httpx stays at INFO (its lines show Gemini/Kapso status codes) but must not log signed tokens.
 logging.getLogger("httpx").addFilter(RedactQueryTokens())
+# uvicorn's access log records every path and query: /api/o/{token}/..., the OAuth `code`/`state`.
+logging.getLogger("uvicorn.access").addFilter(RedactAccessLog())
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +47,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await get_background_work().stop()
 
 
-app = FastAPI(title="Neitor AI", lifespan=lifespan)
+class DocsUrls(TypedDict, total=False):
+    docs_url: str | None
+    redoc_url: str | None
+    openapi_url: str | None
+
+
+def docs_urls(settings: Settings) -> DocsUrls:
+    """The FastAPI kwargs that turn off /docs, /redoc and /openapi.json in production."""
+    if settings.env == "prod":
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {}
+
+
+app = FastAPI(title="Neitor AI", lifespan=lifespan, **docs_urls(get_settings()))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

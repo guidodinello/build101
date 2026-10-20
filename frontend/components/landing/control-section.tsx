@@ -2,9 +2,9 @@ import { LockIcon } from "lucide-react";
 import { Display } from "@/components/landing/chat";
 
 const PROMISES = [
-  { title: "Every post comes to you first", body: "A preview with the caption, right in the chat." },
-  { title: "We never ask for your password", body: "You connect Instagram on Instagram's own page." },
-  { title: "Your real products, untouched", body: "Posts start from your photos. The product is never altered." },
+  { title: "Cada post te llega primero", body: "Una vista previa con el texto, ahí en el chat." },
+  { title: "Nunca te pedimos la contraseña", body: "Conectás Instagram en la página del propio Instagram." },
+  { title: "Tus productos reales, intactos", body: "Los posts parten de tus fotos. El producto nunca se altera." },
 ];
 
 export function ControlSection() {
@@ -18,7 +18,7 @@ export function ControlSection() {
         <LockIcon className="size-7" />
       </span>
       <Display as="h2" id="control-title" className="mx-auto mt-4.5 max-w-190 text-[clamp(2.2rem,5vw,4.25rem)] leading-[0.98]">
-        Nothing is published without your Approve.
+        Nada se publica sin que vos lo apruebes.
       </Display>
       <ul className="mt-8.5 grid gap-3 text-left text-base leading-snug md:grid-cols-3">
         {PROMISES.map((promise) => (

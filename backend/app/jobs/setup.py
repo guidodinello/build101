@@ -15,6 +15,7 @@ from .brand import generate_brand
 from .instagram import import_instagram_job
 from .niche import CHECK_EVERY, enqueue_due_niche_reports, niche_report_job
 from .runner import JobFunction, JobRunner, PeriodicCheck
+from .uploads import SWEEP_EVERY, upload_sweep
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +58,18 @@ def build_job_runner(
         # Silent and per niche: no Owner to notify when it fails (ADR 0025).
         "generate_niche_report": niche_report_job(model),
     }
+    storage = get_storage()
     return JobRunner(
         get_sessionmaker(),
         jobs,
-        get_storage(),
+        storage,
         channel,
         model,
         owner_notify(),
         NOTIFY_ON_FAILURE,
-        checks=(PeriodicCheck("niche reports", CHECK_EVERY, enqueue_due_niche_reports),),
+        checks=(
+            PeriodicCheck("niche reports", CHECK_EVERY, enqueue_due_niche_reports),
+            PeriodicCheck("upload sweep", SWEEP_EVERY, upload_sweep(storage)),
+        ),
         background=get_background_work(),
     )
