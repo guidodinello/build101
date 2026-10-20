@@ -23,7 +23,7 @@ An AI marketing agency that lives in the small business owner's WhatsApp. The ow
 | [`scripts/`](scripts/) | Repo tooling: the docs index check CI runs, Orca worktree setup |
 | [`.claude/skills/`](.claude/skills/README.md) | Shared agent skills: workflow (grilling, domain modeling, tickets, PR review, docs), frontend, and infrastructure (Supabase, Railway, Vercel) |
 | [`.claude/rules/`](.claude/rules/README.md) | Path-scoped agent rules (Python, database, Docker, CI) that load when matching files are touched |
-| [`.claude/routines/`](.claude/routines/README.md) | Nightly cloud agents (product research, bug hunt) that open draft PRs |
+| [`.claude/routines/`](.claude/routines/README.md) | Nightly cloud agents (issue fixer, product research, bug hunt) that open draft PRs |
 | [`AGENTS.md`](AGENTS.md) | How we work: the shared workflow and conventions, for humans and any AI tool |
 
 ## Stack

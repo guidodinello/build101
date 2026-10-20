@@ -17,7 +17,7 @@ How the build101 team works. This file is the single source of truth for the wor
 | [`frontend/`](frontend/README.md) | Owner-facing web: onboarding form, dashboard, WhatsApp simulator (Next.js, [ADR 0004](docs/decisions/0004-frontend-nextjs-vercel.md)) |
 | [`.claude/skills/`](.claude/skills/README.md) | Agent skills that automate the steps below; plain Markdown, readable by anyone |
 | [`.claude/rules/`](.claude/rules/README.md) | Path-scoped coding rules (Python, database, Docker, CI) |
-| [`.claude/routines/`](.claude/routines/README.md) | Nightly cloud agents (product research, bug hunt) that open draft PRs; backup of their prompts and schedules |
+| [`.claude/routines/`](.claude/routines/README.md) | Nightly cloud agents (issue fixer, product research, bug hunt) that open draft PRs; backup of their prompts and schedules |
 | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | CI: markdownlint, docs index check, actionlint, frontend typecheck + lint, dependency audit (`pip-audit` on the backend lock, `npm audit --audit-level=high` on the frontend); actions pinned to commit SHAs; one aggregate `CI` check |
 | [`.github/dependabot.yml`](.github/dependabot.yml) | Weekly grouped Dependabot PRs for Actions, `uv`, `npm` and the backend base image |
 | [`scripts/`](scripts/) | Repo tooling (e.g. `check_docs_index.py`) |
