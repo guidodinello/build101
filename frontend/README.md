@@ -21,7 +21,7 @@ Until the backend serves the onboarding endpoints (T24), set `ENABLE_MOCK_API=tr
 
 ## Layout
 
-- `app/page.tsx` + `components/landing/`: the English landing page, built as one WhatsApp-style thread with Neitor (design: [canvas](https://claude.ai/artifact/4ghMvD3UL9q5x3E4P1Fbai), Option A). Server components except `approval-demo.tsx`, the hero's working Approve / Change buttons. Its colors are the `ld-*` tokens in `app/globals.css`; every CTA opens `NEXT_PUBLIC_WHATSAPP_URL` with "Hi Neitor" typed in (`lib/whatsapp.ts`).
+- `app/page.tsx` + `components/landing/`: the landing page, in Rioplatense Spanish like the bot and the wizard, built as one WhatsApp-style thread with Neitor (design: [canvas](https://claude.ai/artifact/4ghMvD3UL9q5x3E4P1Fbai), Option A). Server components except `approval-demo.tsx`, the hero's working Approve / Change buttons. Its colors are the `ld-*` tokens in `app/globals.css`; every CTA opens `NEXT_PUBLIC_WHATSAPP_URL` with "Hola Neitor" typed in (`lib/whatsapp.ts`).
 - `app/o/[token]/`: the onboarding wizard route (loads `OnboardingState` on the server, `?step=` picks the screen).
 - `components/onboarding/`: wizard shell, one file per step under `steps/`, the photo upload queue. The wizard reuses the landing's chat primitives (`Bubble`, `Display`, `NeitorAvatar`) and its palette, mapped onto the shadcn tokens in `app/globals.css`. `lib/categories.ts` holds the per-category examples, audiences and brand words; step order and resume logic are in `lib/onboarding.ts` ([ADR 0032](../docs/decisions/0032-instagram-first-onboarding.md)).
 - `lib/api.ts`: REST client; Zod schemas (written by hand from `api.md`) check every response and give the types. `lib/upload.ts`: signed-URL uploads.

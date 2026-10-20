@@ -5,40 +5,40 @@ import { NeitorAvatar } from "@/components/landing/site-header";
 import { cn } from "@/lib/utils";
 
 const SPECIALISTS: { role: string; job: string; icon: LucideIcon }[] = [
-  { role: "Strategist", job: "Plans your week around what you sell and the dates that matter.", icon: CalendarDaysIcon },
-  { role: "Copywriter", job: "Writes captions in your voice, in your Spanish.", icon: PenLineIcon },
-  { role: "Art director", job: "Turns your real photos into on-brand posts. Never alters your product.", icon: ImageIcon },
-  { role: "Publisher", job: "Posts or schedules on Instagram, only after you approve.", icon: SendIcon },
+  { role: "Estrategia", job: "Planifica tu semana según lo que vendés y las fechas que importan.", icon: CalendarDaysIcon },
+  { role: "Redacción", job: "Escribe los textos con tu voz y tus palabras.", icon: PenLineIcon },
+  { role: "Dirección de arte", job: "Convierte tus fotos reales en posts con tu marca. Nunca altera tu producto.", icon: ImageIcon },
+  { role: "Publicación", job: "Publica o programa en Instagram, solo después de que aprobás.", icon: SendIcon },
 ];
 
 const TRACE = [
-  { who: "Strategist", what: "shelves are a best seller, and it's Friday: lead with the weekend." },
-  { who: "Copywriter", what: "short, warm, the 10% up front, no hard sell." },
-  { who: "Art director", what: "three framings of your photo in walnut, sand and moss." },
-  { who: "You", what: "picked option 2, tapped Approve.", owner: true },
-  { who: "Publisher", what: "scheduled for Saturday 10:00." },
+  { who: "Estrategia", what: "los estantes se venden mucho y es viernes: arrancamos con el finde." },
+  { who: "Redacción", what: "corto, cálido, el 10% bien adelante, sin presionar." },
+  { who: "Dirección de arte", what: "tres versiones de tu foto en nogal, arena y musgo." },
+  { who: "Vos", what: "elegiste la opción 2 y tocaste Aprobar.", owner: true },
+  { who: "Publicación", what: "programado para el sábado a las 10:00." },
 ];
 
 export function TeamSection() {
   return (
     <section aria-labelledby="team-title">
-      <DayChip id="team">Who&apos;s behind Neitor</DayChip>
+      <DayChip id="team">Quién está detrás de Neitor</DayChip>
       <Bubble
         from="neitor"
-        time="6:36 PM"
+        time="18:36"
         className="px-6 pt-6 pb-4 sm:max-w-[92%] sm:px-8.5 sm:pt-7.5"
         rowClassName="motion-safe:reveal-on-scroll"
       >
         <Display as="h2" id="team-title" className="text-[clamp(2.1rem,4.4vw,3.75rem)] leading-none">
-          You only ever talk to me. Behind me, a whole team works on every post.
+          Vos hablás solo conmigo. Detrás mío, un equipo entero trabaja en cada post.
         </Display>
         <div className="mt-7 flex flex-wrap gap-7">
           <ul className="flex flex-[1_1_320px] flex-col gap-4.5">
             <li className="flex gap-3.5">
               <NeitorAvatar className="size-11.5 text-lg" />
               <div>
-                <strong>Account manager</strong> <Label className="ml-1 text-ld-accent-ink">that&apos;s me</Label>
-                <p className="text-base text-ld-muted">Talks with you, understands what you need, runs the team.</p>
+                <strong>Coordinación</strong> <Label className="ml-1 text-ld-accent-ink">ese soy yo</Label>
+                <p className="text-base text-ld-muted">Habla con vos, entiende lo que necesitás y coordina al equipo.</p>
               </div>
             </li>
             {SPECIALISTS.map(({ role, job, icon: Icon }) => (
@@ -54,7 +54,7 @@ export function TeamSection() {
             ))}
           </ul>
           <div className="flex-[1_1_300px] rounded-[22px] bg-ld-mist px-6 py-5.5">
-            <Label className="mb-4 block">How the weekend promo got made</Label>
+            <Label className="mb-4 block">Cómo se hizo la promo del finde</Label>
             <ol className="flex flex-col gap-4.5 border-l-2 border-dashed border-[#c3d2c8] pl-5 text-[15px]">
               {TRACE.map((step) => (
                 <li key={step.who} className="relative">

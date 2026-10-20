@@ -42,7 +42,7 @@ function Amount({ value, muted }: { value: string; muted: string }) {
       <span className="font-heading text-[clamp(3rem,5vw,3.75rem)] leading-none font-extrabold tracking-[-0.045em]">
         {value}
       </span>
-      <span className={muted}> / month</span>
+      <span className={muted}> / mes</span>
     </span>
   );
 }
@@ -51,43 +51,43 @@ export function PricingSection() {
   return (
     <section aria-labelledby="pricing-title">
       <DayChip id="pricing" headingId="pricing-title">
-        Launch pricing
+        Precios de lanzamiento
       </DayChip>
-      <Bubble from="neitor" time="6:40 PM" rowClassName="motion-safe:reveal-on-scroll">
-        Try me free. When you want more, pick a plan, billed monthly.
+      <Bubble from="neitor" time="18:40" rowClassName="motion-safe:reveal-on-scroll">
+        Probame gratis. Cuando quieras más, elegí un plan, con pago mensual.
       </Bubble>
       <ul className="mt-3 grid gap-3.5 motion-safe:reveal-on-scroll md:grid-cols-3">
         <Plan
-          name="Free"
+          name="Gratis"
           price={<Amount value="US$0" muted="text-ld-muted" />}
-          action={<CtaLink variant="soft">Try it free</CtaLink>}
+          action={<CtaLink variant="soft">Probalo gratis</CtaLink>}
         >
-          <li>Up to 3 posts or carousels a month</li>
-          <li>Made from your photos</li>
-          <li>Published to your Instagram</li>
-          <li>No card needed</li>
+          <li>Hasta 3 posts o carruseles por mes</li>
+          <li>Hechos con tus fotos</li>
+          <li>Publicados en tu Instagram</li>
+          <li>Sin tarjeta</li>
         </Plan>
         <Plan
-          name="Basic"
-          badge="Recommended"
+          name="Básico"
+          badge="Recomendado"
           dark
           price={<Amount value="US$29" muted="text-ld-sage" />}
-          action={<CtaLink>Get started</CtaLink>}
+          action={<CtaLink>Empezá</CtaLink>}
         >
-          <li>Posts and carousels from your photos</li>
-          <li>A weekly content plan, on request</li>
-          <li>Publish now or schedule on Instagram</li>
-          <li>Every post approved by you, on WhatsApp</li>
+          <li>Posts y carruseles con tus fotos</li>
+          <li>Un plan de contenido semanal, cuando lo pidas</li>
+          <li>Publicá ya o programá en Instagram</li>
+          <li>Cada post lo aprobás vos, en WhatsApp</li>
         </Plan>
         <Plan
           name="Pro"
           price={<Amount value="US$49" muted="text-ld-muted" />}
-          action={<CtaLink variant="soft">Join the Pro list</CtaLink>}
+          action={<CtaLink variant="soft">Anotame en la lista Pro</CtaLink>}
         >
-          <li>Everything in Basic</li>
-          <li>Replies to comments and DMs <Label>soon</Label></li>
-          <li>Sale alerts on WhatsApp <Label>soon</Label></li>
-          <li>A weekly results summary <Label>soon</Label></li>
+          <li>Todo lo de Básico</li>
+          <li>Respuestas a comentarios y mensajes <Label>pronto</Label></li>
+          <li>Avisos de ventas en WhatsApp <Label>pronto</Label></li>
+          <li>Un resumen semanal de resultados <Label>pronto</Label></li>
         </Plan>
       </ul>
     </section>

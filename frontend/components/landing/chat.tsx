@@ -43,7 +43,7 @@ export function Timestamp({ time, read, className }: { time: string; read?: bool
       )}
     >
       {time}
-      {read && <CheckCheckIcon className="size-4 text-sky-300" aria-label="Read" />}
+      {read && <CheckCheckIcon className="size-4 text-sky-300" aria-label="Leído" />}
     </span>
   );
 }
