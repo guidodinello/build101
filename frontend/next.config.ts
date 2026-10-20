@@ -5,10 +5,11 @@ const onVercel = Boolean(process.env.VERCEL);
 const isPreview = process.env.VERCEL_ENV === "preview";
 
 // The origin of an env URL for the CSP. On Vercel a missing or invalid value fails the build:
-// shipping without it would either break the wizard or force a wildcard source. Locally an unset
-// value is skipped, since the mock API serves everything from 'self'.
+// shipping without it would either break the wizard or force a wildcard source, so the local
+// `fallback` is never used there. Locally an unset value is skipped, since the mock API serves
+// everything from 'self'.
 function originOf(name: string, fallback?: string): string | null {
-  const value = process.env[name] ?? fallback;
+  const value = process.env[name] ?? (onVercel ? undefined : fallback);
   if (!value) {
     if (onVercel) throw new Error(`${name} must be set to build the Content-Security-Policy`);
     return null;
@@ -81,6 +82,9 @@ const nextConfig: NextConfig = {
       },
       // The onboarding token is in the path: keep it out of Referer on API and storage requests.
       { source: "/o/:path*", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
+      // The mock API stores whatever content type a client declares (dev only). Headers set in a
+      // route handler lose to the rule above, so the sandbox lives here, after it, and wins.
+      { source: "/mock-api/storage/:path*", headers: [{ key: "Content-Security-Policy", value: "sandbox" }] },
     ];
   },
   turbopack: {

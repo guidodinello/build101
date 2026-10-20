@@ -1,6 +1,6 @@
 import { readImageSize } from "./image-size";
 
-export const FAMILIES =["editorial", "numbers", "panorama"] as const;
+export const FAMILIES = ["editorial", "numbers", "panorama"] as const;
 export const ROLES = ["cover", "content", "cta"] as const;
 export const TONES = ["light", "dark"] as const;
 export const MAX_SLIDES = 10;

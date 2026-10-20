@@ -65,7 +65,8 @@ async function storage(request: Request, assetId: string | undefined) {
   const file = mock.readFile(assetId);
   if (!file) return notFound();
   // The stored type is whatever the client declared: never let the browser render it as a page.
-  // `<img>` ignores Content-Disposition, so wizard previews still work.
+  // `<img>` ignores Content-Disposition and the sandbox, so wizard previews still work. The
+  // `Content-Security-Policy: sandbox` for this path is set in next.config.ts.
   return new Response(file.bytes, {
     headers: {
       "Content-Type": file.contentType,
