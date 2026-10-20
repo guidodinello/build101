@@ -121,7 +121,10 @@ def logo_for_render(data: bytes) -> tuple[bytes, Tone]:
         raise ValueError("the logo is fully transparent")
     mark = mark.crop(bounds)
     mark.thumbnail((RENDER_LOGO_MAX_SIDE, RENDER_LOGO_MAX_SIDE), Image.Resampling.LANCZOS)
-    shape = mark.getchannel("A").point(lambda value: 255 if value >= OPAQUE_ALPHA else 0)
+    # Pillow stubs type the `point()` lambda argument as an ImagePointTransform, not an int
+    shape = mark.getchannel("A").point(
+        lambda value: 255 if value >= OPAQUE_ALPHA else 0  # pyright: ignore[reportOperatorIssue]
+    )
     if shape.getbbox() is None:
         shape = mark.getchannel("A").point(lambda value: 255 if value else 0)
     luminance = ImageStat.Stat(mark.convert("L"), shape).mean[0]
@@ -177,11 +180,18 @@ def fit_logo(data: bytes, post_size: tuple[int, int]) -> Image.Image:
 def logo_backing(behind: Image.Image, mark: Image.Image) -> tuple[int, int, int] | None:
     """The backing color a transparent logo needs to stand out from `behind`, if any."""
     alpha = mark.getchannel("A")
-    if alpha.getextrema()[0] >= OPAQUE_ALPHA:
+    # Pillow stubs: `getextrema()` is `float | tuple[int, int]`; a single band gives ints.
+    if alpha.getextrema()[0] >= OPAQUE_ALPHA:  # pyright: ignore[reportOperatorIssue]
         return None
     # A logo that is semi-transparent everywhere has no opaque pixel: measure all visible ones.
-    threshold = OPAQUE_ALPHA if alpha.getextrema()[1] >= OPAQUE_ALPHA else 1
-    shape = alpha.point(lambda value: 255 if value >= threshold else 0)
+    threshold = (
+        OPAQUE_ALPHA
+        if alpha.getextrema()[1] >= OPAQUE_ALPHA  # pyright: ignore[reportOperatorIssue]
+        else 1
+    )
+    shape = alpha.point(
+        lambda value: 255 if value >= threshold else 0  # pyright: ignore[reportOperatorIssue]
+    )
     logo_luminance = ImageStat.Stat(mark.convert("L"), shape).mean[0]
     behind_luminance = ImageStat.Stat(behind.convert("L"), shape).mean[0]
     if abs(logo_luminance - behind_luminance) >= LOGO_MIN_CONTRAST:

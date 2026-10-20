@@ -1,8 +1,10 @@
 import hashlib
 import hmac
-from typing import Any
+from typing import Annotated, Any
 
-from .base import Button, InboundAudio, InboundMedia, InboundMessage
+from pydantic import BaseModel, BeforeValidator, Field, ValidationError
+
+from .base import Button, ChannelError, InboundAudio, InboundMedia, InboundMessage
 
 # Kapso webhook v2 (confirmed 2026-10-17): top level `message`, `conversation`,
 # `phone_number_id`. `message` has Meta-style fields plus a `kapso` block.
@@ -11,6 +13,93 @@ MESSAGE_RECEIVED_EVENT = "whatsapp.message.received"
 # The HMAC covers the body only, so a captured body stays valid forever; one older than this is
 # acknowledged and dropped (#105). Kapso delivers within seconds and retries about twice.
 REPLAY_WINDOW_S = 3600
+
+
+# Models for the parts of the webhook we read; unknown fields are ignored. Only what a message
+# kind needs is strict (`from`, the ids, the text body, the button, the audio mime type), and a
+# kind's block is validated only for that kind. Everything else degrades to absent, as it always
+# has: null, a wrong type or a non-object block.
+def _str_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _int_or_none(value: object) -> int | None:
+    if not isinstance(value, str | int | float):
+        return None
+    try:
+        return int(value)
+    except (ValueError, OverflowError):
+        return None
+
+
+def _object_or_none(value: object) -> object:
+    return value if isinstance(value, dict) else None
+
+
+type _Optional[M: BaseModel] = Annotated[M | None, BeforeValidator(_object_or_none)]
+type _Block = Annotated[dict[str, Any] | None, BeforeValidator(_object_or_none)]
+type _OptStr = Annotated[str | None, BeforeValidator(_str_or_none)]
+
+
+class _TextBody(BaseModel):
+    body: str
+
+
+class _ButtonReply(BaseModel):
+    id: str
+    title: str
+
+
+class _Image(BaseModel):
+    id: str
+    caption: _OptStr = None
+    mime_type: _OptStr = None
+
+
+class _Audio(BaseModel):
+    id: str
+    mime_type: str
+
+
+class _Unsupported(BaseModel):
+    type: object = None
+
+
+class _MediaData(BaseModel):
+    byte_size: Annotated[int | None, BeforeValidator(_int_or_none)] = None
+
+
+class _MessageTypeData(BaseModel):
+    caption: _OptStr = None
+
+
+class _Transcript(BaseModel):
+    text: _OptStr = None
+
+
+class _Kapso(BaseModel):
+    media_url: _OptStr = None
+    media_data: _Optional[_MediaData] = None
+    message_type_data: _Optional[_MessageTypeData] = None
+    transcript: _Optional[_Transcript] = None
+
+
+class _Message(BaseModel):
+    id: _OptStr = None
+    sender: str = Field(validation_alias="from")
+    type: object = None
+    timestamp: Annotated[int | None, BeforeValidator(_int_or_none)] = None
+    text: _Block = None
+    interactive: _Block = None
+    image: _Block = None
+    audio: _Block = None
+    unsupported: _Optional[_Unsupported] = None
+    kapso: _Optional[_Kapso] = None
+
+
+class _Webhook(BaseModel):
+    message: _Message
+    phone_number_id: str
 
 
 def verify_signature(raw_body: bytes, signature: str | None, secret: str) -> bool:
@@ -27,64 +116,74 @@ def is_stale(message: InboundMessage, now: float) -> bool:
 
 
 def parse_message(payload: dict[str, Any], fallback_id: str | None = None) -> InboundMessage:
-    message = payload["message"]
-    kapso = message.get("kapso") or {}
-    message_id = message.get("id") or fallback_id
+    """Map a `whatsapp.message.received` payload; ChannelError when it lacks what its kind needs."""
+    try:
+        return _to_inbound(_Webhook.model_validate(payload), payload, fallback_id)
+    except ValidationError as exc:
+        raise ChannelError(f"unusable kapso webhook payload: {exc.error_count()} errors") from exc
+
+
+def _to_inbound(webhook: _Webhook, raw: dict[str, Any], fallback_id: str | None) -> InboundMessage:
+    message = webhook.message
+    kapso = message.kapso or _Kapso()
+    message_id = message.id or fallback_id
     if not message_id:
-        raise KeyError("id")
+        raise ChannelError("kapso webhook message has no id")
     common: dict[str, Any] = {
         "message_id": message_id,
-        "sender": message["from"],
-        "phone_number_id": payload["phone_number_id"],
-        "timestamp": _int_or_none(message.get("timestamp")),
-        "raw": payload,
+        "sender": message.sender,
+        "phone_number_id": webhook.phone_number_id,
+        "timestamp": message.timestamp,
+        "raw": raw,
     }
-    match message.get("type"):
+    match message.type:
         case "text":
-            return InboundMessage(kind="text", text=message["text"]["body"], **common)
-        case "interactive" if "button_reply" in (message.get("interactive") or {}):
-            reply = message["interactive"]["button_reply"]
-            button = Button(id=reply["id"], title=reply["title"])
+            text = _TextBody.model_validate(_required(message.text, "text"))
+            return InboundMessage(kind="text", text=text.body, **common)
+        case "interactive" if "button_reply" in (message.interactive or {}):
+            reply = _ButtonReply.model_validate((message.interactive or {})["button_reply"])
+            button = Button(id=reply.id, title=reply.title)
             return InboundMessage(kind="button", button=button, **common)
         case "image":
-            image = message["image"]
-            caption = image.get("caption") or (kapso.get("message_type_data") or {}).get("caption")
+            image = _Image.model_validate(_required(message.image, "image"))
+            caption = image.caption or (kapso.message_type_data or _MessageTypeData()).caption
             return InboundMessage(
-                kind="image", text=caption, media=_media(image, kapso, image["id"]), **common
+                kind="image",
+                text=caption,
+                media=_media(image.mime_type, kapso, image.id),
+                **common,
             )
         case "audio":
-            audio = message["audio"]
-            transcript = ((kapso.get("transcript") or {}).get("text") or "").strip()
+            audio = _Audio.model_validate(_required(message.audio, "audio"))
+            transcript = ((kapso.transcript or _Transcript()).text or "").strip()
             return InboundMessage(
                 kind="audio",
                 audio=InboundAudio(
-                    media_id=audio["id"],
-                    mime_type=audio["mime_type"],
-                    byte_size=(kapso.get("media_data") or {}).get("byte_size"),
+                    media_id=audio.id,
+                    mime_type=audio.mime_type,
+                    byte_size=(kapso.media_data or _MediaData()).byte_size,
                     provider_transcript=transcript or None,
                 ),
-                media=_media(audio, kapso, audio["id"]),
+                media=_media(audio.mime_type, kapso, audio.id),
                 **common,
             )
         # WhatsApp announces an album with this message, then sends each photo on its own.
-        case "unsupported" if (message.get("unsupported") or {}).get("type") == "album":
+        case "unsupported" if message.unsupported and message.unsupported.type == "album":
             return InboundMessage(kind="album", **common)
         case _:
             return InboundMessage(kind="other", **common)
 
 
-def _media(content: dict[str, Any], kapso: dict[str, Any], media_id: str) -> InboundMedia:
-    media_data = kapso.get("media_data") or {}
+def _required[T](block: T | None, kind: str) -> T:
+    if block is None:
+        raise ChannelError(f"kapso {kind} message has no {kind} block")
+    return block
+
+
+def _media(mime_type: str | None, kapso: _Kapso, media_id: str) -> InboundMedia:
     return InboundMedia(
         media_id=media_id,
-        url=kapso.get("media_url"),
-        mime_type=content.get("mime_type"),
-        byte_size=media_data.get("byte_size"),
+        url=kapso.media_url,
+        mime_type=mime_type,
+        byte_size=(kapso.media_data or _MediaData()).byte_size,
     )
-
-
-def _int_or_none(value: Any) -> int | None:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None

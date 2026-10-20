@@ -127,9 +127,10 @@ docker run -d --name build101-pg -p 54329:5432 -e POSTGRES_PASSWORD=postgres \
 TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:54329/build101_test uv run pytest
 uv run pytest -m live           # hits Gemini (text, images, transcription, conversation evals) and Kapso; needs GEMINI_API_KEY
 uv run ruff check . && uv run ruff format --check .
+uv run pyright                  # type check (standard mode), 0 errors
 
 cd frontend
-npm run lint && npm run build
+npm run typecheck && npm run lint && npm run build
 ```
 
 ## Deploy

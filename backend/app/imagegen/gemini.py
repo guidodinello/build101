@@ -45,7 +45,7 @@ class GeminiImageGen:
         self._client = client
         self._model = model
         self._image_size = image_size
-        self._thinking_level = thinking_level.upper()
+        self._thinking_level = types.ThinkingLevel(thinking_level.upper())
         self._semaphore = asyncio.Semaphore(max_concurrency)
 
     @classmethod
@@ -67,7 +67,8 @@ class GeminiImageGen:
         aspect_ratio: str | None = None,
         image_size: str | None = None,
     ) -> GeneratedImage:
-        contents = build_contents(prompt, reference_images, style_image)
+        parts = build_contents(prompt, reference_images, style_image)
+        contents: list[types.ContentUnion] = [*parts]  # list is invariant: widen to the SDK type
         config = types.GenerateContentConfig(
             response_modalities=["TEXT", "IMAGE"],
             image_config=types.ImageConfig(
@@ -123,7 +124,7 @@ def parse_response(response: types.GenerateContentResponse, model: str) -> Gener
             )
 
     text = " ".join(part.text for part in parts if part.text and not part.thought)
-    if finish_reason in BLOCKING_REASONS:
+    if finish_reason is not None and finish_reason in BLOCKING_REASONS:
         raise ImageGenBlocked(finish_reason.value)
     logger.warning("gemini returned no image (finish_reason=%s): %.300s", finish_reason, text)
     raise ImageGenNoImage(f"gemini returned no image (finish_reason={finish_reason})")

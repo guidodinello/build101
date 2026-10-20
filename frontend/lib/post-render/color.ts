@@ -18,13 +18,13 @@ function channel(value: number): number {
 }
 
 export function luminance(hex: string): number {
-  const [r, g, b] = rgb(hex).map(channel);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const [r, g, b] = rgb(hex);
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
 }
 
 export function contrast(first: string, second: string): number {
-  const [light, dark] = [luminance(first), luminance(second)].sort((a, b) => b - a);
-  return (light + 0.05) / (dark + 0.05);
+  const [a, b] = [luminance(first), luminance(second)];
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
 export function isDark(hex: string): boolean {

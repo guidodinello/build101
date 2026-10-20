@@ -2,6 +2,8 @@
 
 External services, how we call them, and the gotchas that will bite in a 24h build. Verify shapes against the official docs linked in each section. APIs change; this was written in October 2026.
 
+Each adapter (`channels/kapso_webhook.py`, `channels/kapso.py`, `instagram/meta.py`, `publishing/zernio.py`) parses the provider's JSON with private Pydantic models defined next to it. Unknown fields are ignored, a missing field the code needs raises the adapter's own error (`ChannelError`, `InstagramError`, `PublisherError`), and optional fields that are `null` or oddly shaped count as absent.
+
 ## WhatsApp
 
 The Owner's WhatsApp goes through **Kapso**, a platform for the official WhatsApp API built on top of Meta's Cloud API ([ADR 0020](../decisions/0020-whatsapp-via-kapso.md)). We call its REST API with `httpx` from `app/channels/kapso.py`, behind `ChannelPort`; Kapso has no Python SDK (its SDK is TypeScript only). If Kapso fails the first-hour test, [Plan B](#plan-b-meta-cloud-api-direct) is Meta's Cloud API directly behind the same port. The web simulator stays the dev channel and the stage fallback.

@@ -4,9 +4,9 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import cache
-from typing import Annotated, Any
+from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 
 from app.config import Settings, get_settings
 from app.conversation.factory import build_inbound_handler
@@ -16,7 +16,7 @@ from app.media.public import get_public_images, get_public_videos
 from app.publishing.factory import get_publisher
 from app.ratelimit import TURNS_BURST, TURNS_PER_MINUTE, RateLimiter
 
-from .base import ChannelPort, InboundMessage
+from .base import ChannelError, ChannelPort, InboundMessage
 from .factory import build_channel
 from .inbound import (
     DbDedupeStore,
@@ -61,7 +61,7 @@ def get_inbound_handler() -> InboundHandler:
 
 
 @asynccontextmanager
-async def lifespan(app: Any) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Built at boot so a missing GEMINI_API_KEY or PUBLIC_BACKEND_URL stops the app, instead of
     # turning every webhook into a 500. Tests swap the handler through dependency_overrides.
     app.dependency_overrides.get(get_inbound_handler, get_inbound_handler)()
@@ -127,7 +127,7 @@ async def whatsapp_webhook(
 
     try:
         message = parse_message(json.loads(raw_body), fallback_id=x_idempotency_key)
-    except (ValueError, KeyError, TypeError):
+    except (ChannelError, ValueError, KeyError, TypeError):
         logger.warning("unparseable %s payload", x_webhook_event, exc_info=True)
         return {"status": "ignored"}
 
