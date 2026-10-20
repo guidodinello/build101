@@ -63,6 +63,10 @@ export function DoneScreen() {
     );
   }
 
+  if (submission.status === "failed" && submission.error instanceof ApiError && submission.error.code === "not_in_pilot") {
+    return <ScreenLayout title="¡Gracias por tu interés!" subtitle={submission.error.message} />;
+  }
+
   if (submission.status === "failed") {
     const missingData = submission.error instanceof ApiError && submission.error.status === 422;
     return (
