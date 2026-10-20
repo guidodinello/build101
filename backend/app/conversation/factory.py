@@ -21,6 +21,7 @@ from app.posts.drafts import PostDrafter
 from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher, Sleep
+from app.posts.shared_account import SharedAccountGuard
 from app.posts.store import InMemoryPosts
 from app.posts.video_maker import VideoMaker
 from app.publishing.base import PublisherPort
@@ -89,6 +90,8 @@ class ChatParts:
     photo_debounce_s: float = PHOTO_DEBOUNCE_S
     keep_alive_s: float = KEEP_ALIVE_S
     publish_sleep: Sleep | None = None
+    # None: every Owner's Approval publishes to `account_id` (ADR 0024).
+    shared_account: SharedAccountGuard | None = None
     now: Callable[[], datetime] = local_now
 
 
@@ -143,6 +146,7 @@ def build_chat(parts: ChatParts) -> Chat:
         parts.publish_sleep or asyncio.sleep,
         videos=public_videos,
         background=background,
+        shared_account=parts.shared_account,
     )
     video_maker = (
         VideoMaker(
@@ -220,6 +224,14 @@ def build_conversation(
                 logger.warning(
                     "PUBLISHER=zernio without ZERNIO_ACCOUNT_ID: posts can't be published"
                 )
+            shared_account = SharedAccountGuard(
+                settings.zernio_owner_phone, open_when_unset=settings.env != "prod"
+            )
+            if settings.env == "prod" and not settings.zernio_owner_phone:
+                logger.warning(
+                    "ENV=prod without ZERNIO_OWNER_PHONE: nobody can publish to the shared "
+                    "Instagram account (ADR 0024)"
+                )
             sessions = get_sessionmaker() if settings.database_url else None
             # ADR 0030: with the database, the conversation and the notes survive a deploy.
             history: History = DbHistory(sessions) if sessions else InMemoryHistory()
@@ -258,6 +270,7 @@ def build_conversation(
                     sessions=sessions,
                     video_gen=build_video_gen(settings),
                     videos=videos,
+                    shared_account=shared_account,
                 )
             )
             if sessions is None:

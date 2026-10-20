@@ -8,16 +8,20 @@ from app.conversation.events import (
     PostDiscarded,
     PostNotStarted,
     PostStarted,
+    PublishNotConnected,
     PublishStarted,
     StaleButton,
+    fallback,
 )
 from app.conversation.outbound import buttons
 from app.conversation.photos import InMemoryPhotos
+from app.copy import messages_es
 from app.media.public import PublicImages
 from app.posts.drafts import PostCopy, PostDrafter
 from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import PostMaker
 from app.posts.publish import PostPublisher
+from app.posts.shared_account import SharedAccountGuard
 from app.posts.store import Post, PostImage, PostStatus
 from app.publishing.base import PublishResult
 from app.rendering.mock import MockRenderer
@@ -40,7 +44,7 @@ class RecordingPublisher:
 
 
 class Rig:
-    def __init__(self) -> None:
+    def __init__(self, shared_account: SharedAccountGuard | None = None) -> None:
         self.model = ScriptedModel(drafts={PostCopy: PostCopy(caption="Mesa", hashtags=[])})
         self.photos, self.store = InMemoryPhotos(), PostLifecycle()
         images = PublicImages()
@@ -64,6 +68,7 @@ class Rig:
             "https://backend.test",
             ACCOUNT,
             background=self.background,
+            shared_account=shared_account,
         )
         self.events: list[object] = []
         self.channel = FakeChannel()
@@ -202,3 +207,35 @@ async def test_subilo_can_still_publish_an_approved_post(rig: Rig) -> None:
     rig.add_post("p1", "approved")
 
     assert [post.id for post in rig.store.pending(SENDER)] == ["p1"]
+
+
+OTHER_OWNER = "59899000009"
+
+
+async def test_the_owner_of_the_shared_account_publishes_with_a_tap() -> None:
+    rig = Rig(SharedAccountGuard(SENDER, open_when_unset=False))
+    post = rig.add_post("p1", "approved")
+
+    event = await rig.tap("post_publish:p1")
+    await rig.finish()
+
+    assert event == PublishStarted("p1")
+    assert post.status == "published"
+
+
+@pytest.mark.parametrize(
+    ("status", "button_id"), [("approved", "post_publish:p1"), ("failed", "post_retry:p1")]
+)
+async def test_another_owners_tap_publishes_nothing_and_is_not_connected(
+    status: PostStatus, button_id: str
+) -> None:
+    rig = Rig(SharedAccountGuard(OTHER_OWNER, open_when_unset=False))
+    post = rig.add_post("p1", status)
+
+    event = await rig.tap(button_id)
+    await rig.finish()
+
+    assert event == PublishNotConnected("p1")
+    assert fallback(event) == messages_es.NEED_IG
+    assert post.status == status
+    assert rig.publisher.keys == []

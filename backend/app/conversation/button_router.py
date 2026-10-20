@@ -34,6 +34,7 @@ from .events import (
     PostDiscarded,
     PostNotStarted,
     PostStarted,
+    PublishNotConnected,
     PublishStarted,
     StaleButton,
 )
@@ -175,4 +176,10 @@ def started(result: dict[str, Any], origin: str) -> Event:
 
 
 def publishing(post_id: str, result: dict[str, Any]) -> Event:
-    return StaleButton() if result.get("error") else PublishStarted(post_id)
+    match result.get("error"):
+        case None:
+            return PublishStarted(post_id)
+        case "need_ig":
+            return PublishNotConnected(post_id)
+        case _:
+            return StaleButton()

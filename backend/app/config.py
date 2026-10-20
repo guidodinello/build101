@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     zernio_base_url: str = "https://zernio.com/api/v1"
     zernio_profile_id: str | None = None
     zernio_account_id: str | None = None
+    # The Owner whose Instagram ZERNIO_ACCOUNT_ID is: only their Approvals publish (#186, until
+    # #185). Unset, nobody publishes with ENV=prod and everyone does elsewhere
+    zernio_owner_phone: str | None = None
 
     # Reading the Owner's Instagram through our own Meta app (ADR 0028). INSTAGRAM = meta | mock
     instagram: Literal["meta", "mock"] = "mock"

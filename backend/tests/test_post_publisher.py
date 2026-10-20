@@ -1,14 +1,18 @@
 import asyncio
+import json
+import logging
 from datetime import datetime
 
 import pytest
 
 from app.background import BackgroundWork
-from app.conversation.factory import ChatParts, build_chat
+from app.config import Settings
+from app.conversation.factory import ChatParts, build_chat, build_conversation
 from app.conversation.history import InMemoryHistory
 from app.copy import messages_es
 from app.media.public import PublicImages
 from app.posts.publish import MAX_RETRY_AFTER_S
+from app.posts.shared_account import SharedAccountGuard
 from app.posts.store import Post, PostImage, PostVideo
 from app.publishing.base import (
     PublisherError,
@@ -50,6 +54,7 @@ class Rig:
         publisher: FakePublisher | MockPublisher | None = None,
         account_id: str | None = ACCOUNT_ID,
         max_images: int = 200,
+        shared_account: SharedAccountGuard | None = None,
     ) -> None:
         self.model = model
         self.publisher = publisher or FakePublisher()
@@ -78,6 +83,7 @@ class Rig:
                 history=self.history,
                 keep_alive_s=60.0,
                 publish_sleep=sleep,
+                shared_account=shared_account,
             )
         )
         self.photos, self.store = self.chat.photos, self.chat.lifecycle
@@ -508,3 +514,82 @@ async def test_when_the_model_is_down_the_owner_still_hears_how_it_ended(
         if step["type"] == "user_input"
     ]
     assert f'The Owner was told: "{fallback}"' in texts[-1]
+
+
+OTHER_OWNER = "59899000009"
+NOT_CONNECTED = text_reply("Todavía no puedo publicar en tu Instagram 🙈")
+
+
+def test_the_shared_account_guard_names_one_owner_whatever_the_formatting() -> None:
+    named = SharedAccountGuard("+598 99 000 001", open_when_unset=False)
+
+    assert named.allows(SENDER)
+    assert not named.allows(OTHER_OWNER)
+    assert not SharedAccountGuard(None, open_when_unset=False).allows(SENDER)
+    assert SharedAccountGuard(None, open_when_unset=True).allows(SENDER)
+
+
+async def test_the_owner_named_for_the_shared_account_publishes_as_before() -> None:
+    rig = Rig(
+        ScriptedModel(replies=[approve("p1"), STARTED, LIVE]),
+        shared_account=SharedAccountGuard(SENDER, open_when_unset=False),
+    )
+    rig.add_post("p1")
+
+    await rig.say("subilo")
+    await rig.finish()
+
+    assert [call["account_id"] for call in rig.publisher.calls] == [ACCOUNT_ID]
+    assert status(rig, "p1") == "published"
+
+
+@pytest.mark.parametrize("owner", [OTHER_OWNER, None])
+async def test_another_owners_approval_in_words_publishes_nothing_and_is_not_connected(
+    owner: str | None, caplog: pytest.LogCaptureFixture
+) -> None:
+    rig = Rig(
+        ScriptedModel(replies=[approve("p1"), NOT_CONNECTED]),
+        shared_account=SharedAccountGuard(owner, open_when_unset=False),
+    )
+    rig.add_post("p1")
+
+    with caplog.at_level(logging.WARNING, logger="app.posts.publish"):
+        await rig.say("subilo")
+        await rig.finish()
+
+    assert rig.publisher.calls == []
+    assert status(rig, "p1") == "pending_approval"
+    result = rig.model.calls[1][-1]
+    assert result["type"] == "function_result"
+    assert json.loads(result["result"]) == {"error": "need_ig"}
+    assert rig.said == [NOT_CONNECTED.text]
+    assert "not the Owner of the shared account" in caplog.text
+    assert SENDER not in caplog.text
+
+
+def chat_settings(**changes: object) -> Settings:
+    return Settings(
+        inbound_handler="chat",
+        gemini_api_key="key",
+        public_backend_url="https://backend.test",
+        **changes,
+    )
+
+
+def test_the_chat_publishes_behind_the_guard_from_the_settings(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    named = build_conversation(
+        chat_settings(env="prod", zernio_owner_phone=SENDER), PublicImages(), MockPublisher()
+    )
+    with caplog.at_level(logging.WARNING, logger="app.conversation.factory"):
+        unnamed = build_conversation(chat_settings(env="prod"), PublicImages(), MockPublisher())
+    local = build_conversation(chat_settings(), PublicImages(), MockPublisher())
+
+    def guard(conversation: object) -> SharedAccountGuard:
+        return conversation.handler._buttons._publisher._shared_account
+
+    assert guard(named) == SharedAccountGuard(SENDER, open_when_unset=False)
+    assert guard(unnamed) == SharedAccountGuard(None, open_when_unset=False)
+    assert guard(local) == SharedAccountGuard(None, open_when_unset=True)
+    assert "without ZERNIO_OWNER_PHONE: nobody can publish" in caplog.text

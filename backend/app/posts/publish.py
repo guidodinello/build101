@@ -21,6 +21,7 @@ from app.publishing.base import (
 )
 
 from .lifecycle import ApprovedPost, PostLifecycle
+from .shared_account import SharedAccountGuard
 from .store import Post
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ class PostPublisher:
         *,
         background: BackgroundWork,
         videos: PublicVideos | None = None,
+        shared_account: SharedAccountGuard | None = None,
     ) -> None:
         self._publisher = publisher
         self._posts = posts
@@ -68,6 +70,7 @@ class PostPublisher:
         self._account_id = account_id
         self._sleep = sleep
         self._background = background
+        self._shared_account = shared_account
 
     def approve(
         self,
@@ -111,6 +114,13 @@ class PostPublisher:
         account_id = self._account_id
         if account_id is None:
             logger.warning("cannot publish post %s: ZERNIO_ACCOUNT_ID is not set", approved.post.id)
+            return {"error": "need_ig"}
+        if self._shared_account and not self._shared_account.allows(approved.post.sender):
+            logger.warning(
+                "cannot publish post %s: %s is not the Owner of the shared account (ADR 0024)",
+                approved.post.id,
+                mask(approved.post.sender),
+            )
             return {"error": "need_ig"}
         post = self._posts.begin_publish(approved)
         self._background.start(

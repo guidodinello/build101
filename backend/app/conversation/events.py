@@ -111,6 +111,17 @@ class PublishFailed:
 
 
 @dataclass(frozen=True, slots=True)
+class PublishNotConnected:
+    post_id: str
+
+    def note(self) -> str:
+        return (
+            f"[post {self.post_id} not published] The Owner tapped a button to publish it, but "
+            "publishing to their Instagram isn't connected yet. Nothing was published."
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class PhotosReceived:
     """Photos arrived with no text of their own."""
 
@@ -295,6 +306,7 @@ Event = (
     | Published
     | PublishPending
     | PublishFailed
+    | PublishNotConnected
     | PhotosReceived
     | AudioUnclear
     | UnsupportedMedia
@@ -363,6 +375,8 @@ def fallback(event: Event) -> str | None:
             return messages_es.PUBLISH_PENDING
         case PublishFailed():
             return messages_es.PUBLISH_FAILED
+        case PublishNotConnected():
+            return messages_es.NEED_IG
         case PhotosReceived(photo_ids=ids):
             return messages_es.PHOTOS_KEPT if len(ids) > 1 else messages_es.PHOTO_KEPT
         case AudioUnclear():
