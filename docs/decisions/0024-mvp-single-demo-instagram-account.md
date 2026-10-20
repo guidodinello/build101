@@ -21,3 +21,7 @@ The per-Business connect flow (`/api/o/{token}/instagram/connect` + `/callback`,
 - Every Business in the demo publishes to the same Instagram account; there is no real multi-business onboarding.
 - The wizard has no Instagram screen (step 6) and no feed import (6b); the demo script skips them.
 - `PublisherPort` already takes the account id, so callers do not change. To reverse this once T02, T24 and T25 exist: build the connect endpoints and the wizard step, and read the ids from `social_accounts` instead of env.
+
+## Interim publish guard (2026-10-20)
+
+For the pilot, `ZERNIO_ACCOUNT_ID` may point at a pilot Owner's own Instagram, and then every other Owner's Approval would publish there too ([BUG-1](../research/audit-2026-10/bugs-reliability.md), [PRD-1](../research/audit-2026-10/product.md)). So while every Post goes to this one shared account, only the Owner whose account it is may publish: `ZERNIO_OWNER_PHONE` names their WhatsApp number. Anyone else's Approval, by tap or in words, publishes nothing and gets the `need_ig` answer (publishing to Instagram isn't connected yet); the Post keeps its status. Unset, nobody publishes with `ENV=prod` and everyone does elsewhere, as before. The Approval itself is still decided in code ([ADR 0007](0007-approve-every-post.md)): the guard is one more refusal before the publisher, in `backend/app/posts/shared_account.py`, and goes away when Posts publish to each Business's own account (#185). Issue #186, which also closes the bot to numbers outside the pilot list.

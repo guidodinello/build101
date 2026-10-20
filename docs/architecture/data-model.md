@@ -370,6 +370,18 @@ create table inbound_deliveries (
 create index ix_inbound_deliveries_received_at on inbound_deliveries (received_at);
 alter table inbound_deliveries enable row level security;
 
+-- The closed pilot (#186, migration 0008): the WhatsApp numbers that may onboard, chat and publish,
+-- on top of PILOT_SENDERS. Edited by hand in the Supabase SQL editor (setup.md § Pilot numbers) and
+-- read by the backend at most once a minute. Digits only, so a delete by the digits can't miss a
+-- row written another way. No Business link: a number gets in before it has a Business.
+create table pilot_senders (
+  phone       text not null,
+  created_at  timestamptz not null default now(),
+  constraint pilot_senders_pkey primary key (phone),
+  constraint ck_pilot_senders_phone_digits check (phone ~ '^[0-9]{8,15}$')
+);
+alter table pilot_senders enable row level security;
+
 create table jobs (
   id           uuid primary key default gen_random_uuid(),
   business_id  uuid constraint jobs_business_id_fkey references businesses(id) on delete cascade,
@@ -438,3 +450,4 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 | `0005` | Instagram tokens are not kept (security audit M-5, [ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)): sets `social_accounts.access_token` to null for every row; `import_instagram` now claims it (reads and nulls it in one transaction) when it starts. The downgrade is a no-op, since the tokens can't be restored |
 | `0006` | Durable webhook dedupe (security audit L-3): `inbound_deliveries(external_id pk, received_at)`, RLS on, rows pruned after 48 h by the webhook itself |
 | `0007` | The Data API is closed (2026-10-19 audit, finding SEC-1): RLS on every table in `public`, `alembic_version` included; every grant of `anon` and `authenticated` on tables, sequences and functions in `public` revoked, along with the default privileges `postgres` gives them there (skipped where those roles don't exist, as in CI); `PUBLIC`'s `EXECUTE` on functions in `public` revoked, and on functions `postgres` creates later. Sets a 5 s `lock_timeout`. The downgrade turns RLS off again but leaves every grant revoked |
+| `0008` | The closed pilot (#186, audit SEC-4): `pilot_senders(phone pk, created_at)`, digits only (8 to 15), RLS on. The downgrade drops it |

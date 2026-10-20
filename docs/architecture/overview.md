@@ -226,11 +226,12 @@ build101/
 │   ├── app/
 │   │   ├── main.py           # FastAPI app, routers, startup
 │   │   ├── config.py         # pydantic-settings
+│   │   ├── pilot.py          # PilotList, PilotGate: the closed pilot (#186)
 │   │   ├── api/              # webhooks_whatsapp.py, onboarding.py, dashboard.py, uploads.py, dev.py
 │   │   ├── conversation/     # onboarding.py (OnboardingGate: Flow 1 before the web form, wraps chat.py), chat.py (routes each kind of message), turns.py (one orchestrator turn: Owner and event turns),
 │   │   │                     # toolbox.py (tool dispatch), photo_batches.py (photo debounce), tools.py (schemas), approval.py, button_router.py, brand.py, history.py, photos.py, outbound.py (the one way to send an event to the Owner), factory.py,
 │   │   │                     # prompts/ (orchestrator.md + making_posts.md, publishing.md, rules.md); planned: state.py
-│   │   ├── posts/            # lifecycle.py (PostLifecycle: every Post state change and the Approval inputs), store.py (InMemoryPosts), maker.py, video_maker.py, publish.py, drafts.py
+│   │   ├── posts/            # lifecycle.py (PostLifecycle: every Post state change and the Approval inputs), store.py (InMemoryPosts), maker.py, video_maker.py, publish.py, drafts.py, shared_account.py (interim publish guard, ADR 0024)
 │   │   ├── knowledge/        # base.py (Knowledge: what the Agency knows about a Business), db.py (DbKnowledge + readers), local.py (LocalKnowledge, no database)
 │   │   ├── agents/           # asset_analyst.py, brand_strategist.py, content_strategist.py,
 │   │   │                     # copywriter.py, art_director.py, text_checker.py, schemas.py, prompts/*.md

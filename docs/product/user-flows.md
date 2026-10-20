@@ -89,6 +89,8 @@ If the owner writes something unrelated while `awaiting` is set (e.g. a new requ
 
 Trigger: a phone number with no `businesses` row sends any message (in the demo: "Hola").
 
+Before this flow, and before any other: a number not on the pilot list (#186, [setup.md § Pilot numbers](../implementation/setup.md#pilot-numbers)) gets the `waitlist` reply, at most once a day, and nothing else. No `businesses` row, no link, no AI call; an existing Business whose number left the list keeps its data and gets the same reply.
+
 1. System creates `businesses` row (`onboarding_state = new`, `owner_phone`), stores the message.
 2. Bot sends the welcome (who it is, what it does, that nothing is published without approval) and asks for the business name. State → `awaiting_name`.
 3. Owner replies with the name ("Muebles Ramírez").
@@ -123,7 +125,7 @@ Questionnaire (step 6):
 
 Posts per week is no longer asked: nothing schedules yet (T30), and the Brand Brain defaults to 3.
 
-On submit: `POST /api/o/{token}/complete` → state `generating_brand` → Flow 3 starts in the background.
+On submit: `POST /api/o/{token}/complete` → state `generating_brand` → Flow 3 starts in the background. A number not on the pilot list can't submit (`403 not_in_pilot`): no brand generation starts.
 
 ## Flow 3 — Brand Brain generation and confirmation (Must)
 
@@ -258,7 +260,7 @@ If several Posts are `pending_approval`, the orchestrator asks which one, showin
    If not (ad-hoc) → bot sends `publish_when_adhoc`.
 2. `[Publicar ahora]` → status `publishing` → Publisher service → on success `published`, store `external_post_id` + `permalink` → bot sends `published` with the permalink. A Reel goes out as a single-video Reel through Zernio; Instagram processes the video for up to a few minutes, so the Post stays `publishing` until the provider reports it.
 3. `[Programar]` → if planned date exists, use it; otherwise `awaiting = schedule_time` → owner: "el jueves a las 8 de la noche" → orchestrator parses to ISO datetime in the business timezone (`America/Montevideo`) → confirm → provider schedules → status `scheduled` → bot sends `scheduled`. When the provider later reports the publish, the bot sends `published` (only deliverable inside the 24-hour window, see [integrations.md](../architecture/integrations.md#receiving)).
-4. No Instagram connected → bot sends `need_ig`. The post stays `approved`. In the MVP Instagram is always "connected": the demo account comes from env ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)), so this path only fires with `PUBLISHER=zernio` and no `ZERNIO_ACCOUNT_ID`. After the MVP it is the path for a Business that has not connected.
+4. No Instagram connected → bot sends `need_ig`. The post stays `approved`. In the MVP Instagram is always "connected": the demo account comes from env ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)), so this path only fires with `PUBLISHER=zernio` and no `ZERNIO_ACCOUNT_ID`, or for an Owner other than `ZERNIO_OWNER_PHONE` while every Post goes to that shared account (the interim guard in [ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md#interim-publish-guard-2026-10-20)). After the MVP it is the path for a Business that has not connected.
 5. Failure → status `failed` → bot sends `publish_failed`.
 
 ## Flow 9 — Owner sends a photo in the chat (Must; videos Could)

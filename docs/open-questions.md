@@ -119,7 +119,7 @@ From [ADR 0012](decisions/0012-catalog-content-dashboard-reels.md), moved to Cou
 
 ## Abuse and limits (security audit #115)
 
-- [ ] Many new WhatsApp numbers: each one creates a `Business` row at its first message, and the per-sender turn limit does not cap how many numbers there are. Do we need a global cap on new senders per hour in front of the onboarding gate (#106)?
+- [ ] Many new WhatsApp numbers: each one creates a `Business` row at its first message, and the per-sender turn limit does not cap how many numbers there are. Do we need a global cap on new senders per hour in front of the onboarding gate (#106)? For the closed pilot the pilot list (#186) answers it: a number not on it creates no row and gets one reply a day. Still open for a public number.
 
 ## From the 2026-10-19 audit
 

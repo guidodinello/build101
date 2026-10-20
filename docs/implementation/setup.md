@@ -16,7 +16,7 @@
 
 | Variable | Example | Notes |
 |---|---|---|
-| `ENV` | `local` \| `prod` | **Must be `prod` in production**: it turns off `/dev/*` (even with `ENABLE_DEV_ENDPOINTS=true`) and the API docs. The default is `local` |
+| `ENV` | `local` \| `prod` | **Must be `prod` in production**: it turns off `/dev/*` (even with `ENABLE_DEV_ENDPOINTS=true`) and the API docs, and an empty pilot list or an unset `ZERNIO_OWNER_PHONE` then lets nobody in or publish. The default is `local` |
 | `PUBLIC_BACKEND_URL` | `https://api-example.up.railway.app` | Railway-generated domain ([ADR 0017](../decisions/0017-backend-host-railway.md)). Used in logs/webhook docs, and for the URLs of generated images until Supabase Storage is in (T56) |
 | `FRONTEND_URL` | `https://neitorai.vercel.app` | Magic links + Zernio redirect |
 | `FRONTEND_ORIGINS` | `https://neitorai.vercel.app,http://localhost:3000` | CORS |
@@ -46,12 +46,14 @@
 | `ZERNIO_API_KEY` | `sk_...` | |
 | `ZERNIO_BASE_URL` | `https://zernio.com/api/v1` | Optional; this is the default |
 | `ZERNIO_PROFILE_ID`, `ZERNIO_ACCOUNT_ID` | `...` | The single demo Instagram account's Zernio profile and account ids. Temporary: they stand in for `social_accounts` until T02 exists ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md)). With `PUBLISHER=zernio`, publishing from the chat (T57) needs `ZERNIO_ACCOUNT_ID` and an HTTPS `PUBLIC_BACKEND_URL` (a `cloudflared` tunnel or Railway, not free ngrok) that Zernio can fetch the post images from; without the account id the bot says publishing isn't connected |
+| `ZERNIO_OWNER_PHONE` | `59899123456` | The WhatsApp number of the Owner whose Instagram `ZERNIO_ACCOUNT_ID` is: while every Post goes to that one account, only their Approvals publish, and anyone else's gets "publishing isn't connected yet" ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md#interim-publish-guard-2026-10-20), until #185). Unset, **nobody publishes with `ENV=prod`** (the boot log warns) and everyone does elsewhere |
 | `INSTAGRAM` | `mock` \| `meta` | Reading the Owner's Instagram for the Brand Brain ([ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)). `mock` (default) connects at once and imports three fake posts; `meta` uses our Meta app with Instagram Login (setup in [integrations.md](../architecture/integrations.md#reading-the-owners-instagram-adr-0028): the *Instagram API with Instagram Login* product, the account added as Instagram Tester with the invite accepted, and `$PUBLIC_BACKEND_URL/oauth/instagram/callback` registered as a redirect URI) |
 | `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | `...` | The Instagram app id and secret from the Meta app's Instagram Login settings. Required with `INSTAGRAM=meta`; the secret also signs the start ticket and the binding cookie of the OAuth flow |
 | `INSTAGRAM_GRAPH_VERSION` | `v24.0` | Version of `graph.instagram.com` calls |
 | `INSTAGRAM_IMPORT_MAX_POSTS`, `INSTAGRAM_IMPORT_MAX_IMAGES` | `100`, `24` | Posts whose captions and engagement feed the Brand Strategist, and the newest images imported as Brand assets (each one an Asset Analyst call) |
 | `ZERNIO_TEST_IMAGE_URL` | `https://raw.githubusercontent.com/guidodinello/build101/main/backend/tests/fixtures/zernio-live-test.jpg` | Only for `uv run pytest -m live`: a public HTTPS URL serving the fixture JPEG with no redirect. Before the PR merges, put the branch name in place of `main` (the branch is deleted after the squash merge). The live publish posts to the real demo Instagram: delete the post by hand |
 | `ZERNIO_WEBHOOK_SECRET` | random | |
+| `PILOT_SENDERS` | `+598 99 123 456, 59899000002` | WhatsApp numbers let into the closed pilot, comma-separated, any formatting, on top of the `pilot_senders` table ([Pilot numbers](#pilot-numbers)). The only source without `DATABASE_URL`. With neither, **nobody gets in with `ENV=prod`** (the boot log warns) and everyone does elsewhere |
 | `WHATSAPP_BOT_NUMBER` | `56920403095` | Digits only: the shared Kapso sandbox number. The `wa.me` link on the wizard's last screen (`OnboardingState.whatsapp_url`) |
 | `ENABLE_DEV_ENDPOINTS` | `true` | `/dev/*` |
 | `DEV_TOKEN` | random | Header `X-Dev-Token` |
@@ -87,6 +89,22 @@ Plan B only (Meta Cloud API direct, if Kapso fails its first-hour test; [integra
 - Only if the Could video work starts: switch to **Pro** (Free caps files at 50 MB, [research/media-uploads.md](../research/media-uploads.md#storage-supabase)) and set Storage settings → global file size limit **300 MB** (same as `MAX_VIDEO_MB`).
 - Buckets: `assets` (private; photos and logos, plus videos and derived frames later) and `renders` (public; the generated post images). The browser uploads straight to `assets` with signed upload URLs issued by the backend; photos and logos (≤ 10 MB) go in a single request, and only videos (Could) would need resumable (TUS) uploads. Create both buckets by hand in the dashboard (Storage → New bucket) before the first upload.
 - **Required bucket config (`assets`).** Set a `file_size_limit` of **10 MB** (same as `MAX_PHOTO_MB`) and `allowed_mime_types` = `image/jpeg, image/png, image/webp, image/heic`. The backend re-checks both when the browser calls `/complete` (it stops reading an object past `MAX_PHOTO_MB` and opens it only as its declared type), but the signed upload URL doesn't enforce the size the browser declared, so the bucket is the first line of defense and keeps oversized or foreign files out of storage altogether. If the Could video work starts, the limit has to allow `MAX_VIDEO_MB` and `video/mp4, video/quicktime` as well.
+
+## Pilot numbers
+
+The bot runs as a closed pilot (#186): only numbers on the pilot list can start onboarding, talk to the bot, finish the wizard or publish. Any other number gets one fixed reply a day (`waitlist` in the [copy deck](../product/conversation-design.md#fixed-messages-copy-deck)) and nothing else: no Business, no wizard link, no AI call, no job, and nothing stored about it beyond a masked log line. A Business whose number leaves the list gets the same reply; its data is kept, and it comes back as it was when the number is added again.
+
+The list is the `pilot_senders` table plus `PILOT_SENDERS`. In production, use the table: a change takes effect within a minute (the backend reads it at most once a minute) with no deploy, and a deploy still drops in-flight work today ([BUG-2](../research/audit-2026-10/bugs-reliability.md)). `PILOT_SENDERS` is for the setup without a database, where it is the only source, and for local development; changing it on Railway means a redeploy. With both empty, nobody gets in with `ENV=prod` (the boot log warns `pilot list is empty with ENV=prod`) and everyone does elsewhere.
+
+Add or remove a number in the Supabase dashboard, SQL editor. Digits only, with the country code, no plus sign or spaces (the table refuses anything else, so a delete by those digits can't miss a row written another way):
+
+```sql
+insert into pilot_senders (phone) values ('59899123456');
+delete from pilot_senders where phone = '59899123456';
+select phone, created_at from pilot_senders order by created_at;
+```
+
+To let one pilot Owner publish to the shared Instagram account, set `ZERNIO_OWNER_PHONE` to their number too ([ADR 0024](../decisions/0024-mvp-single-demo-instagram-account.md#interim-publish-guard-2026-10-20)); that one is a Railway variable, so it needs a redeploy.
 
 ## Run locally
 

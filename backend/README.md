@@ -75,6 +75,8 @@ Set on the service (`railway variable set KEY --stdin --service backend`, value 
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | the project URL and its legacy `service_role` JWT (the code sends it as `apikey` and as a Bearer token) |
 | `FRONTEND_URL`, `FRONTEND_ORIGINS` | the Vercel domain, `https://neitorai.vercel.app` (no `localhost` in production CORS) |
 | `WHATSAPP_BOT_NUMBER` | `56920403095`, the shared Kapso sandbox number (only answers phones with an active sandbox session) |
+| `PILOT_SENDERS` | unset: the pilot numbers are rows of the `pilot_senders` table, edited in the Supabase SQL editor with no redeploy ([setup.md § Pilot numbers](../docs/implementation/setup.md#pilot-numbers)). With both empty nobody gets in, and the boot log says so |
+| `ZERNIO_OWNER_PHONE` | the WhatsApp number of the Owner whose Instagram `ZERNIO_ACCOUNT_ID` is; unset, nobody publishes ([ADR 0024](../docs/decisions/0024-mvp-single-demo-instagram-account.md#interim-publish-guard-2026-10-20)) |
 | `ENABLE_DEV_ENDPOINTS`, `DEV_TOKEN` | unset (dev endpoints off) |
 | `RENDERER`, `RENDERER_URL`, `RENDERER_SECRET` | `takumi`, the Vercel domain, and the same secret as the frontend's `RENDER_SECRET` |
 

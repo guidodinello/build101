@@ -21,6 +21,11 @@ The chat app through which the Owner talks to the assistant (e.g. WhatsApp, Tele
 _Avoid_: Platform, integration, interface
 _Status_: draft
 
+**Pilot list**:
+The WhatsApp numbers the team let into the closed pilot; only they can onboard, talk to the Agency and publish, and any other number gets one waitlist reply a day and nothing else.
+_Avoid_: Allowlist, whitelist, beta list
+_Status_: draft
+
 **Voice note**:
 An audio message the Owner records in the Channel, which the assistant reads as its transcript.
 _Avoid_: Audio, voice message, voice (reserved for the Brand Brain's brand voice)

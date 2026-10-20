@@ -42,7 +42,7 @@ Each outside service sits behind a small interface (a Python `Protocol`, called 
 | `ImageGenPort` | `imagegen/gemini.py` | `imagegen/mock.py` | `IMAGE_GEN` |
 | `PublisherPort` (Instagram) | `publishing/zernio.py` | `publishing/mock.py` | `PUBLISHER` |
 
-Everything is wired together in [`backend/app/conversation/factory.py`](../../backend/app/conversation/factory.py) (`build_conversation` reads `Settings`; `build_chat` is the one place the chat graph is wired, in production and in tests; it returns the inbound `handler` and the `notify` that jobs share). It is the best first file to read. The webhook's `get_conversation()` in `channels/router.py` puts the `handler` behind a `RateLimitedHandler` (a token bucket per sender, [#106](https://github.com/guidodinello/build101/issues/106)); `notify` is not limited, since code raises those events, not the Owner.
+Everything is wired together in [`backend/app/conversation/factory.py`](../../backend/app/conversation/factory.py) (`build_conversation` reads `Settings`; `build_chat` is the one place the chat graph is wired, in production and in tests; it returns the inbound `handler` and the `notify` that jobs share). It is the best first file to read. The webhook's `get_conversation()` in `channels/router.py` puts the `handler` behind a `RateLimitedHandler` (a token bucket per sender, [#106](https://github.com/guidodinello/build101/issues/106)), and that behind a `PilotGate` (`pilot.py`, the pilot list, [#186](https://github.com/guidodinello/build101/issues/186)); `notify` is not limited, since code raises those events, not the Owner.
 
 ## WhatsApp and the backend, through Kapso
 
@@ -63,7 +63,7 @@ We never call Meta directly: Kapso sits in between and exposes a Meta-compatible
 
 ## What happens to a message
 
-Every inbound message passes through two handlers in a row: `OnboardingGate`, which is plain code, and then `ChatHandler`, which is the AI.
+Every inbound message passes through two handlers in a row: `OnboardingGate`, which is plain code, and then `ChatHandler`, which is the AI. In front of both, `PilotGate` (`pilot.py`) answers a number not on the pilot list with the `waitlist` reply, at most once a day, and stops it there; the pilot list is `PILOT_SENDERS` plus the `pilot_senders` table, read at most once a minute ([setup.md § Pilot numbers](../implementation/setup.md#pilot-numbers)).
 
 **`OnboardingGate`** (`conversation/onboarding.py`) looks up the Business by the Owner's phone number in Postgres, then acts on its onboarding state:
 
