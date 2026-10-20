@@ -66,14 +66,13 @@ class Rig:
             background=self.background,
         )
         self.events: list[object] = []
-
-        async def notify(sender: str, event: object, channel: object) -> None:
-            self.events.append(event)
-
-        self.maker.on_event(notify)
-        self.publishing.on_event(notify)
         self.channel = FakeChannel()
-        self.router = ButtonRouter(self.store, self.maker, self.publishing, sessions=None)
+        self.router = ButtonRouter(
+            self.store, self.maker, self.publishing, sessions=None, brand=None
+        )
+
+    async def notify(self, sender: str, event: object, channel: object) -> None:
+        self.events.append(event)
 
     def add_post(self, post_id: str, status: PostStatus = "pending_approval") -> Post:
         photo = self.photos.add(SENDER, make_image((100, 100)), None)
@@ -90,7 +89,7 @@ class Rig:
         return post
 
     async def tap(self, button_id: str) -> object:
-        return await self.router.handle(SENDER, button_id, self.channel)
+        return await self.router.handle(SENDER, button_id, self.channel, self.notify)
 
     async def finish(self) -> None:
         await self.background.join()

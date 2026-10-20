@@ -7,7 +7,7 @@ from PIL import Image
 
 from app.agents.schemas import BrandBrain
 from app.background import BackgroundWork
-from app.conversation.events import Event, PostFailed, PostSent
+from app.conversation.events import Event, Notify, PostFailed, PostSent
 from app.conversation.photos import LOCAL_TZ, InMemoryPhotos
 from app.knowledge.base import BusinessKnowledge, Note
 from app.media.images import POST_SIZE, image_size
@@ -62,6 +62,17 @@ def carousel_draft(slides: int, family: str = "editorial") -> CarouselDraft:
     )
 
 
+async def drop(sender: str, event: Event, channel: object) -> None:
+    """A notify for tests that don't look at the events."""
+
+
+def recorder(events: list[Event]) -> Notify:
+    async def record(sender: str, event: Event, channel: object) -> None:
+        events.append(event)
+
+    return record
+
+
 def maker(
     model: ScriptedModel,
     image_gen: CountingImageGen,
@@ -69,20 +80,13 @@ def maker(
     images: PublicImages | None = None,
     max_posts_per_day: int = 5,
     store: PostLifecycle | None = None,
-    events: list[Event] | None = None,
     brand: BrandBrain | None = None,
     renderer: MockRenderer | None = None,
     notes: list[str] | None = None,
     trend_notes: str | None = None,
     knowledge: FakeKnowledge | None = None,
 ) -> tuple[PostMaker, BackgroundWork]:
-    """A maker and the background work to join. Its events go to `events` (a throwaway list
-    when the test doesn't look)."""
-    recorded = events if events is not None else []
-
-    async def record(sender: str, event: Event, channel: object) -> None:
-        recorded.append(event)
-
+    """A maker and the background work to join."""
     background = BackgroundWork()
     posts = PostMaker(
         PostDrafter(model),
@@ -104,7 +108,6 @@ def maker(
         now=lambda: NOON,
         background=background,
     )
-    posts.on_event(record)
     return posts, background
 
 
@@ -132,7 +135,10 @@ async def test_photos_as_they_are_make_a_carousel_with_the_text_on_the_first(
     posts, background = maker(model, image_gen, photos, images)
 
     result = posts.create_post(
-        SENDER, {"brief": "muebles", "asset_ids": ["f1", "f2", "f3"], "style": "photos"}, channel
+        SENDER,
+        {"brief": "muebles", "asset_ids": ["f1", "f2", "f3"], "style": "photos"},
+        channel,
+        drop,
     )
     await background.join()
 
@@ -167,7 +173,10 @@ async def test_the_post_is_written_with_the_owners_brand_brain(
     posts, background = maker(model, CountingImageGen(), photos, brand=brand)
 
     posts.create_post(
-        SENDER, {"brief": "muebles", "asset_ids": ["f1", "f2", "f3"], "style": style}, FakeChannel()
+        SENDER,
+        {"brief": "muebles", "asset_ids": ["f1", "f2", "f3"], "style": style},
+        FakeChannel(),
+        drop,
     )
     await background.join()
 
@@ -192,7 +201,7 @@ async def test_without_a_brand_brain_the_post_gets_the_plain_instructions(
     posts, background = maker(model, CountingImageGen(), photos)
 
     posts.create_post(
-        SENDER, {"brief": "muebles", "asset_ids": ["f1"], "style": "photos"}, FakeChannel()
+        SENDER, {"brief": "muebles", "asset_ids": ["f1"], "style": "photos"}, FakeChannel(), drop
     )
     await background.join()
 
@@ -210,12 +219,14 @@ async def test_a_post_goes_without_the_brand_brain_when_nothing_is_known(
         model,
         CountingImageGen(),
         photos,
-        events=events,
         knowledge=FakeKnowledge(BusinessKnowledge()),
     )
 
     posts.create_post(
-        SENDER, {"brief": "muebles", "asset_ids": ["f1"], "style": "photos"}, FakeChannel()
+        SENDER,
+        {"brief": "muebles", "asset_ids": ["f1"], "style": "photos"},
+        FakeChannel(),
+        recorder(events),
     )
     await background.join()
 
@@ -228,7 +239,7 @@ async def test_the_senders_trend_notes_reach_the_draft(photos: InMemoryPhotos) -
     knowledge = FakeKnowledge(BusinessKnowledge(trend_notes="- [hook] Pieza heredable."))
     posts, background = maker(model, CountingImageGen(), photos, knowledge=knowledge)
     posts.create_post(
-        SENDER, {"brief": "mesa", "asset_ids": ["f1"], "style": "photos"}, FakeChannel()
+        SENDER, {"brief": "mesa", "asset_ids": ["f1"], "style": "photos"}, FakeChannel(), drop
     )
     await background.join()
 
@@ -245,7 +256,9 @@ async def test_one_photo_is_a_single_image_post_without_numbering(photos: InMemo
     channel = FakeChannel()
     posts, background = maker(model, CountingImageGen(), photos)
 
-    posts.create_post(SENDER, {"brief": "mesa", "asset_ids": ["f2"], "style": "photos"}, channel)
+    posts.create_post(
+        SENDER, {"brief": "mesa", "asset_ids": ["f2"], "style": "photos"}, channel, drop
+    )
     await background.join()
 
     assert captions(channel) == [POST_TEXT]
@@ -259,7 +272,10 @@ async def test_a_design_of_several_photos_builds_each_slide_from_its_photo(
     posts, background = maker(model, image_gen, photos)
 
     posts.create_post(
-        SENDER, {"brief": "muebles", "asset_ids": ["f1", "f2", "f3"], "style": "design"}, channel
+        SENDER,
+        {"brief": "muebles", "asset_ids": ["f1", "f2", "f3"], "style": "design"},
+        channel,
+        drop,
     )
     await background.join()
 
@@ -281,6 +297,7 @@ async def test_a_design_with_a_slide_count_uses_all_photos_on_every_slide(
         SENDER,
         {"brief": "mesa", "asset_ids": ["f1"], "style": "design", "slide_count": 3},
         channel,
+        drop,
     )
     await background.join()
 
@@ -294,10 +311,13 @@ async def test_a_sent_design_emits_an_event_with_its_headlines_and_text(
 ) -> None:
     model = ScriptedModel(drafts={CarouselDraft: carousel_draft(2)})
     events: list[Event] = []
-    posts, background = maker(model, CountingImageGen(), photos, events=events)
+    posts, background = maker(model, CountingImageGen(), photos)
 
     result = posts.create_post(
-        SENDER, {"brief": "m", "asset_ids": ["f1", "f2"], "style": "design"}, FakeChannel()
+        SENDER,
+        {"brief": "m", "asset_ids": ["f1", "f2"], "style": "design"},
+        FakeChannel(),
+        recorder(events),
     )
     await background.join()
 
@@ -322,9 +342,8 @@ async def test_the_event_is_sent_once_the_guard_is_free(photos: InMemoryPhotos) 
         # The guard is free, so an Owner turn can ask for another post meanwhile.
         seen.append((sender, event, SENDER in posts._generating))
 
-    posts.on_event(notify)
     result = posts.create_post(
-        SENDER, {"brief": "m", "asset_ids": ["f1"], "style": "design"}, channel
+        SENDER, {"brief": "m", "asset_ids": ["f1"], "style": "design"}, channel, notify
     )
     await background.join()
 
@@ -341,37 +360,13 @@ async def test_a_failing_notify_is_not_a_failed_post(photos: InMemoryPhotos) -> 
     async def notify(sender: str, event: Event, to: object) -> None:
         raise RuntimeError("boom")
 
-    posts.on_event(notify)
-    posts.create_post(SENDER, {"brief": "m", "asset_ids": ["f1"], "style": "design"}, channel)
+    posts.create_post(
+        SENDER, {"brief": "m", "asset_ids": ["f1"], "style": "design"}, channel, notify
+    )
     await background.join()
 
     assert channel.sent == []  # no failure message: the post arrived
     assert len(channel.images) == 1
-
-
-async def test_without_a_registered_callback_the_generation_logs_the_wiring_error(
-    photos: InMemoryPhotos, caplog: pytest.LogCaptureFixture
-) -> None:
-    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(1)})
-    background = BackgroundWork()
-    posts = PostMaker(
-        PostDrafter(model),
-        CountingImageGen(),
-        MockRenderer(),
-        photos,
-        PublicImages(),
-        PostLifecycle(),
-        "https://backend.test/",
-        max_posts_per_day=5,
-        now=lambda: NOON,
-        background=background,
-    )
-
-    posts.create_post(SENDER, {"brief": "m", "asset_ids": ["f1"], "style": "design"}, FakeChannel())
-    await background.join()
-
-    # Nobody awaits the generation, so the background boundary logs the wiring mistake.
-    assert "on_event" in caplog.text
 
 
 async def test_a_text_too_long_for_a_caption_follows_the_images(photos: InMemoryPhotos) -> None:
@@ -380,7 +375,9 @@ async def test_a_text_too_long_for_a_caption_follows_the_images(photos: InMemory
     channel = FakeChannel()
     posts, background = maker(model, CountingImageGen(), photos)
 
-    posts.create_post(SENDER, {"brief": "m", "asset_ids": ["f1", "f2"], "style": "photos"}, channel)
+    posts.create_post(
+        SENDER, {"brief": "m", "asset_ids": ["f1", "f2"], "style": "photos"}, channel, drop
+    )
     await background.join()
 
     assert captions(channel) == ["1/2", "2/2"]
@@ -392,16 +389,16 @@ async def test_a_failed_generation_emits_the_failure_and_frees_the_guard(
 ) -> None:
     model = ScriptedModel(drafts={CarouselDraft: carousel_draft(1)})
     channel, image_gen, events = FakeChannel(), CountingImageGen(fail=True), []
-    posts, background = maker(model, image_gen, photos, events=events)
+    posts, background = maker(model, image_gen, photos)
     request = {"brief": "mesa", "asset_ids": ["f1"], "style": "design"}
 
-    result = posts.create_post(SENDER, request, channel)
+    result = posts.create_post(SENDER, request, channel, recorder(events))
     await background.join()
 
     assert channel.sent == []  # the orchestrator tells the Owner, not the maker
     assert events == [PostFailed(result["post_id"], "design", ("f1",), "mesa")]
     assert "Nothing reached the Owner" in events[0].note()
-    assert posts.create_post(SENDER, request, channel)["status"] == "generating"
+    assert posts.create_post(SENDER, request, channel, recorder(events))["status"] == "generating"
     await background.join()
 
 
@@ -418,7 +415,7 @@ async def test_only_designs_count_toward_the_daily_limit(photos: InMemoryPhotos)
 
     results = []
     for arguments in (as_they_are, as_they_are, design, as_they_are, design):
-        results.append(posts.create_post(SENDER, arguments, FakeChannel()))
+        results.append(posts.create_post(SENDER, arguments, FakeChannel(), drop))
         await background.join()
 
     assert [result.get("error") for result in results] == [None, None, None, None, "daily_limit"]
@@ -443,7 +440,7 @@ async def test_bad_requests_start_nothing(
     image_gen = CountingImageGen()
     posts, background = maker(ScriptedModel(), image_gen, photos)
 
-    result = posts.create_post(SENDER, arguments, FakeChannel())
+    result = posts.create_post(SENDER, arguments, FakeChannel(), drop)
     await background.join()
 
     assert result["error"] == error
@@ -485,7 +482,7 @@ async def test_a_sent_post_waits_for_approval_with_its_images_in_order(
     posts, background = maker(photos_model(), CountingImageGen(), photos, store=store)
 
     result = posts.create_post(
-        SENDER, {"brief": "mesa", "asset_ids": ["f1", "f2", "f3"], "style": "photos"}, channel
+        SENDER, {"brief": "mesa", "asset_ids": ["f1", "f2", "f3"], "style": "photos"}, channel, drop
     )
     await background.join()
 
@@ -502,7 +499,7 @@ async def test_a_single_photo_is_stored_as_an_image_post(photos: InMemoryPhotos)
     posts, background = maker(photos_model(), CountingImageGen(), photos, store=store)
 
     posts.create_post(
-        SENDER, {"brief": "mesa", "asset_ids": ["f2"], "style": "photos"}, FakeChannel()
+        SENDER, {"brief": "mesa", "asset_ids": ["f2"], "style": "photos"}, FakeChannel(), drop
     )
     await background.join()
 
@@ -514,7 +511,7 @@ async def test_a_failed_generation_stores_nothing(photos: InMemoryPhotos) -> Non
     posts, background = maker(photos_model(), CountingImageGen(fail=True), photos, store=store)
 
     posts.create_post(
-        SENDER, {"brief": "mesa", "asset_ids": ["f1"], "style": "design"}, FakeChannel()
+        SENDER, {"brief": "mesa", "asset_ids": ["f1"], "style": "design"}, FakeChannel(), drop
     )
     await background.join()
 
@@ -533,6 +530,7 @@ async def test_the_remade_post_replaces_the_old_one_only_once_it_is_sent(
         SENDER,
         {"brief": "otro título", "asset_ids": ["f1"], "style": "photos", "replaces": "old"},
         FakeChannel(),
+        drop,
     )
     assert old.status == "pending_approval"  # still generating
     await background.join()
@@ -555,6 +553,7 @@ async def test_replacing_something_unknown_or_not_pending_is_ignored(
             SENDER,
             {"brief": "mesa", "asset_ids": ["f1"], "style": "photos", "replaces": replaces},
             FakeChannel(),
+            drop,
         )
         await background.join()
 
@@ -592,6 +591,7 @@ async def test_a_post_with_the_logo_stamps_it_on_every_image(photos: InMemoryPho
         SENDER,
         {"brief": "mesa", "asset_ids": ["f1", "f2"], "style": "photos", "with_logo": True},
         FakeChannel(),
+        drop,
     )
     await background.join()
 
@@ -614,6 +614,7 @@ async def test_a_design_hands_the_logo_to_the_template_instead_of_stamping_it(
         SENDER,
         {"brief": "mesa", "asset_ids": ["f1", "f2"], "style": "design", "with_logo": True},
         FakeChannel(),
+        drop,
     )
     await background.join()
 
@@ -634,7 +635,10 @@ async def test_every_designed_slide_is_rendered_from_its_copy_and_the_brand(
     )
 
     posts.create_post(
-        SENDER, {"brief": "mesa", "asset_ids": ["f1", "f2", "f3"], "style": "design"}, FakeChannel()
+        SENDER,
+        {"brief": "mesa", "asset_ids": ["f1", "f2", "f3"], "style": "design"},
+        FakeChannel(),
+        drop,
     )
     await background.join()
 
@@ -657,7 +661,10 @@ async def test_a_panorama_built_from_one_photo_per_slide_falls_back_to_editorial
     posts, background = maker(model, image_gen, photos, renderer=renderer)
 
     posts.create_post(
-        SENDER, {"brief": "mesa", "asset_ids": ["f1", "f2", "f3"], "style": "design"}, FakeChannel()
+        SENDER,
+        {"brief": "mesa", "asset_ids": ["f1", "f2", "f3"], "style": "design"},
+        FakeChannel(),
+        drop,
     )
     await background.join()
 
@@ -674,6 +681,7 @@ async def test_a_post_with_the_logo_without_one_is_refused(photos: InMemoryPhoto
         SENDER,
         {"brief": "mesa", "asset_ids": ["f1"], "style": "photos", "with_logo": True},
         channel,
+        drop,
     )
 
     assert result == {"error": "no_logo"}
@@ -704,12 +712,13 @@ async def test_a_caption_change_keeps_the_images_and_generates_nothing(
     store, image_gen, channel = PostLifecycle(), CountingImageGen(), FakeChannel()
     events: list[Event] = []
     old = sent_design(store, photos)
-    posts, background = maker(
-        photos_model(), image_gen, photos, store=store, max_posts_per_day=0, events=events
-    )
+    posts, background = maker(photos_model(), image_gen, photos, store=store, max_posts_per_day=0)
 
     result = posts.revise_post(
-        SENDER, {"post_id": "old", "change": "más corto", "part": "caption"}, channel
+        SENDER,
+        {"post_id": "old", "change": "más corto", "part": "caption"},
+        channel,
+        recorder(events),
     )
     await background.join()
 
@@ -732,7 +741,7 @@ async def test_an_image_change_regenerates_the_design_from_the_previous_one(
     posts, background = maker(model, image_gen, photos, store=store)
 
     posts.revise_post(
-        SENDER, {"post_id": "old", "change": "fondo verde", "part": "images"}, FakeChannel()
+        SENDER, {"post_id": "old", "change": "fondo verde", "part": "images"}, FakeChannel(), drop
     )
     await background.join()
 
@@ -760,7 +769,7 @@ async def test_bad_revisions_start_nothing(
     store.add(Post("done", SENDER, [PostImage("/media/y.jpg", b"y")], "caption", "published"))
     posts, background = maker(photos_model(), image_gen, photos, store=store)
 
-    assert posts.revise_post(SENDER, arguments, FakeChannel())["error"] == error
+    assert posts.revise_post(SENDER, arguments, FakeChannel(), drop)["error"] == error
 
 
 async def test_a_remake_by_create_post_shows_the_old_version(photos: InMemoryPhotos) -> None:
@@ -772,6 +781,7 @@ async def test_a_remake_by_create_post_shows_the_old_version(photos: InMemoryPho
         SENDER,
         {"brief": "con la otra foto", "asset_ids": ["f2"], "style": "photos", "replaces": "old"},
         FakeChannel(),
+        drop,
     )
     await background.join()
 
@@ -787,7 +797,7 @@ async def test_the_owners_notes_reach_the_post_writer(photos: InMemoryPhotos) ->
         model, CountingImageGen(), photos, notes=["Siempre mencionar el envío gratis"]
     )
     arguments = {"brief": "mesa", "asset_ids": ["f1"], "style": "photos"}
-    posts.create_post(SENDER, arguments, FakeChannel())
+    posts.create_post(SENDER, arguments, FakeChannel(), drop)
     await background.join()
 
     assert "- Siempre mencionar el envío gratis" in model.structured_systems[0]

@@ -42,7 +42,7 @@ Each outside service sits behind a small interface (a Python `Protocol`, called 
 | `ImageGenPort` | `imagegen/gemini.py` | `imagegen/mock.py` | `IMAGE_GEN` |
 | `PublisherPort` (Instagram) | `publishing/zernio.py` | `publishing/mock.py` | `PUBLISHER` |
 
-Everything is wired together in [`backend/app/conversation/factory.py`](../../backend/app/conversation/factory.py) (`build_conversation`, which returns the inbound `handler` and the `notify` that jobs share). It is the best first file to read.
+Everything is wired together in [`backend/app/conversation/factory.py`](../../backend/app/conversation/factory.py) (`build_conversation` reads `Settings`; `build_chat` is the one place the chat graph is wired, in production and in tests; it returns the inbound `handler` and the `notify` that jobs share). It is the best first file to read.
 
 ## WhatsApp and the backend, through Kapso
 
@@ -74,7 +74,7 @@ Every inbound message passes through two handlers in a row: `OnboardingGate`, wh
 
 The states and the moves between them live in one module, `onboarding/state.py`: an enum plus a transition function per move (`welcome`, `name_received`, `form_submitted`, `confirm_brand`, ...). The gate, the web API, the `generate_brand` job and the brand buttons ask it to move the Business and never write `onboarding_state` themselves.
 
-**`ChatHandler`** (`conversation/chat.py`) treats each kind of message differently:
+**`ChatHandler`** (`conversation/chat.py`) routes each kind of message and holds the Owner's lock; the work is in three modules it calls: `PhotoBatches` (`photo_batches.py`, the photo debounce), `Turns` (`turns.py`, one orchestrator turn) and `Toolbox` (`toolbox.py`, the tools). It treats each kind of message differently:
 
 - **Photos** are downloaded, resized, and held in a 5-second batch, because WhatsApp sends an album as one message per photo. The batch is answered when the timer fires, or together with a text that arrives meanwhile.
 - **Text and voice notes** start an LLM turn. A voice note is handled as its Kapso transcript.
@@ -98,16 +98,16 @@ Timeouts are 60 s for chat and 90 s for structured calls. Server errors are retr
 
 | Agent | Where | Call | What it does |
 |---|---|---|---|
-| orchestrator | `conversation/chat.py` | `reply` with tools | Talks with the Owner; decides when to call `create_post` or `approve_post` |
+| orchestrator | `conversation/turns.py` | `reply` with tools | Talks with the Owner; decides when to call `create_post` or `approve_post` |
 | post_drafter | `posts/drafts.py` | `structured` | Brief, photos and Brand Brain become caption, hashtags and, for a design, each slide's headline and scene prompt |
 | asset_analyst | `agents/asset_analyst.py` | `structured` | Analyzes each photo uploaded in the wizard (background job) and each photo the Owner sends in the chat (`PhotoKeeper`), both through `assets/analysis.py` |
 | brand_strategist | `agents/brand_strategist.py` | `structured`, high thinking | Writes the Brand Brain: voice, audience, pillars, visual identity (background job) |
 | niche_analyst | `agents/niche_analyst.py` | `grounded` (URL context and Google Search) | Writes the weekly Niche Report of a niche: what its stores and articles show this week, each point with a checked source (background job) |
 | image generation | `imagegen/gemini.py`, `carousel/generator.py` | `generate_content` | Makes 4:5 slide images from scene prompts and the product photos |
 
-**The orchestrator's tool loop** (`chat.py`, `_converse`): for up to 5 steps, send the system prompt, the history and the current message with the two tools. If Gemini answers with text, that text goes to WhatsApp. If it asks for a tool, code runs it, appends the result, and loops. Tools are declared in `conversation/tools.py`, and both return at once (`{"post_id": ..., "status": "generating"}`); the slow work runs in the background, on `BackgroundWork` (`app/background.py`).
+**The orchestrator's tool loop** (`turns.py`, `_converse`; Owner turns and event turns share one pipeline, `_run`): for up to 5 steps, send the system prompt, the history and the current message with the two tools. If Gemini answers with text, that text goes to WhatsApp. If it asks for a tool, code runs it, appends the result, and loops. Tools are declared in `conversation/tools.py` and run by `Toolbox` (`toolbox.py`), and both return at once (`{"post_id": ..., "status": "generating"}`); the slow work runs in the background, on `BackgroundWork` (`app/background.py`).
 
-**Code reports events, the model writes the message** ([ADR 0026](../decisions/0026-owner-messages-from-the-orchestrator.md)). When background work ends, code emits a typed event from `conversation/events.py`, such as `PostSent` or `Published`. `ChatHandler.notify` gives that event's note to the orchestrator as if the Owner had sent it, and the model writes the reply. Buttons are attached in code. If the model fails, a fixed Spanish fallback from `copy/messages_es.py` goes out instead. Every event reaches WhatsApp through `conversation/outbound.py`, which owns the buttons, the 1024-character body limit and the text/buttons split. Jobs and the onboarding API use the same `notify`; their three events (`BrandSummaryReady`, `JobFailed`, `BrandGenerating`) are verbatim: fixed text, no model turn.
+**Code reports events, the model writes the message** ([ADR 0026](../decisions/0026-owner-messages-from-the-orchestrator.md)). When background work ends, code emits a typed event from `conversation/events.py`, such as `PostSent` or `Published`; the makers receive `notify` with each call, so none can be built without a way to tell the Owner. `Turns.notify` gives that event's note to the orchestrator as if the Owner had sent it, and the model writes the reply. Buttons are attached in code. If the model fails, a fixed Spanish fallback from `copy/messages_es.py` goes out instead. Every event reaches WhatsApp through `conversation/outbound.py`, which owns the buttons, the 1024-character body limit and the text/buttons split. Jobs and the onboarding API use the same `notify`; their three events (`BrandSummaryReady`, `JobFailed`, `BrandGenerating`) are verbatim: fixed text, no model turn.
 
 **What the Agency knows about a Business.** `knowledge/` has one interface, `Knowledge.of(sender)`, that answers with the Business's facts, latest Brand Brain, Catalog, Owner notes, conversation summary and the trend notes of its niche, all read fresh. `DbKnowledge` resolves the Owner's phone to the Business once (`business_of`) and reads everything in one session; if the database fails it logs one warning and answers with nothing known, so a turn or a post goes ahead without it. `LocalKnowledge` serves runs without a database from the in-memory notes and history, and gives every sender the Niche Report saved at `NICHE_REPORT_PATH`. `build_conversation` builds one and gives it to both the orchestrator (which renders it into the system prompt, `conversation/context.py`) and `PostMaker`.
 
@@ -189,5 +189,5 @@ A redeploy while a post is waiting means it can no longer be approved or publish
 ## Where to read next
 
 - Wiring: [`backend/app/conversation/factory.py`](../../backend/app/conversation/factory.py)
-- The conversation: [`backend/app/conversation/chat.py`](../../backend/app/conversation/chat.py) and its system prompt, `backend/app/conversation/prompts/orchestrator.md`
+- The conversation: [`backend/app/conversation/chat.py`](../../backend/app/conversation/chat.py) (routing), [`turns.py`](../../backend/app/conversation/turns.py) (the turn pipeline) and its system prompt, `backend/app/conversation/prompts/orchestrator.md`
 - Intended design: [overview.md](overview.md), [integrations.md](integrations.md) (Kapso, Gemini, Zernio) and [agents.md](agents.md)

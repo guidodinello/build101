@@ -6,12 +6,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.schemas import AssetAnalysis
-from app.conversation.chat import context_block
 from app.conversation.context import render
 from app.conversation.library import BrandLibrary
 from app.conversation.notes import DbNotes, InMemoryNotes
 from app.conversation.photo_keeper import PhotoKeeper
 from app.conversation.photos import InMemoryPhotos
+from app.conversation.turns import context_block
 from app.db.models import AssetProduct, BrandAsset, BrandBrainVersion, Business, Product
 from app.knowledge.base import BusinessKnowledge, CatalogItem, Note
 from app.knowledge.db import DbKnowledge

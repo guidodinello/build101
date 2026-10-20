@@ -71,17 +71,11 @@ class VideoMaker:
         self._generating: set[str] = set()
         self._videos_today: dict[str, tuple[date, int]] = {}
         self._background = background
-        self._notify: Notify | None = None
-
-    def on_event(self, callback: Notify) -> None:
-        """Register who tells the Owner about a video (wired where the chat handler is built)."""
-        self._notify = callback
 
     def create_video(
-        self, sender: str, arguments: dict[str, Any], channel: ChannelPort
+        self, sender: str, arguments: dict[str, Any], channel: ChannelPort, notify: Notify
     ) -> dict[str, Any]:
         """Check the guards and start the generation; the result goes back to the model."""
-        self._require_wired()
         try:
             args = CreateVideoArgs.model_validate(arguments)
         except ValidationError as exc:
@@ -91,15 +85,24 @@ class VideoMaker:
             return source
         if source.video is not None:
             return {"error": "already_video"}
-        return self._start(sender, source.source_photos, source.caption, args.direction, channel)
+        return self._start(
+            sender, source.source_photos, source.caption, args.direction, channel, notify
+        )
 
-    def remake(self, post: Post, channel: ChannelPort) -> dict[str, Any]:
+    def remake(self, post: Post, channel: ChannelPort, notify: Notify) -> dict[str, Any]:
         """Another video from the same request as `post` ([Sí, otro] after [Descartar])."""
-        self._require_wired()
-        return self._start(post.sender, post.source_photos, post.caption, post.brief, channel)
+        return self._start(
+            post.sender, post.source_photos, post.caption, post.brief, channel, notify
+        )
 
     def _start(
-        self, sender: str, photos: list[Photo], caption: str, direction: str, channel: ChannelPort
+        self,
+        sender: str,
+        photos: list[Photo],
+        caption: str,
+        direction: str,
+        channel: ChannelPort,
+        notify: Notify,
     ) -> dict[str, Any]:
         if not photos:
             return {"error": "no_photos"}
@@ -112,15 +115,10 @@ class VideoMaker:
         self._videos_today[sender] = (today, self._count_today(sender) + 1)
         post_id = uuid.uuid4().hex[:8]
         self._background.start(
-            self._generate(sender, post_id, photos, caption, direction.strip(), channel),
+            self._generate(sender, post_id, photos, caption, direction.strip(), channel, notify),
             f"video {post_id} for {mask(sender)}",
         )
         return {"post_id": post_id, "status": "generating"}
-
-    def _require_wired(self) -> None:
-        """Refuse before any guard or spend: a clip nobody can announce is billed for nothing."""
-        if self._notify is None:
-            raise RuntimeError("VideoMaker.on_event was never called: nobody can tell the Owner")
 
     def _count_today(self, sender: str) -> int:
         day, count = self._videos_today.get(sender, (self._now().date(), 0))
@@ -138,6 +136,7 @@ class VideoMaker:
         caption: str,
         direction: str,
         channel: ChannelPort,
+        notify: Notify,
     ) -> None:
         started = time.monotonic()
         prompt = f"{VIDEO_PROMPT} {direction}".strip()
@@ -177,14 +176,7 @@ class VideoMaker:
             self._generating.discard(sender)
         # After the guard is released, and outside the try: a failing notify must not report a
         # failed video that the Owner already has.
-        await self._announce(sender, post_id, event, channel)
-
-    async def _announce(
-        self, sender: str, post_id: str, event: Event, channel: ChannelPort
-    ) -> None:
-        if self._notify is None:  # `_require_wired` makes this unreachable
-            raise RuntimeError("VideoMaker.on_event was never called")
-        await self._notify(sender, event, channel)
+        await notify(sender, event, channel)
 
 
 def failure_reason(error: Exception) -> str:

@@ -1,38 +1,50 @@
+import asyncio
 import logging
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime
 
-from app.background import get_background_work
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.background import BackgroundWork, get_background_work
 from app.channels.inbound import EchoHandler, InboundHandler
 from app.config import Settings
 from app.db.session import get_sessionmaker
+from app.imagegen.base import ImageGenPort
 from app.imagegen.factory import build_image_gen
 from app.knowledge.base import Knowledge
 from app.knowledge.db import DbKnowledge
 from app.knowledge.local import LocalKnowledge, load_trend_notes
-from app.llm.client import GeminiChat
+from app.llm.client import ChatModel, GeminiChat
 from app.media.public import PublicImages, PublicVideos
 from app.posts.drafts import PostDrafter
 from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import PostMaker
-from app.posts.publish import PostPublisher
+from app.posts.publish import PostPublisher, Sleep
 from app.posts.store import InMemoryPosts
 from app.posts.video_maker import VideoMaker
 from app.publishing.base import PublisherPort
 from app.publishing.mock import MOCK_ACCOUNT_ID
+from app.rendering.base import RendererPort
 from app.rendering.factory import build_renderer
 from app.storage import get_storage
+from app.videogen.base import VideoGenPort
 from app.videogen.factory import build_video_gen
 
+from .brand import BrandFlow
 from .button_router import ButtonRouter
 from .chat import ChatHandler
 from .events import Notify
-from .history import DbHistory, History, InMemoryHistory
+from .history import Compactor, DbHistory, History, InMemoryHistory
 from .library import BrandLibrary
 from .notes import DbNotes, InMemoryNotes, OwnerNotes
 from .onboarding import OnboardingGate
 from .outbound import FixedReplies
+from .photo_batches import PHOTO_DEBOUNCE_S, PhotoBatches
 from .photo_keeper import PhotoKeeper
-from .photos import InMemoryPhotos
+from .photos import InMemoryPhotos, local_now
+from .toolbox import Toolbox
+from .turns import KEEP_ALIVE_S, Turns
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +56,145 @@ class Conversation:
 
     handler: InboundHandler
     notify: Notify
+
+
+@dataclass(frozen=True, slots=True)
+class ChatParts:
+    """What `build_chat` needs: the ports and numbers the chat is built from. Production fills
+    them from `Settings`; a test fills only what it looks at."""
+
+    model: ChatModel
+    image_gen: ImageGenPort
+    renderer: RendererPort
+    publisher: PublisherPort
+    images: PublicImages
+    background: BackgroundWork
+    public_backend_url: str
+    account_id: str | None
+    assistant_name: str
+    max_photo_mb: int
+    max_posts_per_day: int
+    max_videos_per_day: int
+    history: History = field(default_factory=InMemoryHistory)
+    notes: OwnerNotes = field(default_factory=InMemoryNotes)
+    # None: the Business knowledge of the history and notes alone, no Brand Brain or Catalog.
+    knowledge: Knowledge | None = None
+    library: BrandLibrary | None = None
+    keeper: PhotoKeeper | None = None
+    compactor: Compactor | None = None
+    sessions: async_sessionmaker[AsyncSession] | None = None
+    # None while VIDEO_GEN_ENABLED is off: no maker, so no tool and no Veo call (ADR 0033).
+    video_gen: VideoGenPort | None = None
+    videos: PublicVideos | None = None
+    photo_debounce_s: float = PHOTO_DEBOUNCE_S
+    keep_alive_s: float = KEEP_ALIVE_S
+    publish_sleep: Sleep | None = None
+    now: Callable[[], datetime] = local_now
+
+
+@dataclass(frozen=True, slots=True)
+class Chat:
+    """The built conversation graph: `handler` and `notify` are what the app uses; the rest is
+    what tests and the wiring around the chat (the onboarding gate) read."""
+
+    handler: ChatHandler
+    notify: Notify
+    background: BackgroundWork
+    history: History
+    photos: InMemoryPhotos
+    lifecycle: PostLifecycle
+    posts: PostMaker
+    publishing: PostPublisher
+    video_maker: VideoMaker | None
+    buttons: ButtonRouter
+
+
+def build_chat(parts: ChatParts) -> Chat:
+    """The one place the chat graph is wired, in production and in tests.
+
+    Nothing here is late-bound: the makers get `notify` with each call (ADR 0026), so building
+    the graph in any order can't leave a maker unable to tell the Owner.
+    """
+    photos, store = InMemoryPhotos(), InMemoryPosts()
+    lifecycle = PostLifecycle(store)
+    knowledge = parts.knowledge or LocalKnowledge(parts.notes, parts.history)
+    background = parts.background
+    posts = PostMaker(
+        PostDrafter(parts.model),
+        parts.image_gen,
+        parts.renderer,
+        photos,
+        parts.images,
+        lifecycle,
+        parts.public_backend_url,
+        parts.max_posts_per_day,
+        knowledge=knowledge,
+        now=parts.now,
+        background=background,
+    )
+    public_videos = parts.videos or PublicVideos()
+    public_videos.serve_from(store.video)
+    publishing = PostPublisher(
+        parts.publisher,
+        lifecycle,
+        parts.images,
+        parts.public_backend_url,
+        parts.account_id,
+        parts.publish_sleep or asyncio.sleep,
+        videos=public_videos,
+        background=background,
+    )
+    video_maker = (
+        VideoMaker(
+            parts.video_gen,
+            lifecycle,
+            public_videos,
+            parts.public_backend_url,
+            parts.max_videos_per_day,
+            parts.now,
+            background=background,
+        )
+        if parts.video_gen
+        else None
+    )
+    brand = BrandFlow(parts.sessions) if parts.sessions else None
+    buttons = ButtonRouter(lifecycle, posts, publishing, parts.sessions, brand, video_maker)
+    toolbox = Toolbox(posts, publishing, lifecycle, parts.notes, brand, video_maker)
+    turns = Turns(
+        parts.model,
+        parts.history,
+        photos,
+        lifecycle,
+        toolbox,
+        knowledge,
+        parts.library,
+        parts.compactor or Compactor(parts.history, parts.model),
+        parts.assistant_name,
+        parts.now,
+        parts.keep_alive_s,
+        background=background,
+    )
+    batches = PhotoBatches(
+        photos,
+        parts.keeper,
+        parts.max_photo_mb,
+        turns.notify,
+        parts.photo_debounce_s,
+        background=background,
+    )
+    handler = ChatHandler(turns, batches, buttons, parts.history)
+    return Chat(
+        handler,
+        turns.notify,
+        background,
+        parts.history,
+        photos,
+        lifecycle,
+        posts,
+        publishing,
+        video_maker,
+        buttons,
+    )
 
 
 def build_conversation(
@@ -62,9 +213,6 @@ def build_conversation(
                     "post images from it"
                 )
             model = GeminiChat.from_api_key(settings.gemini_api_key, settings.gemini_chat_model)
-            background = get_background_work()
-            photos, store = InMemoryPhotos(), InMemoryPosts()
-            lifecycle = PostLifecycle(store)
             account_id = settings.zernio_account_id or (
                 MOCK_ACCOUNT_ID if settings.publisher == "mock" else None
             )
@@ -83,74 +231,40 @@ def build_conversation(
                 if sessions
                 else LocalKnowledge(notes, history, load_trend_notes(settings.niche_report_path))
             )
-            posts = PostMaker(
-                PostDrafter(model),
-                build_image_gen(settings),
-                build_renderer(settings),
-                photos,
-                images,
-                lifecycle,
-                settings.public_backend_url,
-                settings.max_posts_per_day,
-                knowledge=knowledge,
-                background=background,
-            )
-            public_videos = videos or PublicVideos()
-            public_videos.serve_from(store.video)
-            publishing = PostPublisher(
-                publisher,
-                lifecycle,
-                images,
-                settings.public_backend_url,
-                account_id,
-                background=background,
-                videos=public_videos,
-            )
-            # None while VIDEO_GEN_ENABLED is off: no maker, so no tool and no Veo call (ADR 0033)
-            video_gen = build_video_gen(settings)
-            video_maker = (
-                VideoMaker(
-                    video_gen,
-                    lifecycle,
-                    public_videos,
-                    settings.public_backend_url,
-                    settings.max_videos_per_day,
-                    background=background,
-                )
-                if video_gen
-                else None
-            )
-            buttons = ButtonRouter(lifecycle, posts, publishing, sessions, video_maker)
             storage = (
                 get_storage()
                 if sessions and settings.supabase_url and settings.supabase_service_role_key
                 else None
             )
-            library = BrandLibrary(sessions, storage) if sessions and storage else None
-            chat = ChatHandler(
-                model,
-                history,
-                photos,
-                posts,
-                publishing,
-                lifecycle,
-                buttons,
-                library,
-                settings.assistant_name,
-                max_photo_mb=settings.max_photo_mb,
-                notes=notes,
-                knowledge=knowledge,
-                videos=video_maker,
-                keeper=PhotoKeeper(model, sessions, storage),
-                background=background,
+            chat = build_chat(
+                ChatParts(
+                    model=model,
+                    image_gen=build_image_gen(settings),
+                    renderer=build_renderer(settings),
+                    publisher=publisher,
+                    images=images,
+                    background=get_background_work(),
+                    public_backend_url=settings.public_backend_url,
+                    account_id=account_id,
+                    assistant_name=settings.assistant_name,
+                    max_photo_mb=settings.max_photo_mb,
+                    max_posts_per_day=settings.max_posts_per_day,
+                    max_videos_per_day=settings.max_videos_per_day,
+                    history=history,
+                    notes=notes,
+                    knowledge=knowledge,
+                    library=BrandLibrary(sessions, storage) if sessions and storage else None,
+                    keeper=PhotoKeeper(model, sessions, storage),
+                    sessions=sessions,
+                    video_gen=build_video_gen(settings),
+                    videos=videos,
+                )
             )
-            posts.on_event(chat.notify)
-            publishing.on_event(chat.notify)
-            if video_maker:
-                video_maker.on_event(chat.notify)
             if sessions is None:
-                return Conversation(chat, chat.notify)
-            gate = OnboardingGate(chat, sessions, settings.frontend_url, settings.assistant_name)
+                return Conversation(chat.handler, chat.notify)
+            gate = OnboardingGate(
+                chat.handler, sessions, settings.frontend_url, settings.assistant_name
+            )
             return Conversation(gate, chat.notify)
         case "echo":
             # No chat handler: events still reach the Owner, as their fixed text.

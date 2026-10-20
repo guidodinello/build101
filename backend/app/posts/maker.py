@@ -107,14 +107,9 @@ class PostMaker:
         self._generating: set[str] = set()
         self._designs_today: dict[str, tuple[date, int]] = {}
         self._background = background
-        self._notify: Notify | None = None
-
-    def on_event(self, callback: Notify) -> None:
-        """Register who tells the Owner about a post (wired where the chat handler is built)."""
-        self._notify = callback
 
     def create_post(
-        self, sender: str, arguments: dict[str, Any], channel: ChannelPort
+        self, sender: str, arguments: dict[str, Any], channel: ChannelPort, notify: Notify
     ) -> dict[str, Any]:
         """Check the guards and start the generation; the result goes back to the model."""
         try:
@@ -128,10 +123,10 @@ class PostMaker:
             return {"error": "no_photos"}
         old = self._posts.get(sender, args.replaces) if args.replaces else None
         remake = Remake(previous_post(old, change=None)) if old else None
-        return self._start(sender, args, photos, channel, remake)
+        return self._start(sender, args, photos, channel, notify, remake)
 
     def revise_post(
-        self, sender: str, arguments: dict[str, Any], channel: ChannelPort
+        self, sender: str, arguments: dict[str, Any], channel: ChannelPort, notify: Notify
     ) -> dict[str, Any]:
         """Remake a sent post with one change, keeping the rest; a caption change keeps the
         images, so it generates nothing."""
@@ -157,9 +152,9 @@ class PostMaker:
         )
         kept = [image.data for image in old.images] if args.part == "caption" else None
         remake = Remake(previous_post(old, change=args.change), kept)
-        return self._start(sender, create, old.source_photos, channel, remake)
+        return self._start(sender, create, old.source_photos, channel, notify, remake)
 
-    def remake(self, post: Post, channel: ChannelPort) -> dict[str, Any]:
+    def remake(self, post: Post, channel: ChannelPort, notify: Notify) -> dict[str, Any]:
         """Another post from the same request as `post` ([Sí, otro] after [Descartar])."""
         args = CreatePostArgs(
             brief=post.brief,
@@ -168,7 +163,7 @@ class PostMaker:
             slide_count=post.slide_count,
             with_logo=post.with_logo,
         )
-        return self._start(post.sender, args, post.source_photos, channel)
+        return self._start(post.sender, args, post.source_photos, channel, notify)
 
     def _start(
         self,
@@ -176,6 +171,7 @@ class PostMaker:
         args: CreatePostArgs,
         photos: list[Photo],
         channel: ChannelPort,
+        notify: Notify,
         remake: Remake | None = None,
     ) -> dict[str, Any]:
         if sender in self._generating:
@@ -200,7 +196,7 @@ class PostMaker:
             photo.used = True
         post_id = uuid.uuid4().hex[:8]
         self._background.start(
-            self._generate(sender, post_id, args, photos, logo, channel, remake),
+            self._generate(sender, post_id, args, photos, logo, channel, notify, remake),
             f"post {post_id} for {mask(sender)}",
         )
         return {"post_id": post_id, "status": "generating"}
@@ -213,6 +209,7 @@ class PostMaker:
         photos: list[Photo],
         logo: bytes | None,
         channel: ChannelPort,
+        notify: Notify,
         remake: Remake | None = None,
     ) -> None:
         started = time.monotonic()
@@ -254,20 +251,13 @@ class PostMaker:
             self._generating.discard(sender)
         # After the guard is released, and outside the try: a failing notify must not report a
         # failed post that the Owner already has.
-        await self._announce(sender, post_id, event, channel)
+        await notify(sender, event, channel)
 
     async def _known(self, sender: str) -> BusinessKnowledge:
         """What the Agency knows about the sender's Business; a post makes do with nothing."""
         if self._knowledge is None:
             return BusinessKnowledge()
         return await self._knowledge.of(sender)
-
-    async def _announce(
-        self, sender: str, post_id: str, event: Event, channel: ChannelPort
-    ) -> None:
-        if self._notify is None:
-            raise RuntimeError("PostMaker.on_event was never called: nobody can tell the Owner")
-        await self._notify(sender, event, channel)
 
     async def _render(
         self,

@@ -8,7 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.channels.base import ChannelPort, InboundMessage
-from app.channels.inbound import InboundHandler, mask
+from app.channels.inbound import InboundHandler, mark_read, mask
 from app.copy import messages_es
 from app.db.models import Business
 from app.onboarding.links import add_onboarding_link, onboarding_url
@@ -19,8 +19,6 @@ from app.onboarding.state import (
     state_of,
     welcome,
 )
-
-from .chat import mark_read
 
 logger = logging.getLogger(__name__)
 
