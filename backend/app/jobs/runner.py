@@ -207,31 +207,86 @@ class JobRunner:
         result: dict[str, Any] | None = None
         error: str | None = None
         try:
-            function = self._jobs.get(kind)
-            if function is None:
-                raise LookupError(f"no function for job kind {kind!r}")
-            result = await function(context, payload)
-        except Exception as exc:
-            # The task's boundary: nobody awaits it, so the row and the log carry the error.
-            logger.exception("job %s (%s) failed", job_id, kind)
-            error = repr(exc)[:MAX_ERROR_CHARS]
-        async with self._sessions() as db:
-            # Only a row still `running`: anything else was decided elsewhere and stays.
-            await db.execute(
-                update(Job)
-                .where(Job.id == job_id, Job.status == "running")
-                .values(
-                    status="failed" if error else "succeeded",
-                    result=result,
-                    error=error,
-                    finished_at=datetime.now(UTC),
+            try:
+                function = self._jobs.get(kind)
+                if function is None:
+                    raise LookupError(f"no function for job kind {kind!r}")
+                result = await function(context, payload)
+            except asyncio.CancelledError:
+                await self._mark_failed_best_effort(
+                    job_id, error or "cancelled during shutdown"
                 )
-            )
-            await db.commit()
-        self._running_ids.discard(job_id)
-        logger.info("job %s (%s): %s", job_id, kind, "failed" if error else "succeeded")
-        if error and kind in self._notify_on_failure and business_id:
+                await self._notify_failure_best_effort(job_id, kind, business_id)
+                raise
+            except Exception as exc:
+                # The task's boundary: nobody awaits it, so the row and the log carry the error.
+                logger.exception("job %s (%s) failed", job_id, kind)
+                error = repr(exc)[:MAX_ERROR_CHARS]
+
+            try:
+                async with self._sessions() as db:
+                    # Only a row still `running`: anything else was decided elsewhere and stays.
+                    await db.execute(
+                        update(Job)
+                        .where(Job.id == job_id, Job.status == "running")
+                        .values(
+                            status="failed" if error else "succeeded",
+                            result=result,
+                            error=error,
+                            finished_at=datetime.now(UTC),
+                        )
+                    )
+                    await db.commit()
+            except asyncio.CancelledError:
+                await self._mark_failed_best_effort(
+                    job_id, error or "cancelled during finalization"
+                )
+                await self._notify_failure_best_effort(job_id, kind, business_id)
+                raise
+            except Exception as exc:
+                logger.exception(
+                    "could not finalize job %s (%s); attempting to mark it failed",
+                    job_id,
+                    kind,
+                )
+                error = error or repr(exc)[:MAX_ERROR_CHARS]
+                await self._mark_failed_best_effort(job_id, error)
+
+            logger.info("job %s (%s): %s", job_id, kind, "failed" if error else "succeeded")
+            if error:
+                await self._notify_failure_best_effort(job_id, kind, business_id)
+        finally:
+            self._running_ids.discard(job_id)
+
+    async def _mark_failed_best_effort(self, job_id: uuid.UUID, error: str) -> None:
+        """Try to record failure without hiding the original error or cancellation."""
+        try:
+            async with self._sessions() as db:
+                await db.execute(
+                    update(Job)
+                    .where(Job.id == job_id, Job.status == "running")
+                    .values(
+                        status="failed",
+                        result=None,
+                        error=error[:MAX_ERROR_CHARS],
+                        finished_at=datetime.now(UTC),
+                    )
+                )
+                await db.commit()
+        except Exception:
+            logger.exception("could not mark job %s as failed", job_id)
+
+    async def _notify_failure_best_effort(
+        self, job_id: uuid.UUID, kind: str, business_id: uuid.UUID | None
+    ) -> None:
+        if kind not in self._notify_on_failure or business_id is None:
+            return
+        try:
             await self._tell_owner(job_id, kind, business_id)
+        except Exception:
+            logger.warning(
+                "could not tell the Owner that job %s failed", job_id, exc_info=True
+            )
 
     async def _tell_owner(self, job_id: uuid.UUID, kind: str, business_id: uuid.UUID) -> None:
         async with self._sessions() as db:

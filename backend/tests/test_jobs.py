@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -227,6 +228,68 @@ async def test_only_free_slots_are_claimed(sessions: async_sessionmaker[AsyncSes
     await background.join()
     assert await jobs.run_due() == 1
     await background.join()
+
+
+async def test_a_finalize_db_error_clears_running_id_and_marks_job_failed(
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    business = await add_business(sessions)
+    job_id = await queue(sessions, "analyze_asset", business)
+
+    async def ok(context: JobContext, payload: dict[str, Any]) -> None:
+        return None
+
+    jobs, background = runner(sessions, {"analyze_asset": ok}, FakeChannel())
+    assert await jobs.run_due() == 1
+
+    original_commit = AsyncSession.commit
+    failed_once = False
+
+    async def fail_first_commit(session: AsyncSession) -> None:
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            raise SQLAlchemyError("simulated finalize commit failure")
+        await original_commit(session)
+
+    # The job claim was already committed; fail the following commit only.
+    monkeypatch.setattr(AsyncSession, "commit", fail_first_commit)
+    await background.join()
+
+    assert failed_once
+    assert job_id not in jobs._running_ids
+    job = await job_row(sessions, job_id)
+    assert job.status == "failed"
+    assert "simulated finalize commit failure" in (job.error or "")
+
+
+async def test_stop_marks_cancelled_job_failed_and_notifies_owner(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business = await add_business(sessions)
+    job_id = await queue(sessions, "generate_brand", business)
+    started = asyncio.Event()
+    never = asyncio.Event()
+
+    async def wait_for_stop(context: JobContext, payload: dict[str, Any]) -> None:
+        started.set()
+        await never.wait()
+
+    events = EventLog()
+    jobs, _ = runner(
+        sessions, {"generate_brand": wait_for_stop}, FakeChannel(), notify=events
+    )
+    assert await jobs.run_due() == 1
+    await asyncio.wait_for(started.wait(), timeout=5)
+    await jobs.stop()
+
+    job = await job_row(sessions, job_id)
+    assert job.status == "failed"
+    assert job.finished_at is not None
+    assert "cancelled during shutdown" in (job.error or "")
+    assert job_id not in jobs._running_ids
+    assert events.events == [(PHONE, JobFailed(job_id, "generate_brand"))]
 
 
 async def test_jobs_left_running_by_a_restart_are_failed(
