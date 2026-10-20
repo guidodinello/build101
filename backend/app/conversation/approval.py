@@ -56,8 +56,12 @@ PUBLISH_QUESTION = re.compile(
     r"\b(lo|la|los|las) (subo|publico|subimos|publicamos)\b"
     r"|\b(subirlo|subirla|subirlos|subirlas|publicarlo|publicarla|publicarlos|publicarlas)\b"
 )
-TRAILING_NOISE = re.compile(r"[^\w?]+$")  # emoji, "!", "…" and spaces after the last word or "?"
-SENTENCE_END = re.compile(r"[.!?…\n]")
+KEYCAP = re.compile(r"[0-9#*]\ufe0f?\u20e3")  # "1️⃣": a digit that is an emoji
+# Everything after the last word: spaces, "?", "!", emoji, WhatsApp's _*~ formatting.
+TRAILING_NOISE = re.compile(r"[\W_]+$")
+# A sentence ends at ".", "!", "?" or "…" before a space, at a line break, or at "?¿" / "!¡":
+# not at the dot of "$1.500" or "x.com".
+SENTENCE_END = re.compile(r"[.!?…]+\s|\n|(?<=[?!])(?=[¿¡])")
 ORDINAL_FILLER = frozenset({"el", "la", "lo", "los", "las", "numero", "opcion", "subi", "subo"})
 CAPTION_START_CHARS = 60
 
@@ -102,10 +106,11 @@ def asks_to_publish(text: str) -> bool:
     Only the last sentence counts: a publish question in the middle of a reply (or followed by
     another question) must not turn the Owner's next "bien" into an approval.
     """
-    body = TRAILING_NOISE.sub("", plain(text))  # "¿Lo subo? 🙌" ends on its question
-    if not body.endswith("?"):
+    body = plain(KEYCAP.sub("", text))
+    ending = TRAILING_NOISE.search(body)
+    if ending is None or "?" not in ending.group():  # "¿Lo subo? 🙌" still ends on its question
         return False
-    last_sentence = SENTENCE_END.split(body[:-1])[-1]
+    last_sentence = SENTENCE_END.split(body[: ending.start()])[-1]
     return PUBLISH_QUESTION.search(last_sentence) is not None
 
 

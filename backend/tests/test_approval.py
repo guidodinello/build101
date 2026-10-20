@@ -203,6 +203,15 @@ def test_a_yes_with_anything_else_is_not(text: str) -> None:
         ("Va la tendencia de la semana… ¿Lo subo? Igual, ¿te gustan las mesas de roble?", False),
         ("¿Lo subo\n¿Y el precio?", False),
         ("Lo subo cuando quieras", False),
+        ("¿Lo subo?¿O preferís otro horario?", False),
+        ("¿Lo subo??", True),
+        ("¿Lo subo?!?", True),
+        ("¿Lo subo a $1.500?", True),
+        ("¿Lo subo a www.mueblesroble.com?", True),
+        ("_¿Lo subo?_", True),
+        ("*¿Lo subo?* ~ya~", False),
+        ("¿Lo subo? 1️⃣", True),
+        ("¿Lo subo? 👍🏽", True),
     ],
 )
 def test_asks_to_publish_spots_the_publish_question(text: str, asks: bool) -> None:

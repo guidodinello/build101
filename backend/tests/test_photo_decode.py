@@ -78,6 +78,22 @@ def test_a_decompression_bomb_is_an_unreadable_photo(monkeypatch: pytest.MonkeyP
     assert not isinstance(error.value, ImageTooLarge)
 
 
+def truncated_heic() -> bytes:
+    """A HEIF whose header reads fine but whose data ends early: pillow_heif raises ValueError."""
+    data = make_image((400, 300), format="HEIF")
+    return data[: len(data) * 9 // 10]
+
+
+def test_a_truncated_heic_is_an_unreadable_photo() -> None:
+    with pytest.raises(UnreadableImage):
+        prepare_reference(truncated_heic())
+
+
+def test_a_truncated_heic_upload_is_unreadable() -> None:
+    with pytest.raises(uploads.UnreadableImage):
+        uploads.process_upload(truncated_heic(), "image/heic", "photo")
+
+
 def test_a_file_that_is_not_an_image_is_an_unreadable_photo() -> None:
     with pytest.raises(UnreadableImage):
         prepare_reference(b"not an image")
@@ -128,6 +144,22 @@ async def test_whatsapp_and_onboarding_decodes_share_one_limit(
 
     assert seen["calls"] == 6
     assert seen["peak"] == images.MAX_CONCURRENT_DECODES == 2
+
+
+@pytest.mark.parametrize("onboarding_first", [True, False])
+async def test_the_decode_limit_does_not_depend_on_who_asks_first(
+    monkeypatch: pytest.MonkeyPatch, onboarding_first: bool
+) -> None:
+    monkeypatch.setattr(images, "MAX_CONCURRENT_DECODES", 1)
+    seen = count_decodes(monkeypatch)
+    data = make_image((SIDE, 80))
+    uploads_ = [read_upload(data, "image/jpeg", "photo") for _ in range(2)]
+    photos = [decode(prepare_reference, data) for _ in range(2)]
+
+    await asyncio.gather(*(uploads_ + photos if onboarding_first else photos + uploads_))
+
+    assert seen["calls"] == 4
+    assert seen["peak"] == 1
 
 
 async def test_the_carousel_references_decode_under_the_same_limit(

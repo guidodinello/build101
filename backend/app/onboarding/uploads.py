@@ -5,7 +5,6 @@ from io import BytesIO
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.media.images import (
-    MAX_CONCURRENT_DECODES,
     MAX_PIXELS,
     ImageTooLarge,
     UnreadableImage,
@@ -45,7 +44,7 @@ def llm_copy_path(business_id: object, asset_id: object) -> str:
 async def read_upload(data: bytes, content_type: str, kind: str) -> ProcessedUpload:
     """`process_upload` in a thread, at most MAX_CONCURRENT_DECODES at a time. The others wait on
     the event loop, not in a thread, so they don't hold the pool other work needs."""
-    async with decode_slot(MAX_CONCURRENT_DECODES):
+    async with decode_slot():
         return await asyncio.to_thread(process_upload, data, content_type, kind)
 
 
@@ -57,7 +56,8 @@ def process_upload(data: bytes, content_type: str, kind: str) -> ProcessedUpload
                 raise ImageTooLarge(f"{source.width}x{source.height} is over {MAX_PIXELS} px")
             image = ImageOps.exif_transpose(source)
             image.load()
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+    # ValueError: pillow_heif's error for a truncated HEIF.
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         raise UnreadableImage(str(exc)) from exc
     return ProcessedUpload(
         width=image.width,

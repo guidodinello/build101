@@ -49,9 +49,12 @@ class ImageTooLarge(UnreadableImage):
     """Readable, but over MAX_PIXELS."""
 
 
-def decode_slot(limit: int = MAX_CONCURRENT_DECODES) -> asyncio.Semaphore:
-    """The running loop's one semaphore for image decodes; `limit` sizes it on first use."""
-    return _decode_slots.setdefault(asyncio.get_running_loop(), asyncio.Semaphore(limit))
+def decode_slot() -> asyncio.Semaphore:
+    """The running loop's one semaphore for image decodes, sized by MAX_CONCURRENT_DECODES the
+    first time the loop asks (read here, so it doesn't depend on who asks first)."""
+    return _decode_slots.setdefault(
+        asyncio.get_running_loop(), asyncio.Semaphore(MAX_CONCURRENT_DECODES)
+    )
 
 
 async def decode[T](function: Callable[..., T], *args: Any) -> T:
@@ -71,7 +74,8 @@ def prepare_reference(data: bytes) -> bytes:
             if source.width * source.height > MAX_PIXELS:
                 raise ImageTooLarge(f"{source.width}x{source.height} is over {MAX_PIXELS} px")
             return reference_from(ImageOps.exif_transpose(source))
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+    # ValueError: pillow_heif's error for a truncated HEIF.
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         raise UnreadableImage(str(exc)) from exc
 
 

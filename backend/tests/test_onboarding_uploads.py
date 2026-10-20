@@ -6,6 +6,7 @@ from io import BytesIO
 import pytest
 from PIL import Image
 
+from app.media import images
 from app.onboarding import uploads
 from app.onboarding.uploads import (
     ImageTooLarge,
@@ -120,7 +121,7 @@ def test_the_pixel_cap_is_25_megapixels() -> None:
 async def test_decodes_run_at_most_as_many_at_once_as_the_limit_allows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(uploads, "MAX_CONCURRENT_DECODES", 2)
+    monkeypatch.setattr(images, "MAX_CONCURRENT_DECODES", 2)
     running = 0
     peak = 0
     lock = threading.Lock()
@@ -148,7 +149,7 @@ async def test_decodes_waiting_for_a_slot_leave_the_thread_pool_free(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Waiting happens on the event loop: one decode runs in a thread, the rest hold none."""
-    monkeypatch.setattr(uploads, "MAX_CONCURRENT_DECODES", 1)
+    monkeypatch.setattr(images, "MAX_CONCURRENT_DECODES", 1)
     in_threads = 0
     peak = 0
     lock = threading.Lock()
