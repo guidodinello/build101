@@ -144,10 +144,6 @@ def build_conversation(
                 keeper=PhotoKeeper(model, sessions, storage),
                 background=background,
             )
-            posts.on_event(chat.notify)
-            publishing.on_event(chat.notify)
-            if video_maker:
-                video_maker.on_event(chat.notify)
             if sessions is None:
                 return Conversation(chat, chat.notify)
             gate = OnboardingGate(chat, sessions, settings.frontend_url, settings.assistant_name)

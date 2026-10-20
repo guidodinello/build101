@@ -131,8 +131,6 @@ def rig(compactor_budget: tuple[int, int] | None = None) -> Rig:
         compactor=compactor,
         background=background,
     )
-    posts.on_event(chat.notify)
-    publisher.on_event(chat.notify)
     return Rig(chat, background, history, notes, store, photos, image_gen, FakeChannel())
 
 

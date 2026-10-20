@@ -199,7 +199,9 @@ class ChatHandler:
             case "audio":
                 event: Event = AudioUnclear()
             case "button" if message.button:
-                tapped = await self._buttons.handle(message.sender, message.button.id, channel)
+                tapped = await self._buttons.handle(
+                    message.sender, message.button.id, channel, self.notify
+                )
                 if tapped is None:
                     return None
                 event = tapped
@@ -532,13 +534,13 @@ class ChatHandler:
             return {"error": "not_owner_request"}
         match call.name:
             case "create_post":
-                return self._posts.create_post(sender, arguments, channel)
+                return self._posts.create_post(sender, arguments, channel, self.notify)
             case "create_video" if self._videos is not None:
-                return self._videos.create_video(sender, arguments, channel)
+                return self._videos.create_video(sender, arguments, channel, self.notify)
             case "revise_post":
-                return self._posts.revise_post(sender, arguments, channel)
+                return self._posts.revise_post(sender, arguments, channel, self.notify)
             case "approve_post":
-                return self._publisher.approve(sender, arguments, approval, channel)
+                return self._publisher.approve(sender, arguments, approval, channel, self.notify)
             case "list_posts":
                 return {"posts": [describe_post(post) for post in self._lifecycle.all(sender)]}
             case "remember":

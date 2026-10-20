@@ -28,6 +28,7 @@ from .events import (
     BrandFixAsked,
     Event,
     JobRetried,
+    Notify,
     PostApproved,
     PostChangeAsked,
     PostDiscarded,
@@ -40,7 +41,7 @@ from .events import (
 logger = logging.getLogger(__name__)
 
 # The event to answer, or None for a tap that needs no answer (`noop`).
-Handler = Callable[[str, str, ChannelPort], Awaitable[Event | None]]
+Handler = Callable[[str, str, ChannelPort, Notify], Awaitable[Event | None]]
 
 
 class ButtonRouter:
@@ -76,7 +77,9 @@ class ButtonRouter:
     def brand(self) -> BrandFlow | None:
         return self._brand
 
-    async def handle(self, sender: str, button_id: str, channel: ChannelPort) -> Event | None:
+    async def handle(
+        self, sender: str, button_id: str, channel: ChannelPort, notify: Notify
+    ) -> Event | None:
         """Run the button's action. The caller holds the sender's history lock."""
         action, _, entity = button_id.partition(":")
         handler = self._handlers.get(action)
@@ -84,7 +87,7 @@ class ButtonRouter:
             event: Event | None = StaleButton()
         else:
             try:
-                event = await handler(sender, entity, channel)
+                event = await handler(sender, entity, channel, notify)
             except SQLAlchemyError:
                 # Like the chat's own database calls: answer rather than drop the tap.
                 logger.warning("button %s failed for %s", button_id, mask(sender), exc_info=True)
@@ -93,62 +96,80 @@ class ButtonRouter:
             logger.info("stale button %s from %s", button_id, mask(sender))
         return event
 
-    async def _noop(self, sender: str, entity: str, channel: ChannelPort) -> None:
+    async def _noop(self, sender: str, entity: str, channel: ChannelPort, notify: Notify) -> None:
         return None
 
-    async def _brand_ok(self, sender: str, entity: str, channel: ChannelPort) -> Event:
+    async def _brand_ok(
+        self, sender: str, entity: str, channel: ChannelPort, notify: Notify
+    ) -> Event:
         if self._brand is None or not await self._brand.confirm(sender):
             return StaleButton()
         return BrandConfirmed()
 
-    async def _brand_fix(self, sender: str, entity: str, channel: ChannelPort) -> Event:
+    async def _brand_fix(
+        self, sender: str, entity: str, channel: ChannelPort, notify: Notify
+    ) -> Event:
         if self._brand is None or not await self._brand.ask_for_correction(sender):
             return StaleButton()
         return BrandFixAsked()
 
-    async def _retry(self, sender: str, entity: str, channel: ChannelPort) -> Event:
+    async def _retry(self, sender: str, entity: str, channel: ChannelPort, notify: Notify) -> Event:
         job = await retry_failed(self._sessions, sender, entity) if self._sessions else None
         return StaleButton() if job is None else JobRetried(job.kind)
 
-    async def _post_approve(self, sender: str, entity: str, channel: ChannelPort) -> Event:
+    async def _post_approve(
+        self, sender: str, entity: str, channel: ChannelPort, notify: Notify
+    ) -> Event:
         post = self._posts.approve(sender, entity)
         return StaleButton() if post is None else PostApproved(post.id)
 
-    async def _post_change(self, sender: str, entity: str, channel: ChannelPort) -> Event:
+    async def _post_change(
+        self, sender: str, entity: str, channel: ChannelPort, notify: Notify
+    ) -> Event:
         post = self._posts.pending_post(sender, entity)
         return StaleButton() if post is None else PostChangeAsked(post.id)
 
-    async def _post_discard(self, sender: str, entity: str, channel: ChannelPort) -> Event:
+    async def _post_discard(
+        self, sender: str, entity: str, channel: ChannelPort, notify: Notify
+    ) -> Event:
         post = self._posts.discard(sender, entity)
         return StaleButton() if post is None else PostDiscarded(post.id)
 
-    async def _post_replace(self, sender: str, entity: str, channel: ChannelPort) -> Event:
+    async def _post_replace(
+        self, sender: str, entity: str, channel: ChannelPort, notify: Notify
+    ) -> Event:
         post = self._posts.discarded_post(sender, entity)
         if post is None:
             return StaleButton()
         if post.video is None:
-            return started(self._maker.remake(post, channel), "Sí, otro")
+            return started(self._maker.remake(post, channel, notify), "Sí, otro")
         if self._videos is None:  # the flag was turned off since
             return StaleButton()
-        result = self._videos.remake(post, channel)
+        result = self._videos.remake(post, channel, notify)
         if not result.get("error"):
             # One tap, one clip: Veo bills per second, so the same button can't start a second.
             self._posts.replace(post)
         return started(result, "Sí, otro")
 
-    async def _post_publish(self, sender: str, entity: str, channel: ChannelPort) -> Event:
-        return publishing(entity, self._publisher.publish_approved(sender, entity, channel))
+    async def _post_publish(
+        self, sender: str, entity: str, channel: ChannelPort, notify: Notify
+    ) -> Event:
+        return publishing(entity, self._publisher.publish_approved(sender, entity, channel, notify))
 
-    async def _post_retry(self, sender: str, entity: str, channel: ChannelPort) -> Event:
-        return publishing(entity, self._publisher.retry(sender, entity, channel))
+    async def _post_retry(
+        self, sender: str, entity: str, channel: ChannelPort, notify: Notify
+    ) -> Event:
+        return publishing(entity, self._publisher.retry(sender, entity, channel, notify))
 
-    async def _photo_post(self, sender: str, entity: str, channel: ChannelPort) -> Event:
+    async def _photo_post(
+        self, sender: str, entity: str, channel: ChannelPort, notify: Notify
+    ) -> Event:
         photo_ids = [photo_id for photo_id in entity.split(",") if photo_id]
         if not photo_ids:
             return StaleButton()
         brief = "Post con esta foto" if len(photo_ids) == 1 else "Post con estas fotos"
         arguments = {"brief": brief, "asset_ids": photo_ids, "style": "photos"}
-        return started(self._maker.create_post(sender, arguments, channel), "Sí, armalo")
+        return started(self._maker.create_post(sender, arguments, channel, notify), "Sí, armalo")
 
 
 def started(result: dict[str, Any], origin: str) -> Event:

@@ -125,10 +125,6 @@ class Rig:
             videos=self.maker,
             background=self.background,
         )
-        maker.on_event(self.chat.notify)
-        publishing.on_event(self.chat.notify)
-        if self.maker:
-            self.maker.on_event(self.chat.notify)
         self.publishing = publishing
 
     def add_post(self, post_id: str = "p1") -> Post:
@@ -238,7 +234,7 @@ async def test_nothing_publishes_a_video_the_owner_has_not_approved() -> None:
     [video] = rig.videos_of()
     assert video.status == "pending_approval"
     assert rig.publisher.calls == []
-    assert rig.publishing.publish_approved(SENDER, video.id, rig.channel) == {
+    assert rig.publishing.publish_approved(SENDER, video.id, rig.channel, rig.chat.notify) == {
         "error": "post_not_approved"
     }
 
@@ -294,15 +290,22 @@ async def test_blocked_is_refunded_but_other_failures_count_against_the_daily_li
     args = {"post_id": "p1"}
 
     for _ in range(2):  # each one is blocked, so each one is refunded and allowed
-        assert rig.maker.create_video(SENDER, args, rig.channel)["status"] == "generating"  # type: ignore[union-attr]
+        assert (
+            rig.maker.create_video(SENDER, args, rig.channel, rig.chat.notify)["status"]
+            == "generating"
+        )  # type: ignore[union-attr]
         await rig.background.join()
 
     billed = CountingVideoGen(VideoGenUnavailable("503"))
     rig = Rig(ScriptedModel(replies=[text_reply("ok")]), billed, max_videos=1)
     rig.add_post()
-    assert rig.maker.create_video(SENDER, args, rig.channel)["status"] == "generating"  # type: ignore[union-attr]
+    assert (
+        rig.maker.create_video(SENDER, args, rig.channel, rig.chat.notify)["status"] == "generating"
+    )  # type: ignore[union-attr]
     await rig.background.join()
-    assert rig.maker.create_video(SENDER, args, rig.channel) == {"error": "video_daily_limit"}  # type: ignore[union-attr]
+    assert rig.maker.create_video(SENDER, args, rig.channel, rig.chat.notify) == {
+        "error": "video_daily_limit"
+    }  # type: ignore[union-attr]
     assert len(billed.calls) == 1
 
 
@@ -315,16 +318,24 @@ async def test_guards_run_in_code() -> None:
     bare = Post("p3", SENDER, [PostImage("/media/y.jpg", b"jpeg")], "caption")
     rig.store.add(bare)
 
-    assert rig.maker.create_video(SENDER, {"post_id": "nope"}, rig.channel) == {
+    assert rig.maker.create_video(SENDER, {"post_id": "nope"}, rig.channel, rig.chat.notify) == {
         "error": "unknown_post"
     }
-    assert rig.maker.create_video(SENDER, {"post_id": "p2"}, rig.channel)["error"] == (
-        "post_not_pending"
+    assert rig.maker.create_video(SENDER, {"post_id": "p2"}, rig.channel, rig.chat.notify)[
+        "error"
+    ] == ("post_not_pending")
+    assert rig.maker.create_video(SENDER, {"post_id": "p3"}, rig.channel, rig.chat.notify) == {
+        "error": "no_photos"
+    }
+    assert (
+        rig.maker.create_video(SENDER, {"nope": 1}, rig.channel, rig.chat.notify)["error"]
+        == "invalid_arguments"
     )
-    assert rig.maker.create_video(SENDER, {"post_id": "p3"}, rig.channel) == {"error": "no_photos"}
-    assert rig.maker.create_video(SENDER, {"nope": 1}, rig.channel)["error"] == "invalid_arguments"
-    assert rig.maker.create_video(SENDER, {"post_id": "p1"}, rig.channel)["status"] == "generating"
-    assert rig.maker.create_video(SENDER, {"post_id": "p1"}, rig.channel) == {
+    assert (
+        rig.maker.create_video(SENDER, {"post_id": "p1"}, rig.channel, rig.chat.notify)["status"]
+        == "generating"
+    )
+    assert rig.maker.create_video(SENDER, {"post_id": "p1"}, rig.channel, rig.chat.notify) == {
         "error": "generation_in_progress"
     }
     await rig.background.join()
@@ -352,7 +363,10 @@ async def test_revise_post_does_not_touch_a_video_post() -> None:
     posts = rig.chat._posts
 
     result = posts.revise_post(
-        SENDER, {"post_id": video.id, "change": "más corto", "part": "caption"}, rig.channel
+        SENDER,
+        {"post_id": video.id, "change": "más corto", "part": "caption"},
+        rig.channel,
+        rig.chat.notify,
     )
 
     assert result == {"error": "video_post"}
@@ -407,22 +421,10 @@ async def test_another_on_a_video_post_is_stale_with_the_flag_off() -> None:
     )
     rig.store.add(video)
 
-    event = await rig.chat._buttons.handle(SENDER, "post_replace:v1", rig.channel)
+    event = await rig.chat._buttons.handle(SENDER, "post_replace:v1", rig.channel, rig.chat.notify)
 
     assert event == StaleButton()
     assert video.status == "discarded"
-
-
-async def test_an_unwired_maker_refuses_before_any_generation() -> None:
-    video_gen = CountingVideoGen()
-    rig = Rig(ScriptedModel(replies=[text_reply("ok")]), video_gen)
-    rig.add_post()
-    unwired = VideoMaker(video_gen, rig.store, rig.videos, BASE_URL, 2, background=rig.background)
-
-    with pytest.raises(RuntimeError, match="on_event"):
-        unwired.create_video(SENDER, {"post_id": "p1"}, rig.channel)
-
-    assert video_gen.calls == []
 
 
 async def test_a_sent_video_stays_served_after_the_cache_cap_of_later_clips() -> None:

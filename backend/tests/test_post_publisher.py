@@ -101,8 +101,6 @@ class Rig:
             keep_alive_s=60.0,
             background=self.background,
         )
-        maker.on_event(self.chat.notify)
-        self.publishing.on_event(self.chat.notify)
 
     def add_post(self, post_id: str, slides: int = 1) -> Post:
         images = [PostImage(self.images.add(make_image((80, 100))), b"jpeg") for _ in range(slides)]

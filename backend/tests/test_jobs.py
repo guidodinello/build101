@@ -442,8 +442,8 @@ async def test_brand_ok_activates_the_business_once(
     business = await add_business(sessions, state="awaiting_brand_confirmation")
     buttons = router(sessions)
 
-    first = await buttons.handle(PHONE, "brand_ok", FakeChannel())
-    second = await buttons.handle(PHONE, "brand_ok", FakeChannel())
+    first = await buttons.handle(PHONE, "brand_ok", FakeChannel(), EventLog())
+    second = await buttons.handle(PHONE, "brand_ok", FakeChannel(), EventLog())
 
     assert (first, second) == (BrandConfirmed(), StaleButton())
     async with sessions() as db:
@@ -457,7 +457,7 @@ async def test_a_brand_change_queues_revise_mode_once(
     buttons = router(sessions)
     flow = BrandFlow(sessions)
 
-    asked = await buttons.handle(PHONE, "brand_fix", FakeChannel())
+    asked = await buttons.handle(PHONE, "brand_fix", FakeChannel(), EventLog())
     taken = await flow.revise(PHONE, "somos más formales")
     again = await flow.revise(PHONE, "y otra cosa")
 
@@ -470,7 +470,7 @@ async def test_a_brand_change_queues_revise_mode_once(
         "generating_brand",
         {"resume_state": "awaiting_brand_confirmation"},
     )
-    assert await buttons.handle(PHONE, "brand_ok", FakeChannel()) == StaleButton()
+    assert await buttons.handle(PHONE, "brand_ok", FakeChannel(), EventLog()) == StaleButton()
     assert [(job.kind, job.payload) for job in jobs] == [
         ("generate_brand", {"correction": "somos más formales"})
     ]
@@ -522,8 +522,8 @@ async def test_brand_buttons_are_stale_in_another_state(
     await add_business(sessions, state="active")
     buttons = router(sessions)
 
-    assert await buttons.handle(PHONE, "brand_ok", FakeChannel()) == StaleButton()
-    assert await buttons.handle(PHONE, "brand_fix", FakeChannel()) == StaleButton()
+    assert await buttons.handle(PHONE, "brand_ok", FakeChannel(), EventLog()) == StaleButton()
+    assert await buttons.handle(PHONE, "brand_fix", FakeChannel(), EventLog()) == StaleButton()
 
 
 async def test_retry_button_requeues_the_failed_job(
@@ -536,7 +536,7 @@ async def test_retry_button_requeues_the_failed_job(
         await db.commit()
     buttons = router(sessions)
 
-    first = await buttons.handle(PHONE, f"retry:{failed.id}", FakeChannel())
-    second = await buttons.handle(PHONE, f"retry:{failed.id}", FakeChannel())
+    first = await buttons.handle(PHONE, f"retry:{failed.id}", FakeChannel(), EventLog())
+    second = await buttons.handle(PHONE, f"retry:{failed.id}", FakeChannel(), EventLog())
 
     assert (first, second) == (JobRetried("generate_brand"), StaleButton())

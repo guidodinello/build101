@@ -177,8 +177,6 @@ def build(
         background=background,
         **options,
     )
-    posts.on_event(chat.notify)
-    publishing.on_event(chat.notify)
     return chat, background
 
 
