@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.background import BackgroundWork
 from app.db.models import BrandAsset, Business
 from app.onboarding.uploads import EXTENSIONS
 from app.storage import (
@@ -118,23 +119,20 @@ async def _sweep_business(
 
 
 def upload_sweep(
-    storage: StoragePort,
+    storage: StoragePort, background: BackgroundWork
 ) -> Callable[[async_sessionmaker[AsyncSession]], Awaitable[object]]:
     """The `PeriodicCheck.run` of the sweep. The runner awaits its checks before it claims jobs,
-    and a round lists Storage once per Business, so the round runs as a background task: the check
+    and a round lists Storage once per Business, so the round runs as background work: the check
     returns at once, and skips a round while the previous one is still running."""
-    current: asyncio.Task[int] | None = None  # kept: a task nobody references can be collected
+    current: asyncio.Task[None] | None = None
+
+    async def sweep(sessions: async_sessionmaker[AsyncSession]) -> None:
+        await sweep_orphaned_uploads(sessions, storage)
 
     async def run(sessions: async_sessionmaker[AsyncSession]) -> None:
         nonlocal current
         if current is not None and not current.done():
             return
-        current = asyncio.create_task(sweep_orphaned_uploads(sessions, storage))
-        current.add_done_callback(_log_failure)
+        current = background.start(sweep(sessions), "upload sweep")
 
     return run
-
-
-def _log_failure(task: asyncio.Task[int]) -> None:
-    if not task.cancelled() and task.exception() is not None:
-        logger.error("upload sweep failed", exc_info=task.exception())

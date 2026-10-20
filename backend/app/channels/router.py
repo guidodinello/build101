@@ -9,6 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 
+from app.background import get_background_work
 from app.config import Settings, get_settings
 from app.conversation.events import Notify
 from app.conversation.factory import Conversation, build_conversation
@@ -42,7 +43,7 @@ def get_channel() -> ChannelPort:
 def get_dedupe_store() -> DedupeStore:
     # With the database the ids survive a deploy (#105); without it a restart forgets them.
     if get_settings().database_url:
-        return DbDedupeStore(get_sessionmaker())
+        return DbDedupeStore(get_sessionmaker(), get_background_work())
     return InMemoryDedupeStore()
 
 

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.background import BackgroundWork
 from app.db.models import BrandAsset, Business
 from app.jobs.queue import enqueue
 from app.jobs.runner import JobContext, JobRunner, PeriodicCheck
@@ -19,7 +20,7 @@ from app.jobs.uploads import (
 )
 from app.storage import SIGNED_UPLOAD_URL_TTL, StorageError, StoredObject
 from tests.conftest import requires_db
-from tests.fakes import FakeChannel, FakeStorage, SequenceModel
+from tests.fakes import EventLog, FakeChannel, FakeStorage, SequenceModel
 
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
 OLD = NOW - SIGNED_UPLOAD_URL_TTL - timedelta(minutes=1)
@@ -163,15 +164,17 @@ async def test_the_check_returns_at_once_and_skips_a_round_while_one_is_running(
 ) -> None:
     await add_businesses(sessions, 2)
     storage = StuckStorage()
-    check = upload_sweep(storage)
+    background = BackgroundWork()
+    check = upload_sweep(storage, background)
 
     await asyncio.wait_for(check(sessions), timeout=1)
     await asyncio.sleep(0.05)
     await asyncio.wait_for(check(sessions), timeout=1)
     await asyncio.sleep(0.05)
+    assert storage.listings == 1  # the second call started no round
+
     storage.release.set()
-
-    assert storage.listings == 1
+    await background.join()
 
 
 @requires_db
@@ -189,14 +192,17 @@ async def test_a_stuck_sweep_does_not_delay_a_due_job(
         enqueue(db, "analyze_asset", None, {})
         await db.commit()
     model: Any = SequenceModel([])
+    background = BackgroundWork()
     runner = JobRunner(
         sessions,
         {"analyze_asset": job},
         storage,
         FakeChannel(),
         model,
+        EventLog(),
         poll_interval_s=0.01,
-        checks=(PeriodicCheck("upload sweep", SWEEP_EVERY, upload_sweep(storage)),),
+        checks=(PeriodicCheck("upload sweep", SWEEP_EVERY, upload_sweep(storage, background)),),
+        background=background,
     )
     await runner.start()
     try:

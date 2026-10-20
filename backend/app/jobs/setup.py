@@ -69,7 +69,9 @@ def build_job_runner(
         NOTIFY_ON_FAILURE,
         checks=(
             PeriodicCheck("niche reports", CHECK_EVERY, enqueue_due_niche_reports),
-            PeriodicCheck("upload sweep", SWEEP_EVERY, upload_sweep(storage)),
+            PeriodicCheck(
+                "upload sweep", SWEEP_EVERY, upload_sweep(storage, get_background_work())
+            ),
         ),
         background=get_background_work(),
     )

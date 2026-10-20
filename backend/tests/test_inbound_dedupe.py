@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.background import BackgroundWork
 from app.channels.inbound import DbDedupeStore
 from tests.conftest import requires_db
 
@@ -16,7 +17,7 @@ pytestmark = requires_db
 async def test_the_first_delivery_is_new_and_the_replay_is_not(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
-    store = DbDedupeStore(sessions)
+    store = DbDedupeStore(sessions, BackgroundWork())
 
     assert await store.first_seen("wamid.A") is True
     assert await store.first_seen("wamid.A") is False
@@ -26,10 +27,10 @@ async def test_the_first_delivery_is_new_and_the_replay_is_not(
 async def test_a_replayed_id_is_ignored_across_restarts(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
-    assert await DbDedupeStore(sessions).first_seen("wamid.A") is True
+    assert await DbDedupeStore(sessions, BackgroundWork()).first_seen("wamid.A") is True
 
     # A new store on the same database is what a restart or a deploy leaves behind.
-    assert await DbDedupeStore(sessions).first_seen("wamid.A") is False
+    assert await DbDedupeStore(sessions, BackgroundWork()).first_seen("wamid.A") is False
 
 
 async def pruned(store: DbDedupeStore) -> None:
@@ -48,7 +49,7 @@ async def test_only_expired_ids_are_pruned(sessions: async_sessionmaker[AsyncSes
         )
         await db.commit()
 
-    store = DbDedupeStore(sessions, retention=timedelta(hours=48))
+    store = DbDedupeStore(sessions, BackgroundWork(), retention=timedelta(hours=48))
     assert await store.first_seen("fresh") is True
     await pruned(store)
 
@@ -91,7 +92,7 @@ async def test_a_failed_prune_never_fails_first_seen(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     counter = UseCounter(sessions, fail_on=2)  # 1: the insert, 2: the prune
-    store = DbDedupeStore(counter.as_sessionmaker())
+    store = DbDedupeStore(counter.as_sessionmaker(), BackgroundWork())
 
     # The prune runs after the id is committed. If it failed the request, Kapso's retry would
     # find the id stored and the message would never be handled.
@@ -99,7 +100,7 @@ async def test_a_failed_prune_never_fails_first_seen(
     await pruned(store)
 
     assert counter.uses == 2
-    assert await DbDedupeStore(sessions).first_seen("wamid.A") is False
+    assert await DbDedupeStore(sessions, BackgroundWork()).first_seen("wamid.A") is False
 
 
 async def test_a_failed_prune_is_retried_soon_and_a_good_one_waits_the_interval(
@@ -107,7 +108,9 @@ async def test_a_failed_prune_is_retried_soon_and_a_good_one_waits_the_interval(
 ) -> None:
     now = [0.0]
     counter = UseCounter(sessions, fail_on=2)
-    store = DbDedupeStore(counter.as_sessionmaker(), prune_every_s=3600, clock=lambda: now[0])
+    store = DbDedupeStore(
+        counter.as_sessionmaker(), BackgroundWork(), prune_every_s=3600, clock=lambda: now[0]
+    )
 
     await store.first_seen("a")  # use 1 inserts, use 2 is the prune that fails
     await pruned(store)
@@ -130,7 +133,7 @@ async def test_a_failed_prune_is_retried_soon_and_a_good_one_waits_the_interval(
 async def test_first_seen_does_not_wait_for_the_prune(
     sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    store = DbDedupeStore(sessions)
+    store = DbDedupeStore(sessions, BackgroundWork())
     release = asyncio.Event()
 
     async def slow_prune() -> None:
@@ -149,7 +152,9 @@ async def test_first_seen_does_not_wait_for_the_prune(
 async def test_never_more_than_one_prune_is_in_flight(
     sessions: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    store = DbDedupeStore(sessions, prune_every_s=0)  # always due once the last one is done
+    store = DbDedupeStore(
+        sessions, BackgroundWork(), prune_every_s=0
+    )  # always due once the last one is done
     release = asyncio.Event()
     started = 0
 
