@@ -1,5 +1,6 @@
 import pytest
 
+from app.background import BackgroundWork
 from app.conversation.button_router import ButtonRouter
 from app.conversation.events import (
     PostApproved,
@@ -43,6 +44,7 @@ class Rig:
         self.model = ScriptedModel(drafts={PostCopy: PostCopy(caption="Mesa", hashtags=[])})
         self.photos, self.store = InMemoryPhotos(), PostLifecycle()
         images = PublicImages()
+        self.background = BackgroundWork()
         self.maker = PostMaker(
             PostDrafter(self.model),
             CountingImageGen(),
@@ -52,10 +54,16 @@ class Rig:
             self.store,
             "https://backend.test",
             max_posts_per_day=5,
+            background=self.background,
         )
         self.publisher = RecordingPublisher()
         self.publishing = PostPublisher(
-            self.publisher, self.store, images, "https://backend.test", ACCOUNT
+            self.publisher,
+            self.store,
+            images,
+            "https://backend.test",
+            ACCOUNT,
+            background=self.background,
         )
         self.events: list[object] = []
 
@@ -85,8 +93,7 @@ class Rig:
         return await self.router.handle(SENDER, button_id, self.channel)
 
     async def finish(self) -> None:
-        await self.maker.join()
-        await self.publishing.join()
+        await self.background.join()
 
 
 @pytest.fixture
