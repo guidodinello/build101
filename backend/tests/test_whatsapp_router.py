@@ -117,6 +117,66 @@ def test_duplicate_delivery_is_handled_once(client: TestClient, handler: Recordi
     assert len(handler.handled) == 1
 
 
+def test_reaction_is_marked_read_without_calling_handler(
+    client: TestClient, handler: RecordingHandler
+) -> None:
+    channel = FakeChannel()
+    app.dependency_overrides[get_channel] = lambda: channel
+    body = {
+        "phone_number_id": "fake-phone_number_id",
+        "message": {
+            "id": "wamid.reaction-123",
+            "from": "59899000001",
+            "type": "reaction",
+            "reaction": {
+                "message_id": "wamid.original-456",
+                "emoji": "👍",
+            },
+            "timestamp": str(FIXTURE_TIME),
+        },
+    }
+    raw = json.dumps(body).encode()
+
+    response = post(client, raw, signature=sign(raw, SECRET))
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert handler.handled == []
+    assert channel.read == [("wamid.reaction-123", False)]
+    assert channel.sent == []
+
+
+def test_duplicate_reaction_is_not_acknowledged_twice(
+    client: TestClient, handler: RecordingHandler
+) -> None:
+    channel = FakeChannel()
+    app.dependency_overrides[get_channel] = lambda: channel
+    body = {
+        "phone_number_id": "fake-phone_number_id",
+        "message": {
+            "id": "wamid.reaction-duplicate",
+            "from": "59899000001",
+            "type": "reaction",
+            "reaction": {
+                "message_id": "wamid.original-456",
+                "emoji": "\\U0001F44D",
+            },
+            "timestamp": str(FIXTURE_TIME),
+        },
+    }
+    raw = json.dumps(body).encode()
+    signature = sign(raw, SECRET)
+
+    first = post(client, raw, signature=signature)
+    second = post(client, raw, signature=signature)
+
+    assert first.json() == {"status": "ok"}
+    assert second.json() == {"status": "duplicate"}
+    assert handler.handled == []
+    assert channel.read == [("wamid.reaction-duplicate", False)]
+    assert channel.sent == []
+
+
 def test_a_message_older_than_the_window_is_acknowledged_but_not_processed(
     client: TestClient, handler: RecordingHandler
 ) -> None:

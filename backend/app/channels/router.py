@@ -122,6 +122,16 @@ async def run_handler(
         logger.exception("inbound handling failed: %s id=%s", message.kind, message.message_id)
 
 
+async def run_reaction(message: InboundMessage, channel: ChannelPort) -> None:
+    # Reactions are acknowledged silently; never show a typing indicator or reply.
+    try:
+        await channel.mark_read(message.message_id, typing=False)
+    except Exception:
+        logger.exception(
+            "reaction read acknowledgement failed: id=%s", message.message_id
+        )
+
+
 @router.post("/webhooks/whatsapp")
 async def whatsapp_webhook(
     request: Request,
@@ -159,6 +169,12 @@ async def whatsapp_webhook(
     if not await dedupe.first_seen(message.message_id):
         logger.info("duplicate delivery of %s ignored", message.message_id)
         return {"status": "duplicate"}
+
+
+    if message.kind == "reaction":
+        logger.info("queued silent reaction id=%s", message.message_id)
+        background_tasks.add_task(run_reaction, message, channel)
+        return {"status": "ok"}
 
     logger.info(
         "queued inbound %s id=%s from=%s", message.kind, message.message_id, mask(message.sender)

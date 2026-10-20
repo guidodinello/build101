@@ -10,7 +10,9 @@ SECRET = "test-secret"
 
 
 def body(name: str) -> dict:
-    return json.loads((FIXTURES / f"kapso_message_{name}.json").read_text())["body"]
+    return json.loads(
+        (FIXTURES / f"kapso_message_{name}.json").read_text(encoding="utf-8")
+    )["body"]
 
 
 def test_text_message() -> None:
@@ -69,6 +71,29 @@ def test_audio_without_transcript_has_none() -> None:
     payload["message"]["kapso"]["transcript"] = {"text": "  "}
 
     assert parse_message(payload).audio.provider_transcript is None
+
+
+def test_parse_reaction() -> None:
+    payload = {
+        "phone_number_id": "phone-123",
+        "message": {
+            "id": "wamid.reaction-123",
+            "from": "15551234567",
+            "type": "reaction",
+            "reaction": {
+                "message_id": "wamid.original-456",
+                "emoji": "\U0001F44D",
+            },
+        },
+    }
+
+    message = parse_message(payload)
+
+    assert message.kind == "reaction"
+    assert message.message_id == "wamid.reaction-123"
+    assert message.sender == "15551234567"
+    assert message.reaction_emoji == "\U0001F44D"
+    assert message.reaction_message_id == "wamid.original-456"
 
 
 def test_unknown_type_is_other() -> None:

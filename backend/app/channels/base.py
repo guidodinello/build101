@@ -43,12 +43,14 @@ class InboundAudio(BaseModel):
 
 
 class InboundMessage(BaseModel):
-    kind: Literal["text", "button", "image", "audio", "album", "other"]
+    kind: Literal["text", "button", "image", "audio", "album", "reaction", "other"]
     message_id: str
     sender: str
     phone_number_id: str
     timestamp: int | None = None
     text: str | None = None  # the body, or the caption of an image
+    reaction_emoji: str | None = None
+    reaction_message_id: str | None = None
     button: Button | None = None
     media: InboundMedia | None = None
     audio: InboundAudio | None = None
