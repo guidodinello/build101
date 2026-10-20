@@ -13,7 +13,7 @@ Commands run from this folder (`uv run ruff check .`, `uv run pyright`, `uv run 
 
 ## What exists today
 
-- `app/main.py`: `/health` (`uv run uvicorn app.main:app --reload`).
+- `app/main.py`: `/health` (`uv run uvicorn app.main:app --reload`); `app/api/ready.py`: `/ready`, the deploy healthcheck ([api.md § Health](../docs/architecture/api.md#health)).
 - `app/imagegen/`: `ImageGenPort` with the Gemini and mock adapters, selected by `IMAGE_GEN`.
 - `app/media/images.py`: reference photo normalization, the 1080×1350 resize, panorama slicing and logo prep.
 - `app/carousel/`: carousel schemas, scene prompts and `CarouselGenerator` (text-free scenes: cover first, other slides anchored on it, or one wide panorama sliced).
@@ -46,7 +46,7 @@ The backend runs on Railway ([ADR 0017](../docs/decisions/0017-backend-host-rail
 
 - **Push to `main`** builds and deploys the service from the connected GitHub repo.
 - **Manual deploy** from the repo root, with the service linked (`railway link`): `railway up --service backend --detach`. Run it from the repo root and not from `backend/`: the service's root directory is `/backend`, so Railway expects the repo layout in the upload.
-- Each deploy runs the pre-deploy command, then starts the container; Railway switches traffic only after `/health` answers.
+- Each deploy runs the pre-deploy command, then starts the container; Railway switches traffic only after `/ready` answers 200. A deploy that refuses to start (see [Environment variables](#environment-variables)) or never gets ready doesn't take traffic, and the previous deployment keeps serving.
 
 ### Service settings
 
@@ -58,27 +58,38 @@ Railway "Config as Code" files (`railway.json`, `railway.toml`) are deprecated a
 | Root directory | `/backend` |
 | Builder / Dockerfile | Dockerfile, `Dockerfile` |
 | Pre-deploy command | `alembic upgrade head` (timeout 300 s) |
-| Healthcheck | `/health`, timeout 60 s |
+| Healthcheck | `/ready` (dashboard: service, Settings, Deploy, Healthcheck Path), timeout 60 s. Railway calls it only during a deploy, not once the deployment is live ([Railway docs](https://docs.railway.com/reference/healthchecks), read 2026-10-20) |
 | Restart policy | on failure, up to 10 retries |
 | Region / replicas | `us-east4-eqdc4a` × 1 |
 | Domain | Railway-generated (`*.up.railway.app`) |
 
 ### Environment variables
 
-Set on the service (`railway variable set KEY --stdin --service backend`, value on stdin so it never lands in shell history). Names are in [`.env.example`](.env.example); the values that differ from local:
+Set on the service (`railway variable set KEY --stdin --service backend`, value on stdin so it never lands in shell history). Names are in [`.env.example`](.env.example); the production values:
 
 | Variable | Production value |
 |---|---|
-| `ENV` | `prod` |
-| `PUBLIC_BACKEND_URL` | the Railway domain (`https://<service>.up.railway.app`); the app refuses to start without it while `INBOUND_HANDLER=chat` |
+| `ENV` | `prod`. Without it nothing below is checked at startup (`/ready` still fails on the mock publisher) |
+| `PUBLIC_BACKEND_URL` | the Railway domain (`https://<service>.up.railway.app`) |
 | `DATABASE_URL` | Supabase **session pooler**, port 5432, `postgresql+asyncpg://` (the transaction pooler breaks asyncpg prepared statements, see [ADR 0003](../docs/decisions/0003-database-supabase-sqlalchemy.md)) |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | the project URL and its legacy `service_role` JWT (the code sends it as `apikey` and as a Bearer token) |
 | `FRONTEND_URL`, `FRONTEND_ORIGINS` | the Vercel domain, `https://neitorai.vercel.app` (no `localhost` in production CORS) |
 | `WHATSAPP_BOT_NUMBER` | `56920403095`, the shared Kapso sandbox number (only answers phones with an active sandbox session) |
 | `ENABLE_DEV_ENDPOINTS`, `DEV_TOKEN` | unset (dev endpoints off) |
 | `RENDERER`, `RENDERER_URL`, `RENDERER_SECRET` | `takumi`, the Vercel domain, and the same secret as the frontend's `RENDER_SECRET` |
+| `IMAGE_GEN` | `gemini` |
+| `PUBLISHER` | `zernio` (`mock` tells the Owner a Post is live when nothing reached Instagram) |
+| `ZERNIO_API_KEY`, `ZERNIO_ACCOUNT_ID` | the Zernio API key and the demo account every Post goes to ([ADR 0024](../docs/decisions/0024-mvp-single-demo-instagram-account.md)) |
+| `INSTAGRAM`, `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | `meta` and our Meta app's id and secret ([ADR 0028](../docs/decisions/0028-read-instagram-with-our-meta-app.md)) |
+| `INBOUND_HANDLER` | `chat` |
+| `VIDEO_GEN_ENABLED`, `VIDEO_GEN` | `false` while AI Reels are off ([ADR 0033](../docs/decisions/0033-ai-generated-reels-veo.md)); once on, `true` and `gemini`, with `GEMINI_VIDEO_API_KEY` |
+| `WHATSAPP_CHANNEL` | `kapso` |
+| `KAPSO_API_KEY`, `KAPSO_WEBHOOK_SECRET`, `KAPSO_PHONE_NUMBER_ID` | the Kapso project key, the signing secret of the Railway webhook (see [below](#switching-whatsapp-between-railway-and-local-development)) and the number we send from |
+| `GEMINI_API_KEY` | a key of the Google project with billing linked |
 
-Everything else (`GEMINI_*`, `KAPSO_*`, `ZERNIO_*`, `PUBLISHER`, `IMAGE_GEN`, ...) carries the same value as local. Without `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `GEMINI_API_KEY` the app still boots but the job runner is off (the startup log says so).
+Settings not listed (model names, limits, base URLs) can keep their defaults.
+
+With `ENV=prod` the app refuses to start when an adapter is a demo fallback (`mock`, `INBOUND_HANDLER=echo`, `WHATSAPP_CHANNEL=simulator`) or when a key, id, number or URL of this table is unset (`GEMINI_VIDEO_API_KEY` only while `VIDEO_GEN_ENABLED=true`); `FRONTEND_URL`, `FRONTEND_ORIGINS`, `PUBLIC_BACKEND_URL` and `RENDERER_URL` must also not point at localhost. One error names every such setting and never prints a value (`check_production` in `app/config.py`). Every start logs the adapters in use, by name only: `adapters in use: IMAGE_GEN=gemini RENDERER=takumi PUBLISHER=zernio ...`. Locally nothing is checked: without `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `GEMINI_API_KEY` the app still boots, with the job runner off (the startup log says so).
 
 ### Migrations
 
@@ -87,7 +98,8 @@ Everything else (`GEMINI_*`, `KAPSO_*`, `ZERNIO_*`, `PUBLISHER`, `IMAGE_GEN`, ..
 ### Logs and checks
 
 - `railway logs --service backend` (deploy logs) and `railway logs --service backend --build` (build logs).
-- `curl -sS https://<service>.up.railway.app/health` returns `{"status":"ok"}`.
+- `curl -sS https://<service>.up.railway.app/health` returns `{"status":"ok"}` while the process is up.
+- `curl -sS https://<service>.up.railway.app/ready` returns `{"status":"ok","checks":{"database":"ok","job_runner":"ok","publisher":"ok"},"commit":"<sha>"}`, or a 503 with the failed checks. `commit` is the deployed commit (Railway's `RAILWAY_GIT_COMMIT_SHA`, so `null` after a `railway up`): compare it with `main`.
 - Pre-deploy output shows up in the deploy logs of the new deployment; `Running upgrade ...` lines appear only when a migration was pending.
 - uvicorn and the app log to stderr, so Railway tags every line `level=error`, including the normal `INFO` ones. It is known noise: read the message text, not the Railway level.
 

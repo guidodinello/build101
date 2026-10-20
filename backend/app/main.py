@@ -10,10 +10,11 @@ from app.api.dev import router as dev_router
 from app.api.errors import install_error_handlers
 from app.api.instagram import router as instagram_router
 from app.api.onboarding import router as onboarding_router
+from app.api.ready import router as ready_router
 from app.background import get_background_work
 from app.channels.router import get_channel, get_owner_notify
 from app.channels.router import router as whatsapp_router
-from app.config import Settings, get_settings
+from app.config import Settings, adapters_in_use, check_production, get_settings
 from app.jobs.setup import build_job_runner
 from app.log_redaction import RedactAccessLog, RedactQueryTokens
 from app.media.public import router as media_router
@@ -30,6 +31,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    check_production(get_settings())
+    adapters = adapters_in_use(get_settings()).items()
+    logger.info("adapters in use: %s", " ".join(f"{name}={adapter}" for name, adapter in adapters))
     try:
         runner = build_job_runner(
             get_settings(),
@@ -41,6 +45,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         runner = None
     if runner:
         await runner.start()
+    app.state.job_runner = runner
     yield
     if runner:
         await runner.stop()
@@ -75,6 +80,7 @@ app.include_router(media_router)
 app.include_router(onboarding_router)
 app.include_router(instagram_router)
 app.include_router(dev_router)
+app.include_router(ready_router)
 
 
 @app.get("/health")

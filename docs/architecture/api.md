@@ -19,7 +19,8 @@ CORS: allow every origin in `FRONTEND_ORIGINS` (comma-separated: Vercel URL + `h
 
 | Method | Path | Response |
 |---|---|---|
-| GET | `/health` | `{"ok": true, "version": "<git sha>"}` |
+| GET | `/health` | `200 {"status": "ok"}` whenever the process is up; it checks nothing else |
+| GET | `/ready` | `200` only when every check passes, else `503`; same body either way: `{"status": "ok" \| "fail", "checks": {"database": "ok" \| "fail", "job_runner": "ok" \| "fail", "publisher": "ok" \| "fail"}, "commit": "<git sha>" \| null}`. `database`: a `select 1` answers within 5 s. `job_runner`: the job runner is on and its poller last polled for jobs less than 30 s ago. `publisher`: `PUBLISHER` is not `mock`. `commit` is Railway's `RAILWAY_GIT_COMMIT_SHA` (`null` locally and after a `railway up`). It shows check names and the commit only: no setting, hostname or error text. Railway's deploy healthcheck ([backend/README.md](../../backend/README.md#service-settings)) |
 
 ### WhatsApp webhook
 

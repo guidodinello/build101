@@ -94,6 +94,16 @@ class JobRunner:
         self._running: set[asyncio.Task[None]] = set()
         self._running_ids: set[uuid.UUID] = set()
         self._poller: asyncio.Task[None] | None = None
+        self._last_poll: datetime | None = None
+
+    def polled_within(self, window: timedelta) -> bool:
+        """Whether the poller is alive and last polled for jobs less than `window` ago (/ready)."""
+        return (
+            self._poller is not None
+            and not self._poller.done()
+            and self._last_poll is not None
+            and datetime.now(UTC) - self._last_poll < window
+        )
 
     async def start(self) -> None:
         await self.fail_stale()
@@ -176,6 +186,7 @@ class JobRunner:
                     last_stale_check = datetime.now(UTC)
                     await self.fail_stale()
                 await self.run_due()
+                self._last_poll = datetime.now(UTC)
             except Exception:
                 logger.exception("polling for jobs failed")
             await asyncio.sleep(self._poll_interval_s)

@@ -136,5 +136,5 @@ npm run typecheck && npm run lint && npm run build
 ## Deploy
 
 - **Frontend**: Vercel ([ADR 0004](../decisions/0004-frontend-nextjs-vercel.md)), root directory `frontend/`, env vars above, at `https://neitorai.vercel.app`. Every push to `main` deploys; settings in [frontend/README.md](../../frontend/README.md#deploy).
-- **Backend**: Railway ([ADR 0017](../decisions/0017-backend-host-railway.md)): one service with root directory `backend/`, built from `backend/Dockerfile` (no browser; `ffmpeg` is added only with the Could video work), one replica (in-process jobs and locks), Railway-generated HTTPS domain. Health check `/health`. Trial first (1 GB RAM, account verified through GitHub so outbound calls work), Hobby if needed.
+- **Backend**: Railway ([ADR 0017](../decisions/0017-backend-host-railway.md)): one service with root directory `backend/`, built from `backend/Dockerfile` (no browser; `ffmpeg` is added only with the Could video work), one replica (in-process jobs and locks), Railway-generated HTTPS domain. Health check `/ready` ([api.md § Health](../architecture/api.md#health)). Trial first (1 GB RAM, account verified through GitHub so outbound calls work), Hobby if needed.
 - **After the first backend deploy**: set the webhook URL in Kapso, run `/dev/seed/demo` if needed, send "hola" from a test phone.
