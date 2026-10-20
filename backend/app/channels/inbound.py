@@ -7,6 +7,7 @@ from typing import Protocol, runtime_checkable
 
 from sqlalchemy import delete, func
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import InboundDelivery
@@ -87,13 +88,19 @@ class DbDedupeStore:
         if self._last_prune is not None and now - self._last_prune < self._prune_every_s:
             return
         self._last_prune = now
-        async with self._sessions() as db:
-            await db.execute(
-                delete(InboundDelivery).where(
-                    InboundDelivery.received_at < func.now() - self._retention
+        # The id is already committed: a failure here must not fail `first_seen`, or Kapso's
+        # retry would find the id stored and drop a message that was never handled. The next
+        # prune is an hour away; the table only grows a little meanwhile.
+        try:
+            async with self._sessions() as db:
+                await db.execute(
+                    delete(InboundDelivery).where(
+                        InboundDelivery.received_at < func.now() - self._retention
+                    )
                 )
-            )
-            await db.commit()
+                await db.commit()
+        except SQLAlchemyError:
+            logger.warning("pruning inbound_deliveries failed", exc_info=True)
 
 
 class RateLimitedHandler:

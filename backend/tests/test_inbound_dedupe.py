@@ -1,6 +1,8 @@
 from datetime import timedelta
+from typing import cast
 
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.channels.inbound import DbDedupeStore
@@ -45,3 +47,35 @@ async def test_only_expired_ids_are_pruned(sessions: async_sessionmaker[AsyncSes
         kept = set((await db.execute(text("select external_id from inbound_deliveries"))).scalars())
     assert kept == {"recent", "fresh"}
     assert await store.first_seen("old") is True
+
+
+class FailingDelete:
+    """A session whose DELETE fails, e.g. on a lock timeout."""
+
+    async def __aenter__(self) -> "FailingDelete":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    async def execute(self, *args: object, **kwargs: object) -> None:
+        raise OperationalError("delete from inbound_deliveries", {}, Exception("lock timeout"))
+
+
+async def test_a_failed_prune_never_fails_first_seen(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    calls = 0
+
+    def sessions_whose_second_use_fails() -> object:
+        nonlocal calls
+        calls += 1
+        return sessions() if calls == 1 else FailingDelete()  # 1: the insert, 2: the prune
+
+    store = DbDedupeStore(cast(async_sessionmaker[AsyncSession], sessions_whose_second_use_fails))
+
+    # The prune runs after the id is committed. If it raised out of first_seen, Kapso's retry
+    # would find the id stored and the message would never be handled.
+    assert await store.first_seen("wamid.A") is True
+    assert calls == 2
+    assert await DbDedupeStore(sessions).first_seen("wamid.A") is False
