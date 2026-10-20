@@ -1,6 +1,7 @@
 import pytest
 
 from app.conversation.approval import Approval, asks_to_publish, classify, decide, is_yes, ordinal
+from app.copy import messages_es
 from app.posts.store import Post, PostImage
 
 
@@ -195,10 +196,38 @@ def test_a_yes_with_anything_else_is_not(text: str) -> None:
         ("Quedó lindo. ¿Querés subirlo ahora?", True),
         ("¡Dale, lo subo! ⏳", False),
         ("¿Querés que le cambie el título?", False),
+        ("¿Lo subo? 🙌", True),
+        ("Quedó linda… ¿Lo subo?", True),
+        ("¿Lo subo? Antes decime si el precio está bien.", False),
+        ("¿Lo subo? ¿O preferís que cambie el horario?", False),
+        ("Va la tendencia de la semana… ¿Lo subo? Igual, ¿te gustan las mesas de roble?", False),
+        ("¿Lo subo\n¿Y el precio?", False),
+        ("Lo subo cuando quieras", False),
+        ("¿Lo subo?¿O preferís otro horario?", False),
+        ("¿Lo subo??", True),
+        ("¿Lo subo?!?", True),
+        ("¿Lo subo a $1.500?", True),
+        ("¿Lo subo a www.mueblesroble.com?", True),
+        ("_¿Lo subo?_", True),
+        ("*¿Lo subo?* ~ya~", False),
+        ("¿Lo subo? 1️⃣", True),
+        ("¿Lo subo? 👍🏽", True),
     ],
 )
 def test_asks_to_publish_spots_the_publish_question(text: str, asks: bool) -> None:
     assert asks_to_publish(text) is asks
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        messages_es.PUBLISH_NOW_ASK,
+        messages_es.VIDEO_ACTIONS,
+        messages_es.post_actions(),
+    ],
+)
+def test_the_publish_questions_we_write_still_arm_a_bare_yes(text: str) -> None:
+    assert asks_to_publish(text)
 
 
 def test_a_yes_to_the_publish_question_approves_the_offered_post() -> None:

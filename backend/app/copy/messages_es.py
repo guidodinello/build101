@@ -26,6 +26,8 @@ JOB_FAILED = "Uy, se me trabó algo armando esto. ¿Lo intento de nuevo?"
 PHOTO_KEPT = "¡Buenísima! 📸 ¿Armo un post con esta foto?"
 PHOTOS_KEPT = "¡Buenísimas! 📸 ¿Armo un post con estas fotos?"
 PHOTO_UNREADABLE = "No pude abrir la foto 🙈 ¿Me la mandás de nuevo?"
+# Over the megapixel cap, not the MB one: the same photo again would fail the same way.
+PHOTO_TOO_LARGE = "Esa foto es demasiado grande 🙈 ¿Me mandás una más chica?"
 PUBLISH_PENDING = "Instagram lo está procesando, en un ratito aparece en tu cuenta ⏳"
 PUBLISH_FAILED = "Uy, Instagram no me dejó publicarlo 🙈 ¿Lo intento de nuevo?"
 BRAND_GENERATING = "¡Gracias! Estoy estudiando tu marca, en un minuto te cuento lo que entendí ⏳"
