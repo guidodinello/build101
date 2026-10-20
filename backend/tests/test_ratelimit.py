@@ -184,6 +184,43 @@ async def test_an_album_announcement_is_free() -> None:
     assert channel.sent == []
 
 
+async def test_an_album_announcement_does_not_end_a_throttled_stretch() -> None:
+    handler, inner = limited(burst=1)
+    channel = FakeChannel()
+    await handler.handle(text(message_id="wamid.ok"), channel)
+
+    for number in range(4):  # a throttled sender alternating albums and texts
+        await handler.handle(album(), channel)
+        await handler.handle(text(message_id=f"wamid.over{number}"), channel)
+
+    assert channel.sent == [("59899000001", NOTICE)]  # one notice, not one per album
+
+
+async def test_an_album_flood_stops_reaching_the_handler_and_gets_no_notice() -> None:
+    clock = Clock()
+    inner = RecordingHandler()
+    handler = RateLimitedHandler(
+        inner,
+        RateLimiter(burst=30, per_minute=10, clock=clock),
+        NOTICE,
+        albums=RateLimiter(burst=5, per_minute=2, clock=clock),
+    )
+    channel = FakeChannel()
+
+    for _ in range(20):
+        await handler.handle(album(), channel)
+    assert len(inner.handled) == 5
+    assert channel.sent == []  # dropped silently
+
+    clock.now += 31  # two a minute: one token is back
+    for _ in range(3):
+        await handler.handle(album(), channel)
+    assert len(inner.handled) == 6
+
+    await handler.handle(text(), channel)  # albums don't touch the turn bucket
+    assert len(inner.handled) == 7
+
+
 async def test_a_failing_notice_does_not_break_the_webhook_task() -> None:
     class BrokenChannel(FakeChannel):
         async def send_text(self, to: str, text: str) -> str:

@@ -19,6 +19,9 @@ MAX_TRACKED_KEYS = 10_000
 # reaches the refill.
 TURNS_BURST = 30
 TURNS_PER_MINUTE = 10
+# An album announcement costs no turn, but a sender can't send them without end either.
+ALBUM_BURST = 5
+ALBUM_PER_MINUTE = 2
 
 # Wizard API calls per link token: the wizard polls every 3 s while photos are analyzed, and
 # uploads cost two calls per photo.

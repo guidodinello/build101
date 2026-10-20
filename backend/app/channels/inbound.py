@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 from collections import OrderedDict
+from collections.abc import Callable
 from datetime import timedelta
 from typing import Protocol, runtime_checkable
 
@@ -11,7 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import InboundDelivery
-from app.ratelimit import MAX_TRACKED_KEYS, RateLimiter
+from app.ratelimit import ALBUM_BURST, ALBUM_PER_MINUTE, MAX_TRACKED_KEYS, RateLimiter
 
 from .base import ChannelError, ChannelPort, InboundMessage
 
@@ -21,6 +22,8 @@ DEDUPE_MAX_KEYS = 10_000
 # Kept longer than the replay window (an hour): a body can't come back as "new" while it is fresh.
 DEDUPE_RETENTION = timedelta(hours=48)
 DEDUPE_PRUNE_EVERY_S = 3600.0
+# A failed prune is tried again this soon, not a whole interval later.
+DEDUPE_PRUNE_RETRY_S = 60.0
 
 
 @runtime_checkable
@@ -56,8 +59,10 @@ class InMemoryDedupeStore:
 class DbDedupeStore:
     """`INSERT ... ON CONFLICT DO NOTHING` on `inbound_deliveries`: survives a restart (#105).
 
-    Rows older than `DEDUPE_RETENTION` are deleted, at most once per `DEDUPE_PRUNE_EVERY_S`, so
-    the table stays small without a job.
+    Rows older than `DEDUPE_RETENTION` are deleted by a background task, at most once per
+    `DEDUPE_PRUNE_EVERY_S` and never two at a time, so the table stays small without a job and
+    the webhook request does no DELETE. A failed prune is logged and tried again after
+    `DEDUPE_PRUNE_RETRY_S`; it can't fail `first_seen`, whose id is already committed.
     """
 
     def __init__(
@@ -65,11 +70,15 @@ class DbDedupeStore:
         sessions: async_sessionmaker[AsyncSession],
         retention: timedelta = DEDUPE_RETENTION,
         prune_every_s: float = DEDUPE_PRUNE_EVERY_S,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._sessions = sessions
         self._retention = retention
         self._prune_every_s = prune_every_s
-        self._last_prune: float | None = None
+        self._clock = clock
+        self._next_prune_at = float("-inf")
+        # Held so the task isn't garbage-collected mid-flight, and to keep it to one at a time.
+        self._prune_task: asyncio.Task[None] | None = None
 
     async def first_seen(self, key: str) -> bool:
         async with self._sessions() as db:
@@ -80,17 +89,18 @@ class DbDedupeStore:
                 .returning(InboundDelivery.external_id)
             )
             await db.commit()
-        await self._prune_if_due()
+        self._prune_if_due()
         return inserted is not None
 
-    async def _prune_if_due(self) -> None:
-        now = time.monotonic()
-        if self._last_prune is not None and now - self._last_prune < self._prune_every_s:
+    def _prune_if_due(self) -> None:
+        if self._prune_task is not None and not self._prune_task.done():
             return
-        self._last_prune = now
-        # The id is already committed: a failure here must not fail `first_seen`, or Kapso's
-        # retry would find the id stored and drop a message that was never handled. The next
-        # prune is an hour away; the table only grows a little meanwhile.
+        if self._clock() < self._next_prune_at:
+            return
+        self._prune_task = asyncio.create_task(self._prune())
+
+    async def _prune(self) -> None:
+        delay = self._prune_every_s
         try:
             async with self._sessions() as db:
                 await db.execute(
@@ -101,12 +111,19 @@ class DbDedupeStore:
                 await db.commit()
         except SQLAlchemyError:
             logger.warning("pruning inbound_deliveries failed", exc_info=True)
+            delay = min(delay, DEDUPE_PRUNE_RETRY_S)
+        self._next_prune_at = self._clock() + delay
 
 
 class RateLimitedHandler:
     """A token bucket per sender in front of the handler (#106): no turn over the limit reaches
     the LLM. The Owner is told once per throttled stretch, so a flood doesn't earn a flood of
-    replies. An album announcement is free: each photo arrives as a message of its own."""
+    replies.
+
+    An album announcement costs no turn (each photo arrives as a message of its own) and doesn't
+    end a throttled stretch, but it has a small bucket of its own: over it, the announcement is
+    dropped silently, so albums can't be used to flood the handler or to reset the notice.
+    """
 
     def __init__(
         self,
@@ -114,15 +131,25 @@ class RateLimitedHandler:
         limiter: RateLimiter,
         notice: str,
         max_keys: int = MAX_TRACKED_KEYS,
+        albums: RateLimiter | None = None,
     ) -> None:
         self._inner = inner
         self._limiter = limiter
+        self._albums = (
+            albums if albums is not None else RateLimiter(ALBUM_BURST, ALBUM_PER_MINUTE, max_keys)
+        )
         self._notice = notice
         self._max_keys = max_keys
         self._notified: OrderedDict[str, None] = OrderedDict()
 
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
-        if message.kind == "album" or self._limiter.take(message.sender):
+        if message.kind == "album":
+            if self._albums.take(message.sender):
+                await self._inner.handle(message, channel)
+            else:
+                logger.debug("album limit hit by %s", mask(message.sender))
+            return
+        if self._limiter.take(message.sender):
             self._notified.pop(message.sender, None)
             await self._inner.handle(message, channel)
             return
