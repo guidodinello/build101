@@ -153,17 +153,16 @@ class Turns:
         """The model's own message about `event` (ADR 0026), under the sender's history lock.
 
         Runs after any Owner turn in progress, never interleaved with it. Failures are logged:
-        nobody awaits the producers that call this. The exception is a verbatim event's
-        `ChannelError`: its caller (a job) must know the Owner never got it.
+        nobody awaits the producers that call this. The exception is a verbatim event: whatever
+        fails (the history, the send), its caller (a job, the onboarding API) must know the Owner
+        may not have it.
         """
         try:
             async with self._history.lock(sender):
                 await self.event_turn(sender, event, channel)
-        except ChannelError:
+        except Exception:
             if verbatim(event):
                 raise
-            logger.exception("%s event failed for %s", type(event).__name__, mask(sender))
-        except Exception:
             # The task's boundary, like the photo batches.
             logger.exception("%s event failed for %s", type(event).__name__, mask(sender))
 

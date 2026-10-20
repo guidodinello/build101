@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.background import BackgroundWork
 from app.channels.base import Button, ChannelError, InboundMessage
@@ -41,6 +42,7 @@ from app.conversation.events import (
     UnsupportedMedia,
 )
 from app.conversation.factory import Chat, ChatParts, build_chat, build_conversation
+from app.conversation.history import InMemoryHistory
 from app.conversation.outbound import FixedReplies
 from app.conversation.photos import Photo, local_now
 from app.conversation.turns import MAX_STEPS
@@ -830,6 +832,39 @@ async def test_a_verbatim_events_delivery_failure_reaches_the_caller_and_leaves_
         await chat.notify(SENDER, BrandGenerating(), Down())
 
     assert await chat.history.get(SENDER) == []
+
+
+class BrokenHistory(InMemoryHistory):
+    """A database that fails when the turn reads the history."""
+
+    async def get(self, sender: str) -> list[Step]:
+        raise SQLAlchemyError("boom")
+
+
+@pytest.mark.parametrize(
+    ("event", "_text", "_button_ids"), VERBATIM_EVENTS, ids=lambda e: type(e).__name__
+)
+async def test_a_verbatim_event_that_fails_before_the_send_reaches_the_caller(
+    event: Event, _text: str, _button_ids: list[str] | None
+) -> None:
+    channel = FakeChannel()
+    chat, _ = build(ScriptedModel(), history=BrokenHistory())
+
+    with pytest.raises(SQLAlchemyError):
+        await chat.notify(SENDER, event, channel)
+
+    assert channel.sent == []
+    assert channel.buttons == []
+
+
+async def test_any_other_events_failure_is_only_logged(caplog: pytest.LogCaptureFixture) -> None:
+    channel = FakeChannel()
+    chat, _ = build(ScriptedModel(), history=BrokenHistory())
+
+    await chat.notify(SENDER, StaleButton(), channel)
+
+    assert "StaleButton event failed" in caplog.text
+    assert channel.sent == []
 
 
 @pytest.mark.parametrize("event", EVENTS, ids=lambda event: type(event).__name__)

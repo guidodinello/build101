@@ -318,7 +318,7 @@ Event = (
 )
 
 # Called as (sender, event, channel). Whoever answers it owns the sender's history lock. A verbatim
-# event's `ChannelError` reaches the caller; any other failure is logged by the notifier.
+# event's failure reaches the caller; any other failure is logged by the notifier.
 Notify = Callable[[str, Event, ChannelPort], Awaitable[None]]
 
 # The events whose fixed text is the message itself: the model never writes them, it only reads

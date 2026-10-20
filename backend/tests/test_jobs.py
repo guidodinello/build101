@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.schemas import AssetAnalysis
@@ -19,6 +20,7 @@ from app.conversation.events import (
     JobRetried,
     StaleButton,
 )
+from app.conversation.factory import ChatParts, build_chat
 from app.conversation.history import DbHistory
 from app.conversation.outbound import FixedReplies
 from app.copy import messages_es
@@ -30,12 +32,16 @@ from app.db.models import (
     Job,
     Product,
 )
+from app.imagegen.mock import MockImageGen
 from app.jobs.asset import analyze_asset
 from app.jobs.brand import generate_brand
 from app.jobs.queue import enqueue, retry_failed
 from app.jobs.runner import JobContext, JobRunner
-from app.llm.client import user_step
+from app.llm.client import Step, user_step
+from app.media.public import PublicImages
 from app.posts.lifecycle import PostLifecycle
+from app.publishing.mock import MOCK_ACCOUNT_ID, MockPublisher
+from app.rendering.mock import MockRenderer
 from tests.conftest import make_image, requires_db
 from tests.fakes import EventLog, FakeChannel, FakeStorage, SequenceModel, brand_brain
 
@@ -418,6 +424,56 @@ class FailsOnceChannel(FakeChannel):
             self.failed = True
             raise ChannelError("boom")
         return await super().send_buttons(to, body, buttons, **headers)
+
+
+class FailsOnceHistory(DbHistory):
+    """The first read of the history fails, like a database blip while the summary is told."""
+
+    failed = False
+
+    async def get(self, sender: str) -> list[Step]:
+        if not self.failed:
+            self.failed = True
+            raise SQLAlchemyError("boom")
+        return await super().get(sender)
+
+
+async def test_a_summary_that_fails_before_the_send_fails_the_job_and_offers_a_retry(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business, channel = await add_business(sessions), FakeChannel()
+    chat = build_chat(
+        ChatParts(
+            model=SequenceModel([]),
+            image_gen=MockImageGen(),
+            renderer=MockRenderer(),
+            publisher=MockPublisher(delay_s=0),
+            images=PublicImages(),
+            background=BackgroundWork(),
+            public_backend_url="https://backend.test",
+            account_id=MOCK_ACCOUNT_ID,
+            assistant_name="Mora",
+            max_photo_mb=10,
+            max_posts_per_day=5,
+            max_videos_per_day=2,
+            history=FailsOnceHistory(sessions),
+        )
+    )
+    job_id = await queue(sessions, "generate_brand", business)
+    jobs, background = runner(
+        sessions,
+        {"generate_brand": generate_brand},
+        channel,
+        SequenceModel([brand_brain()]),
+        notify=chat.notify,
+    )
+
+    await jobs.run_due()
+    await background.join()
+
+    assert (await job_row(sessions, job_id)).status == "failed"
+    # The Owner never got the summary, and is told with the retry.
+    assert channel.buttons == [(PHONE, messages_es.JOB_FAILED, [f"retry:{job_id}"])]
 
 
 async def test_a_summary_that_cant_be_delivered_fails_the_job_and_offers_a_retry(

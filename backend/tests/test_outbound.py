@@ -2,6 +2,7 @@ import asyncio
 import uuid
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.channels.base import ChannelError
 from app.conversation.events import (
@@ -22,7 +23,7 @@ from app.conversation.outbound import (
     send,
 )
 from app.copy import messages_es
-from app.llm.client import user_step
+from app.llm.client import Step, user_step
 from tests.fakes import FakeChannel
 
 PHONE = "59899000001"
@@ -149,3 +150,17 @@ async def test_an_event_with_no_fallback_records_only_its_note() -> None:
     # `PostSent` has buttons through its fallback `post_actions`; the note goes in after.
     assert channel.buttons[0][2] == ["post_approve:p1", "post_change:p1", "post_discard:p1"]
     assert await history.get(PHONE) == [user_step(event.note())]
+
+
+class BrokenHistory(InMemoryHistory):
+    async def extend(self, sender: str, steps: list[Step]) -> None:
+        raise SQLAlchemyError("boom")
+
+
+async def test_fixed_replies_let_a_verbatim_events_history_failure_reach_the_caller() -> None:
+    with pytest.raises(SQLAlchemyError):
+        await FixedReplies(BrokenHistory())(PHONE, BrandGenerating(), FakeChannel())
+
+
+async def test_fixed_replies_swallow_the_history_failure_of_any_other_event() -> None:
+    await FixedReplies(BrokenHistory())(PHONE, StaleButton(), FakeChannel())
