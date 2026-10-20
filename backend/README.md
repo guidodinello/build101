@@ -70,14 +70,20 @@ Railway "Config as Code" files (`railway.json`, `railway.toml`) are deprecated a
 On a deploy the old backend gets a SIGTERM once the new one answers `/health`, and a SIGKILL `RAILWAY_DEPLOYMENT_DRAINING_SECONDS` (150 s) later. It uses that time to finish what it was doing ([#180](https://github.com/guidodinello/build101/issues/180)):
 
 1. uvicorn stops taking connections and gives the requests in flight 10 s to finish (`--timeout-graceful-shutdown 10` in the [`Dockerfile`](Dockerfile)). The webhook answers in well under a second: the Owner's turn runs after the 200, as background work.
-2. The app's shutdown ([`app/main.py`](app/main.py)): the job poller claims no new job, then the background work (Owner turns, Post and video generation, publishes, the wait that groups a photo album, running jobs) gets up to `SHUTDOWN_TIMEOUT_S` (130 s) to finish. What is still running at the deadline is cancelled and logged with its ids: `shutdown deadline passed, cancelling N background tasks: post <id> for ***1234; job <id> (generate_brand) for business <id>; ...`.
-3. The Kapso and Zernio clients close last, so work that ends in step 2 still reaches the Owner.
+2. The app's shutdown ([`app/main.py`](app/main.py)): the job poller claims no new job, then the background work (Owner turns, the `brand_generating` message of a submitted onboarding form, Post and video generation, publishes, the wait that groups a photo album, running jobs) gets up to `SHUTDOWN_TIMEOUT_S` (130 s) to finish. What is still running at the deadline is cancelled and logged with its ids: `shutdown deadline passed, cancelling N background tasks: post <id> for ***1234; job <id> (generate_brand) for business <id>; ...`.
+3. The Kapso and Zernio clients close last, so the text that work ends with in step 2 still reaches the Owner: a reply, the brand summary, a publish's link.
 
-10 s plus 130 s stays under the 150 s drain, so the process exits on its own before the SIGKILL. Raising one of the three means checking the other two. Still lost on a deploy: work cancelled at the deadline (a job left `running` is failed by the next instance after 5 minutes), and the Posts and chat photos, which still live in memory ([One instance](#one-instance)). A crash or an out-of-memory kill gets no drain at all.
+10 s plus 130 s stays under the 150 s drain, so the process exits on its own before the SIGKILL. Raising one of the three means checking the other two.
+
+Post images and videos are the exception. Kapso, WhatsApp and Zernio fetch them by link from `/media/<token>.jpg` (or `.mp4`), which each process serves from its own memory. Once Railway switches traffic, those requests reach the new deployment, which doesn't have them and answers 404, and from the SIGTERM on the old one stops listening anyway. So a Post, Carousel or video sent during the drain doesn't reach the Owner: the send fails and the Owner gets the failure message, or WhatsApp drops the image later. A publish whose media Zernio fetches after the switch fails the same way. The images are still paid for. Fixing it needs the media out of the process (T17: the Storage `renders` bucket).
+
+During the drain two processes talk to the same Owners: the new one answers their new messages while the old one finishes its turns. The per-Owner lock is in memory ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)), so the two don't wait for each other, and an Owner can get two replies that don't know about each other.
+
+Still lost on a deploy: work cancelled at the deadline (a job left `running` is failed by the next instance after 5 minutes), Post images and videos sent during the drain, and the Posts and chat photos, which still live in memory ([One instance](#one-instance)). A crash or an out-of-memory kill gets no drain at all.
 
 ### When to merge backend changes during the pilot
 
-While pilot Owners are active, merge PRs that change `backend/` outside Uruguayan business hours, by default 09:00-20:00 Montevideo time (UTC-3). A deploy still loses the Posts kept in memory and any work that outlasts the drain, and Owners write during business hours. Other PRs don't redeploy the backend (watch paths), so they can merge any time.
+While pilot Owners are active, merge PRs that change `backend/` outside Uruguayan business hours, by default 09:00-20:00 Montevideo time (UTC-3). A deploy still loses the Posts kept in memory, the Post images sent during the drain and any work that outlasts it, and during the drain two processes answer the same Owners. Owners write during business hours. Other PRs don't redeploy the backend (watch paths), so they can merge any time.
 
 ### Environment variables
 
@@ -93,6 +99,7 @@ Set on the service (`railway variable set KEY --stdin --service backend`, value 
 | `WHATSAPP_BOT_NUMBER` | `56920403095`, the shared Kapso sandbox number (only answers phones with an active sandbox session) |
 | `ENABLE_DEV_ENDPOINTS`, `DEV_TOKEN` | unset (dev endpoints off) |
 | `RENDERER`, `RENDERER_URL`, `RENDERER_SECRET` | `takumi`, the Vercel domain, and the same secret as the frontend's `RENDER_SECRET` |
+| `SHUTDOWN_TIMEOUT_S` | unset: the default 130 s ([Deploys and work in flight](#deploys-and-work-in-flight)). `.env.example` sets 5 for local runs |
 
 Everything else (`GEMINI_*`, `KAPSO_*`, `ZERNIO_*`, `PUBLISHER`, `IMAGE_GEN`, ...) carries the same value as local. Without `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `GEMINI_API_KEY` the app still boots but the job runner is off (the startup log says so).
 
@@ -113,7 +120,7 @@ Redeploy the previous deployment from the Railway dashboard (service, Deployment
 
 ### One instance
 
-State kept in memory is lost on every deploy or restart: jobs still running at the shutdown deadline, or when the process dies (the job runner marks jobs stuck for more than 5 minutes as failed), the webhook dedupe store, served post images (`/media/*.jpg`) and the in-memory photo and post stores. The orchestrator's history, its conversation summary and the Owner's notes are in Postgres ([ADR 0028](../docs/decisions/0030-orchestrator-memory-and-context.md)), and so are the chat photos once kept as Brand assets. Keep one replica ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)).
+State kept in memory is lost on every deploy or restart: jobs still running at the shutdown deadline, or when the process dies (the job runner marks jobs stuck for more than 5 minutes as failed), the webhook dedupe store when there is no `DATABASE_URL` (with one it is the `inbound_deliveries` table), served post images (`/media/*.jpg`) and the in-memory photo and post stores. The orchestrator's history, its conversation summary and the Owner's notes are in Postgres ([ADR 0028](../docs/decisions/0030-orchestrator-memory-and-context.md)), and so are the chat photos once kept as Brand assets. Keep one replica ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)).
 
 ### Switching WhatsApp between Railway and local development
 
