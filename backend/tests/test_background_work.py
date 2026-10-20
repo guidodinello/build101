@@ -86,15 +86,35 @@ async def test_stop_cancels_the_work_in_flight() -> None:
     assert finished == []
 
 
+SPAWNERS = {"create_task", "ensure_future"}
+
+
+def spawns(source: str) -> list[int]:
+    """Lines calling `create_task` or `ensure_future`, as `asyncio.x(...)` or a bare name."""
+    return [
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Attribute) and node.func.attr in SPAWNERS)
+            or (isinstance(node.func, ast.Name) and node.func.id in SPAWNERS)
+        )
+    ]
+
+
+def test_the_scan_sees_a_spawn_however_it_is_written() -> None:
+    assert spawns("import asyncio\nasyncio.create_task(work())") == [2]
+    assert spawns("from asyncio import create_task\ncreate_task(work())") == [2]
+    assert spawns("from asyncio import ensure_future\nensure_future(work())") == [2]
+    assert spawns("import asyncio\nawait asyncio.sleep(0)") == []
+
+
 def test_only_the_supervisor_starts_tasks() -> None:
     offenders = [
-        f"{path.relative_to(APP)}:{node.lineno}"
+        f"{path.relative_to(APP)}:{line}"
         for path in sorted(APP.rglob("*.py"))
         if path != SUPERVISOR
-        for node in ast.walk(ast.parse(path.read_text()))
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr in {"create_task", "ensure_future"}
+        for line in spawns(path.read_text())
     ]
 
     assert offenders == [], f"background work must start in app/background.py: {offenders}"

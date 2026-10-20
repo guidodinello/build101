@@ -40,10 +40,11 @@ class BackgroundWork:
 
     async def stop(self) -> None:
         """Cancel everything, services included, and wait for it to end (shutdown)."""
-        running = [*self._tasks, *self._services]
-        for task in running:
-            task.cancel()
-        await asyncio.gather(*running, return_exceptions=True)
+        # Again until nothing is left: a task cancelled in the middle of its work may start more.
+        while running := [task for task in (*self._tasks, *self._services) if not task.done()]:
+            for task in running:
+                task.cancel()
+            await asyncio.gather(*running, return_exceptions=True)
 
     def _spawn(
         self, work: Coroutine[Any, Any, None], name: str, group: set[asyncio.Task[None]]

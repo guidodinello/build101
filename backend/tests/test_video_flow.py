@@ -145,8 +145,6 @@ class Rig:
 
     async def say(self, text: str = "hacelo video") -> None:
         await self.chat.handle(message("text", text=text), self.channel)
-        if self.maker:
-            await self.background.join()
         await self.background.join()
 
     async def tap(self, button_id: str) -> None:

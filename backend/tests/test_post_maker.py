@@ -349,7 +349,7 @@ async def test_a_failing_notify_is_not_a_failed_post(photos: InMemoryPhotos) -> 
     assert len(channel.images) == 1
 
 
-async def test_without_a_registered_callback_the_generation_fails_loudly(
+async def test_without_a_registered_callback_the_generation_logs_the_wiring_error(
     photos: InMemoryPhotos, caplog: pytest.LogCaptureFixture
 ) -> None:
     model = ScriptedModel(drafts={CarouselDraft: carousel_draft(1)})
