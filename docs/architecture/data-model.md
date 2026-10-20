@@ -376,7 +376,7 @@ create table jobs (
   kind         text not null,
   payload      jsonb not null default '{}',
   status       text not null default 'queued',
-  result       jsonb,                                 -- a failed job's Reintentar tap adds {"retried_by": <new job id>}
+  result       jsonb,                                 -- a Reintentar tap, or the startup check of stuck brands, adds {"retried_by": <new job id>}
   error        text,
   attempts     int not null default 0,                -- times the runner claimed it: an interrupted job runs again once
   retry_offered_at timestamptz,                       -- the Owner got job_failed with its Reintentar
