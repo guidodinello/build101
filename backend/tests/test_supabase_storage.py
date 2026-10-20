@@ -217,3 +217,28 @@ async def test_a_network_error_raises_storage_error() -> None:
 
     with pytest.raises(StorageError):
         await storage(httpx.MockTransport(handle)).download("assets", "b1/a1.jpg")
+
+
+async def test_list_objects_pages_through_the_folder_and_skips_sub_folders() -> None:
+    seen: list[dict[str, object]] = []
+    first = [
+        {"name": f"o{i:03}.jpg", "id": f"id{i}", "created_at": "2026-10-19T10:00:00.000Z"}
+        for i in range(100)
+    ]
+    second = [
+        {"name": "sub", "id": None, "created_at": None},
+        {"name": "z.jpg", "id": "idz", "created_at": "2026-10-19T11:30:00+00:00"},
+    ]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        seen.append(body)
+        return httpx.Response(200, json=first if body["offset"] == 0 else second)
+
+    objects = await storage(httpx.MockTransport(handle)).list_objects("assets", "b1")
+
+    assert [body["offset"] for body in seen] == [0, 100]
+    assert seen[0]["prefix"] == "b1"
+    assert len(objects) == 101
+    assert objects[-1].name == "z.jpg"
+    assert objects[-1].created_at.isoformat() == "2026-10-19T11:30:00+00:00"

@@ -15,6 +15,9 @@ Scale = Literal[1, 2, 3, 4, 5]
 MAX_PRODUCTS = 5
 MAX_PRODUCT_PHOTOS = 5
 MAX_COLORS = 5
+# A hard ceiling on the request lists, above the caps the route checks itself (MAX_PRODUCTS,
+# MAX_PRODUCT_PHOTOS), which have their own error codes. It bounds validation, not JSON parsing.
+MAX_LIST_ITEMS = 20
 
 
 class BusinessInfo(BaseModel):
@@ -55,12 +58,12 @@ class ProductInput(BaseModel):
     price: OptionalText = None
     category: OptionalText = None
     # The Product's own photos, linked by the Owner; left out, the links don't change.
-    asset_ids: list[str] | None = None
+    asset_ids: Annotated[list[str], Field(max_length=MAX_LIST_ITEMS)] | None = None
 
 
 class ProductsInput(BaseModel):
     # The 5-product and 5-photo caps are checked in the route, so they get their own error codes.
-    products: list[ProductInput] = Field(min_length=1)
+    products: list[ProductInput] = Field(min_length=1, max_length=MAX_LIST_ITEMS)
 
 
 class Brand(BaseModel):

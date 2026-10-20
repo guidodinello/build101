@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel
@@ -17,7 +17,7 @@ from app.channels.base import Button, ChannelError
 from app.imagegen.base import GeneratedImage
 from app.llm.client import Content, FunctionCall, LLMError, Reply, Step, Tool
 from app.publishing.base import PublishMedia, PublishResult
-from app.storage import ObjectTooLarge, SignedUpload
+from app.storage import ObjectTooLarge, SignedUpload, StoredObject
 from tests.conftest import make_image
 
 
@@ -197,9 +197,17 @@ class FakeStorage:
 
     objects: dict[str, bytes] = field(default_factory=dict)
     content_types: dict[str, str] = field(default_factory=dict)
+    created_at: dict[str, datetime] = field(default_factory=dict)
 
     def put(self, bucket: str, path: str, data: bytes) -> None:
         self.objects[f"{bucket}/{path}"] = data
+        self.created_at[f"{bucket}/{path}"] = datetime.now(UTC)
+
+    def age(self, bucket: str, by: timedelta) -> None:
+        """Make every object of the bucket `by` older (the sweep only takes the old ones)."""
+        for key in self.created_at:
+            if key.startswith(f"{bucket}/"):
+                self.created_at[key] -= by
 
     async def create_signed_upload_url(self, bucket: str, path: str) -> SignedUpload:
         return SignedUpload(url=f"https://storage.test/upload/{bucket}/{path}?token=t", token="t")
@@ -213,7 +221,7 @@ class FakeStorage:
         return data
 
     async def upload(self, bucket: str, path: str, data: bytes, content_type: str) -> None:
-        self.objects[f"{bucket}/{path}"] = data
+        self.put(bucket, path, data)
         self.content_types[f"{bucket}/{path}"] = content_type
 
     async def create_signed_urls(
@@ -229,6 +237,15 @@ class FakeStorage:
         for path in paths:
             self.objects.pop(f"{bucket}/{path}", None)
             self.content_types.pop(f"{bucket}/{path}", None)
+            self.created_at.pop(f"{bucket}/{path}", None)
+
+    async def list_objects(self, bucket: str, prefix: str) -> list[StoredObject]:
+        folder = f"{bucket}/{prefix}/"
+        return [
+            StoredObject(key.removeprefix(folder), created)
+            for key, created in self.created_at.items()
+            if key.startswith(folder) and "/" not in key.removeprefix(folder)
+        ]
 
 
 class CountingStorage(FakeStorage):

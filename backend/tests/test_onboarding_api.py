@@ -16,6 +16,7 @@ from app.config import Settings, get_settings
 from app.copy import messages_es
 from app.db.models import BrandAsset, Business, Job, MagicLink
 from app.db.session import get_session
+from app.jobs.uploads import sweep_orphaned_uploads
 from app.main import app
 from app.onboarding import uploads
 from app.onboarding.links import hash_token
@@ -132,6 +133,27 @@ async def test_dev_link_needs_the_dev_token(client: httpx.AsyncClient) -> None:
 
 async def test_dev_link_is_off_unless_enabled(client: httpx.AsyncClient) -> None:
     app.dependency_overrides[get_settings] = lambda: Settings(dev_token=DEV_TOKEN)
+
+    response = await client.post(
+        "/dev/onboarding-link", json={"phone": PHONE}, headers={"X-Dev-Token": DEV_TOKEN}
+    )
+
+    assert response.status_code == 404
+
+
+async def test_dev_link_rejects_a_non_ascii_token(client: httpx.AsyncClient) -> None:
+    # Bytes: httpx refuses a non-ASCII str header, but a real client can send them (latin-1).
+    response = await client.post(
+        "/dev/onboarding-link", json={"phone": PHONE}, headers=[(b"x-dev-token", "ñandú".encode())]
+    )
+
+    assert response.status_code == 401
+
+
+async def test_dev_link_is_off_in_prod_even_when_enabled(client: httpx.AsyncClient) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        env="prod", enable_dev_endpoints=True, dev_token=DEV_TOKEN
+    )
 
     response = await client.post(
         "/dev/onboarding-link", json={"phone": PHONE}, headers={"X-Dev-Token": DEV_TOKEN}
@@ -520,6 +542,7 @@ async def test_unreadable_upload_fails(
     async with sessions() as db:
         asset = await db.get(BrandAsset, uuid.UUID(ticket["asset_id"]))
     assert asset and asset.status == "failed"
+    assert storage.objects == {}
 
 
 async def test_deleted_asset_leaves_the_state(
@@ -872,6 +895,7 @@ async def test_a_tiff_declared_as_png_is_unsupported(
     async with sessions() as db:
         asset = await db.get(BrandAsset, uuid.UUID(asset_id))
     assert asset and asset.status == "failed"
+    assert storage.objects == {}
 
 
 @pytest.mark.parametrize(
@@ -916,6 +940,7 @@ async def test_an_object_over_the_size_limit_is_refused_and_fails_the_asset(
     async with sessions() as db:
         asset = await db.get(BrandAsset, uuid.UUID(asset_id))
     assert asset and asset.status == "failed"
+    assert storage.objects == {}
 
 
 async def test_a_failed_asset_is_refused_again_without_downloading_it(
@@ -932,7 +957,29 @@ async def test_a_failed_asset_is_refused_again_without_downloading_it(
     again = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
 
     assert again.status_code == 422
-    assert error_code(again) == "unsupported_file"
+    assert error_code(again) == "upload_failed"
+    assert again.json()["error"]["message"] == onboarding.UPLOAD_FAILED
+    assert counting.downloads == downloads
+
+
+async def test_a_retried_over_cap_upload_says_upload_failed_not_image_too_large(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(uploads, "MAX_PIXELS", 100 * 100)
+    counting = CountingStorage()
+    app.dependency_overrides[get_storage] = lambda: counting
+    token = await new_link(client)
+    asset_id = await ticket_with_object(
+        client, counting, token, make_image((101, 100)), content_type="image/jpeg"
+    )
+    first = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+    downloads = counting.downloads
+
+    retry = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+
+    assert error_code(first) == "image_too_large"
+    assert retry.status_code == 422
+    assert error_code(retry) == "upload_failed"
     assert counting.downloads == downloads
 
 
@@ -956,6 +1003,7 @@ async def test_an_image_over_the_pixel_cap_gets_its_own_error(
     async with sessions() as db:
         asset = await db.get(BrandAsset, uuid.UUID(asset_id))
     assert asset and asset.status == "failed"
+    assert storage.objects == {}
 
 
 async def upload_complete_delete(
@@ -1155,6 +1203,23 @@ async def test_a_photo_being_read_does_not_hold_the_business(
 
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "ready"
+
+
+async def test_an_object_put_after_its_asset_was_archived_is_swept(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    ticket = (await request_upload(client, token, "photo")).json()
+    deleted = await client.delete(f"/api/o/{token}/assets/{ticket['asset_id']}")
+    assert deleted.status_code == 204
+    # The signed URL is still valid: the browser's PUT lands after the DELETE.
+    path = ticket["upload_url"].split("/upload/assets/")[1].split("?")[0]
+    storage.put("assets", path, make_image((120, 80)))
+    assert storage.objects
+
+    await sweep_orphaned_uploads(sessions, storage)
+
+    assert storage.objects == {}
 
 
 @pytest.fixture

@@ -16,7 +16,7 @@
 
 | Variable | Example | Notes |
 |---|---|---|
-| `ENV` | `local` \| `prod` | |
+| `ENV` | `local` \| `prod` | **Must be `prod` in production**: it turns off `/dev/*` (even with `ENABLE_DEV_ENDPOINTS=true`) and the API docs. The default is `local` |
 | `PUBLIC_BACKEND_URL` | `https://api-example.up.railway.app` | Railway-generated domain ([ADR 0017](../decisions/0017-backend-host-railway.md)). Used in logs/webhook docs, and for the URLs of generated images until Supabase Storage is in (T56) |
 | `FRONTEND_URL` | `https://neitorai.vercel.app` | Magic links + Zernio redirect |
 | `FRONTEND_ORIGINS` | `https://neitorai.vercel.app,http://localhost:3000` | CORS |

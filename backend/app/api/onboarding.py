@@ -8,7 +8,7 @@ import logging
 import uuid
 from collections import Counter
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Response
@@ -33,15 +33,22 @@ from app.onboarding.uploads import (
     read_upload,
 )
 from app.ratelimit import limit_onboarding_token
-from app.storage import ASSETS_BUCKET, ObjectTooLarge, StorageError, StoragePort, get_storage
+from app.storage import (
+    ASSETS_BUCKET,
+    SIGNED_UPLOAD_URL_TTL,
+    ObjectTooLarge,
+    StorageError,
+    StoragePort,
+    get_storage,
+)
 
 from .errors import ApiError
 
 logger = logging.getLogger(__name__)
 
 SIGNED_URL_TTL_S = 3600
-# Supabase signed upload URLs last 2 h; an older ticket that never completed frees its slot.
-UPLOAD_TICKET_TTL = timedelta(hours=2)
+# An older ticket that never completed frees its slot.
+UPLOAD_TICKET_TTL = SIGNED_UPLOAD_URL_TTL
 WIZARD_KINDS = frozenset({"logo", "photo"})
 MIN_PHOTOS = 3
 MAX_PHOTOS = 15
@@ -62,6 +69,8 @@ UNKNOWN_ASSET = "No encontramos una de las fotos. Recargá la página y probá d
 MISSING_COLORS = 'Sumá al menos un color, o elegí "Todavía no tengo logo ni colores".'
 UNSUPPORTED_FILE = "Este archivo no lo podemos usar. Subí fotos."
 UNREADABLE_FILE = "No pudimos abrir esta foto. Probá con otra."
+# A retry of an asset that already failed: the cause is not kept, so the message is generic.
+UPLOAD_FAILED = "No pudimos usar ese archivo. Subí uno nuevo."
 IMAGE_TOO_LARGE = "Esta foto es demasiado grande. Probá con una de menos resolución."
 TOO_MANY_PHOTOS = f"Ya tenés {MAX_PHOTOS} fotos."
 PHOTO_UPLOADS_USED_UP = (
@@ -366,7 +375,7 @@ async def complete_upload(
     asset = await _active_asset(session, business.id, asset_id)
     if asset.status == "failed":
         # Already read and refused once: don't download and decode it again.
-        raise ApiError(422, "unsupported_file", UNREADABLE_FILE)
+        raise ApiError(422, "upload_failed", UPLOAD_FAILED)
     if asset.status != "ready":
         await _finish_upload(asset, business, session, storage, settings)
     urls = await storage.create_signed_urls(ASSETS_BUCKET, [asset.storage_path], SIGNED_URL_TTL_S)
@@ -425,17 +434,17 @@ async def _finish_upload(
             ASSETS_BUCKET, asset.storage_path, max_bytes=settings.max_photo_mb * BYTES_PER_MB
         )
     except ObjectTooLarge:
-        await _fail(asset, session)
+        await _fail(asset, session, storage)
         raise ApiError(422, "unsupported_file", file_too_big(settings.max_photo_mb)) from None
     if data is None:
         raise ApiError(409, "upload_missing", UPLOAD_MISSING)
     try:
         processed = await read_upload(data, asset.mime_type, asset.kind)
     except ImageTooLarge:
-        await _fail(asset, session)
+        await _fail(asset, session, storage)
         raise ApiError(422, "image_too_large", IMAGE_TOO_LARGE) from None
     except UnreadableImage:
-        await _fail(asset, session)
+        await _fail(asset, session, storage)
         raise ApiError(422, "unsupported_file", UNREADABLE_FILE) from None
 
     if processed.jpeg is not None:
@@ -454,9 +463,12 @@ async def _finish_upload(
     await session.commit()
 
 
-async def _fail(asset: BrandAsset, session: AsyncSession) -> None:
+async def _fail(asset: BrandAsset, session: AsyncSession, storage: StoragePort) -> None:
+    """Mark it failed, then drop what was uploaded: nothing reads a failed asset's files. If the
+    process dies in between, the orphaned-upload sweep removes them."""
     asset.status = "failed"
     await session.commit()
+    await _delete_objects(storage, asset)
 
 
 async def _active_asset(
@@ -472,18 +484,19 @@ async def _active_asset(
 
 
 async def _delete_objects(storage: StoragePort, asset: BrandAsset) -> None:
-    """Remove what an archived asset left in Storage: the original, whatever its extension (a HEIC
-    upload is replaced by a JPEG), the JPEG made from it, and the agents' copy.
+    """Remove what an archived or failed asset left in Storage: the original, whatever its
+    extension (a HEIC upload is replaced by a JPEG), the JPEG made from it, and the agents' copy.
 
-    Nothing reads an archived asset's files: the Brand Brain, the library and the wizard all skip
-    archived rows. A Storage failure is logged and not raised: the Owner's ✕ already took effect.
+    Nothing reads those files: the Brand Brain, the library and the wizard all skip archived and
+    failed rows. A Storage failure is logged and not raised: the Owner's ✕ (or the refusal of the
+    file) already took effect, and the orphaned-upload sweep retries.
     """
     paths = [asset_path(asset.business_id, asset.id, content_type) for content_type in EXTENSIONS]
     paths.append(llm_copy_path(asset.business_id, asset.id))
     try:
         await storage.remove(ASSETS_BUCKET, paths)
     except StorageError:
-        logger.exception("the files of archived asset %s were not deleted", asset.id)
+        logger.exception("the files of asset %s were not deleted", asset.id)
 
 
 async def _check_upload_caps(session: AsyncSession, business_id: uuid.UUID, kind: str) -> None:
