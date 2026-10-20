@@ -19,6 +19,7 @@ from app.agents.niche_analyst import (
     trend_notes,
     week_start,
 )
+from app.background import BackgroundWork
 from app.db.models import Business, Job, NicheReportRow
 from app.jobs.niche import (
     KIND,
@@ -298,6 +299,7 @@ async def test_the_runner_runs_its_checks_when_it_starts_and_survives_a_failing_
         EventLog(),
         poll_interval_s=0.01,
         checks=checks,
+        background=BackgroundWork(),
     )
     await runner.start()
     await asyncio.sleep(0.1)

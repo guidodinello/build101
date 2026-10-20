@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Callable
 
+from app.background import get_background_work
 from app.channels.base import ChannelPort
 from app.config import Settings
 from app.conversation.events import Notify
@@ -65,4 +66,5 @@ def build_job_runner(
         owner_notify(),
         NOTIFY_ON_FAILURE,
         checks=(PeriodicCheck("niche reports", CHECK_EVERY, enqueue_due_niche_reports),),
+        background=get_background_work(),
     )

@@ -3,6 +3,7 @@ from datetime import datetime
 
 import pytest
 
+from app.background import BackgroundWork
 from app.conversation.button_router import ButtonRouter
 from app.conversation.chat import ChatHandler
 from app.conversation.history import InMemoryHistory
@@ -65,8 +66,15 @@ class Rig:
         async def sleep(seconds: float) -> None:
             self.sleeps.append(seconds)
 
+        self.background = BackgroundWork()
         self.publishing = PostPublisher(
-            self.publisher, self.store, self.images, BASE_URL, account_id, sleep
+            self.publisher,
+            self.store,
+            self.images,
+            BASE_URL,
+            account_id,
+            sleep,
+            background=self.background,
         )
         maker = PostMaker(
             PostDrafter(model),
@@ -77,6 +85,7 @@ class Rig:
             self.store,
             BASE_URL,
             max_posts_per_day=5,
+            background=self.background,
         )
         self.chat = ChatHandler(
             model,
@@ -90,6 +99,7 @@ class Rig:
             assistant_name="Mora",
             max_photo_mb=1,
             keep_alive_s=60.0,
+            background=self.background,
         )
         maker.on_event(self.chat.notify)
         self.publishing.on_event(self.chat.notify)
@@ -104,7 +114,7 @@ class Rig:
         await self.chat.handle(message("text", text=text), self.channel)
 
     async def finish(self) -> None:
-        await self.publishing.join()
+        await self.background.join()
 
     @property
     def said(self) -> list[str]:

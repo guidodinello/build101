@@ -58,9 +58,9 @@ async def test_a_yes_to_the_publish_question_publishes(monkeypatch: pytest.Monke
             text_reply("¡Publicado!"),
         ]
     )
-    chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
+    chat, background, channel, gate = await start_gated_post(model, monkeypatch)
     gate.set()
-    await posts.join()
+    await background.join()
 
     await chat.handle(message("text", text="sí"), channel)
 
@@ -81,9 +81,9 @@ async def test_a_yes_to_another_question_publishes_nothing(
             text_reply("¿Lo subo?"),
         ]
     )
-    chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
+    chat, background, channel, gate = await start_gated_post(model, monkeypatch)
     gate.set()
-    await posts.join()
+    await background.join()
 
     await chat.handle(message("text", text="sí"), channel)
 
@@ -214,12 +214,12 @@ async def test_old_turns_are_folded_into_the_summary() -> None:
         replies=[text_reply("¡Hola! ¿Qué vendés?")],
         drafts={ConversationSummary: ConversationSummary(summary="Vende mesas de roble.")},
     )
-    chat, _ = build(model)
+    chat, background = build(model)
     chat._compactor = Compactor(chat._history, model, max_tokens=100, keep_tokens=40)
 
     for text in ("hola", "vendo mesas de roble", "y sillas también"):
         await chat.handle(message("text", text=text), FakeChannel())
-        await chat.join()
+        await background.join()
     await chat.handle(message("text", text="¿qué te conté?"), FakeChannel())
 
     history = await chat._history.get(SENDER)
@@ -235,14 +235,14 @@ async def test_old_turns_are_folded_into_the_summary() -> None:
 
 async def test_a_failed_summary_keeps_the_history_until_the_hard_limit() -> None:
     model = ScriptedModel(replies=[text_reply("¡Hola!")])  # no summary draft: it fails
-    chat, _ = build(model)
+    chat, background = build(model)
     chat._compactor = Compactor(
         chat._history, model, max_tokens=50, keep_tokens=20, hard_limit_tokens=10_000
     )
 
     for text in ("hola", "vendo mesas"):
         await chat.handle(message("text", text=text), FakeChannel())
-        await chat.join()
+        await background.join()
 
     assert step_text((await chat._history.get(SENDER))[0]) == "hola"
 
@@ -261,10 +261,10 @@ async def test_a_photo_is_described_for_the_next_turns() -> None:
         safe_crop_focus="center",
     )
     model = ScriptedModel(replies=[text_reply("¡Linda!")], drafts={AssetAnalysis: analysis})
-    chat, _ = build(model, keeper=PhotoKeeper(model))
+    chat, background = build(model, keeper=PhotoKeeper(model))
 
     await chat.handle(message("image", text=None), FakeChannel())
-    await chat.join()
+    await background.join()
     await chat.handle(message("text", text="¿qué te mandé?"), FakeChannel())
 
     context = model.calls[-1][-1]["content"][1]["text"]

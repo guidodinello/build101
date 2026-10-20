@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.schemas import AssetAnalysis
+from app.background import BackgroundWork
 from app.channels.base import Button, ChannelError
 from app.conversation.brand import BrandFlow
 from app.conversation.button_router import ButtonRouter
@@ -87,7 +88,8 @@ def runner(
     storage: FakeStorage | None = None,
     notify: Any = None,
     **options: Any,
-) -> JobRunner:
+) -> tuple[JobRunner, BackgroundWork]:
+    background = BackgroundWork()
     return JobRunner(
         sessions,
         jobs,
@@ -96,8 +98,9 @@ def runner(
         model or SequenceModel([]),
         notify or FixedReplies(DbHistory(sessions)),
         notify_on_failure=frozenset({"generate_brand"}),
+        background=background,
         **options,
-    )
+    ), background
 
 
 async def queue(
@@ -125,10 +128,10 @@ async def test_a_queued_job_runs_and_records_its_result(
         return {"done": True}
 
     job_id = await queue(sessions, "analyze_asset", business, n=1)
-    jobs = runner(sessions, {"analyze_asset": ok}, FakeChannel())
+    jobs, background = runner(sessions, {"analyze_asset": ok}, FakeChannel())
 
     assert await jobs.run_due() == 1
-    await jobs.join()
+    await background.join()
 
     job = await job_row(sessions, job_id)
     assert (job.status, job.result, job.error) == ("succeeded", {"done": True}, None)
@@ -146,10 +149,10 @@ async def test_a_failed_job_tells_the_owner_with_a_retry_button(
 
     job_id = await queue(sessions, "generate_brand", business)
     channel = FakeChannel()
-    jobs = runner(sessions, {"generate_brand": boom}, channel)
+    jobs, background = runner(sessions, {"generate_brand": boom}, channel)
 
     await jobs.run_due()
-    await jobs.join()
+    await background.join()
 
     job = await job_row(sessions, job_id)
     assert job.status == "failed"
@@ -167,10 +170,10 @@ async def test_a_failed_job_raises_job_failed_for_its_owner(
 
     job_id = await queue(sessions, "generate_brand", business)
     events = EventLog()
-    jobs = runner(sessions, {"generate_brand": boom}, FakeChannel(), notify=events)
+    jobs, background = runner(sessions, {"generate_brand": boom}, FakeChannel(), notify=events)
 
     await jobs.run_due()
-    await jobs.join()
+    await background.join()
 
     assert events.events == [(PHONE, JobFailed(job_id, "generate_brand"))]
 
@@ -183,10 +186,10 @@ async def test_other_failures_are_only_logged(sessions: async_sessionmaker[Async
 
     job_id = await queue(sessions, "analyze_asset", business)
     channel = FakeChannel()
-    jobs = runner(sessions, {"analyze_asset": boom}, channel)
+    jobs, background = runner(sessions, {"analyze_asset": boom}, channel)
 
     await jobs.run_due()
-    await jobs.join()
+    await background.join()
 
     assert (await job_row(sessions, job_id)).status == "failed"
     assert channel.buttons == []
@@ -198,7 +201,7 @@ async def test_a_kind_this_process_cant_run_stays_queued(
     # The old instance during a deploy: it must not claim, and fail, a kind only the new one knows
     business = await add_business(sessions)
     job_id = await queue(sessions, "generate_niche_report", business)
-    jobs = runner(sessions, {"analyze_asset": analyze_asset}, FakeChannel())
+    jobs, background = runner(sessions, {"analyze_asset": analyze_asset}, FakeChannel())
 
     assert await jobs.run_due() == 0
     assert (await job_row(sessions, job_id)).status == "queued"
@@ -212,12 +215,12 @@ async def test_only_free_slots_are_claimed(sessions: async_sessionmaker[AsyncSes
 
     for _ in range(3):
         await queue(sessions, "analyze_asset", business)
-    jobs = runner(sessions, {"analyze_asset": ok}, FakeChannel(), max_concurrent=2)
+    jobs, background = runner(sessions, {"analyze_asset": ok}, FakeChannel(), max_concurrent=2)
 
     assert await jobs.run_due() == 2
-    await jobs.join()
+    await background.join()
     assert await jobs.run_due() == 1
-    await jobs.join()
+    await background.join()
 
 
 async def test_jobs_left_running_by_a_restart_are_failed(
@@ -240,7 +243,7 @@ async def test_jobs_left_running_by_a_restart_are_failed(
         db.add_all([stale, fresh])
         await db.commit()
 
-    assert await runner(sessions, {}, FakeChannel()).fail_stale() == 1
+    assert await runner(sessions, {}, FakeChannel())[0].fail_stale() == 1
     assert (await job_row(sessions, stale.id)).status == "failed"
     assert (await job_row(sessions, fresh.id)).status == "running"
 
@@ -397,12 +400,12 @@ async def test_a_summary_that_cant_be_delivered_fails_the_job_and_offers_a_retry
 ) -> None:
     business, channel = await add_business(sessions), FailsOnceChannel()
     job_id = await queue(sessions, "generate_brand", business)
-    jobs = runner(
+    jobs, background = runner(
         sessions, {"generate_brand": generate_brand}, channel, SequenceModel([brand_brain()])
     )
 
     await jobs.run_due()
-    await jobs.join()
+    await background.join()
 
     assert (await job_row(sessions, job_id)).status == "failed"
     assert channel.buttons == [(PHONE, messages_es.JOB_FAILED, [f"retry:{job_id}"])]

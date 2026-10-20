@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from app.agents.schemas import BrandBrain
+from app.background import BackgroundWork
 from app.channels.base import InboundMessage
 from app.config import get_settings
 from app.conversation.button_router import ButtonRouter
@@ -49,6 +50,7 @@ class FixedKnowledge:
 @dataclass
 class Rig:
     chat: ChatHandler
+    background: BackgroundWork
     history: InMemoryHistory
     notes: InMemoryNotes
     store: PostLifecycle
@@ -59,7 +61,7 @@ class Rig:
     async def say(self, text: str) -> str:
         sent = len(self.channel.sent)
         await self.chat.handle(text_message(text), self.channel)
-        await self.chat.join()
+        await self.background.join()
         return " ".join(body for _, body in self.channel.sent[sent:])
 
     async def tools_called(self) -> list[str]:
@@ -89,6 +91,7 @@ def rig(compactor_budget: tuple[int, int] | None = None) -> Rig:
     history, notes, store = InMemoryHistory(), InMemoryNotes(), PostLifecycle()
     photos = InMemoryPhotos()
     images, image_gen = PublicImages(), CountingImageGen()
+    background = BackgroundWork()
     posts = PostMaker(
         PostDrafter(model),
         image_gen,
@@ -98,9 +101,15 @@ def rig(compactor_budget: tuple[int, int] | None = None) -> Rig:
         store,
         "https://backend.test",
         5,
+        background=background,
     )
     publisher = PostPublisher(
-        MockPublisher(delay_s=0), store, images, "https://backend.test", MOCK_ACCOUNT_ID
+        MockPublisher(delay_s=0),
+        store,
+        images,
+        "https://backend.test",
+        MOCK_ACCOUNT_ID,
+        background=background,
     )
     compactor = Compactor(history, model, *compactor_budget) if compactor_budget else None
     chat = ChatHandler(
@@ -120,10 +129,11 @@ def rig(compactor_budget: tuple[int, int] | None = None) -> Rig:
             [CatalogItem("Mesa nórdica de roble", "$U 18.500", "Mesa de comedor para 6")],
         ),
         compactor=compactor,
+        background=background,
     )
     posts.on_event(chat.notify)
     publisher.on_event(chat.notify)
-    return Rig(chat, history, notes, store, photos, image_gen, FakeChannel())
+    return Rig(chat, background, history, notes, store, photos, image_gen, FakeChannel())
 
 
 async def sent_post(rig: Rig, caption: str) -> None:

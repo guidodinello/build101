@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.background import BackgroundWork
 from app.channels.base import ChannelError, ChannelPort
 from app.conversation.events import JobFailed, Notify
 from app.db.models import Business, Job
@@ -74,6 +75,8 @@ class JobRunner:
         max_concurrent: int = MAX_CONCURRENT_JOBS,
         poll_interval_s: float = POLL_INTERVAL_S,
         checks: tuple[PeriodicCheck, ...] = (),
+        *,
+        background: BackgroundWork,
     ) -> None:
         self._sessions = sessions
         self._jobs = jobs
@@ -85,13 +88,14 @@ class JobRunner:
         self._max_concurrent = max_concurrent
         self._poll_interval_s = poll_interval_s
         self._checks = checks
+        self._background = background
         self._running: set[asyncio.Task[None]] = set()
         self._running_ids: set[uuid.UUID] = set()
         self._poller: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         await self.fail_stale()
-        self._poller = asyncio.create_task(self._poll())
+        self._poller = self._background.start_service(self._poll(), "job poller")
 
     async def stop(self) -> None:
         if self._poller:
@@ -146,15 +150,13 @@ class JobRunner:
             await db.commit()
         for job in jobs:
             self._running_ids.add(job.id)
-            task = asyncio.create_task(self._run(job.id, job.kind, job.business_id, job.payload))
+            task = self._background.start(
+                self._run(job.id, job.kind, job.business_id, job.payload),
+                f"job {job.id} ({job.kind})",
+            )
             self._running.add(task)
             task.add_done_callback(self._running.discard)
         return len(jobs)
-
-    async def join(self) -> None:
-        """Wait for the running jobs (tests)."""
-        while self._running:
-            await asyncio.gather(*self._running)
 
     async def _poll(self) -> None:
         last_stale_check = datetime.now(UTC)

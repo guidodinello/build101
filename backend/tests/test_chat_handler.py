@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from app.background import BackgroundWork
 from app.channels.base import Button, ChannelError, InboundMessage
 from app.channels.inbound import EchoHandler
 from app.channels.kapso_webhook import parse_message
@@ -131,7 +132,7 @@ def build(
     keep_alive_s: float = 60.0,
     library: FakeLibrary | None = None,
     **options: Any,
-) -> tuple[ChatHandler, PostMaker]:
+) -> tuple[ChatHandler, BackgroundWork]:
     model.drafts.setdefault(PostCopy, DRAFT)
     model.drafts.setdefault(CarouselDraft, carousel_draft(1))
     photos, history, store, images = (
@@ -140,6 +141,7 @@ def build(
         PostLifecycle(),
         PublicImages(),
     )
+    background = BackgroundWork()
     posts = PostMaker(
         PostDrafter(model),
         image_gen or CountingImageGen(),
@@ -149,9 +151,15 @@ def build(
         store,
         "https://backend.test",
         max_posts_per_day,
+        background=background,
     )
     publishing = PostPublisher(
-        MockPublisher(delay_s=0), store, images, "https://backend.test", MOCK_ACCOUNT_ID
+        MockPublisher(delay_s=0),
+        store,
+        images,
+        "https://backend.test",
+        MOCK_ACCOUNT_ID,
+        background=background,
     )
     chat = ChatHandler(
         model,
@@ -166,11 +174,12 @@ def build(
         max_photo_mb=MAX_PHOTO_MB,
         photo_debounce_s=DEBOUNCE_S,
         keep_alive_s=keep_alive_s,
+        background=background,
         **options,
     )
     posts.on_event(chat.notify)
     publishing.on_event(chat.notify)
-    return chat, posts
+    return chat, background
 
 
 def handler(model: ScriptedModel) -> ChatHandler:
@@ -247,10 +256,10 @@ async def test_a_fast_reply_sends_no_holding_message() -> None:
 
 async def test_a_slow_reply_about_new_photos_says_it_is_looking_at_them() -> None:
     model, channel = ScriptedModel(delay_s=0.25), FakeChannel()
-    chat, _ = build(model, keep_alive_s=0.1)
+    chat, background = build(model, keep_alive_s=0.1)
 
     await chat.handle(message("image"), channel)
-    await chat.join()
+    await background.join()
 
     assert channel.sent[0] == (SENDER, messages_es.LOOKING_AT_PHOTOS)
 
@@ -297,10 +306,10 @@ async def test_an_unsupported_kind_is_an_event_the_model_answers() -> None:
 
 async def test_a_photo_without_caption_is_an_event_the_model_answers() -> None:
     model, channel = ScriptedModel(replies=[text_reply(EVENT_REPLY)]), FakeChannel()
-    chat = handler(model)
+    chat, background = build(model)
 
     await chat.handle(message("image", text=None), channel)
-    await chat.join()
+    await background.join()
 
     assert channel.sent == [(SENDER, EVENT_REPLY)]
     assert len(model.calls) == 1
@@ -309,11 +318,11 @@ async def test_a_photo_without_caption_is_an_event_the_model_answers() -> None:
 
 async def test_photos_without_text_attach_the_images_but_store_only_the_note() -> None:
     model, channel = ScriptedModel(replies=[text_reply(EVENT_REPLY)]), FakeChannel()
-    chat = handler(model)
+    chat, background = build(model)
 
     await chat.handle(message("image", text=None), channel)
     await chat.handle(message("image", text=None), channel)
-    await chat.join()
+    await background.join()
 
     current = model.calls[0][-1]
     assert step_text(current) == "[photos f1 f2 received, no text]"
@@ -326,10 +335,10 @@ async def test_photos_without_text_attach_the_images_but_store_only_the_note() -
 
 async def test_photos_stay_unseen_when_their_turn_fails() -> None:
     model, channel = ScriptedModel(fail=True), FakeChannel()
-    chat = handler(model)
+    chat, background = build(model)
 
     await chat.handle(message("image", text=None), channel)
-    await chat.join()
+    await background.join()
 
     assert channel.sent == [(SENDER, messages_es.PHOTO_KEPT)]
     assert not chat._photos.recent(SENDER)[0].seen
@@ -337,11 +346,11 @@ async def test_photos_stay_unseen_when_their_turn_fails() -> None:
 
 async def test_several_photos_without_text_fall_back_to_the_plural_text() -> None:
     model, channel = ScriptedModel(fail=True), FakeChannel()
-    chat = handler(model)
+    chat, background = build(model)
 
     await chat.handle(message("image", text=None), channel)
     await chat.handle(message("image", text=None), channel)
-    await chat.join()
+    await background.join()
 
     assert channel.sent == [(SENDER, messages_es.PHOTOS_KEPT)]
 
@@ -356,12 +365,11 @@ async def test_photos_without_text_proceed_with_the_post_the_owner_already_asked
         ]
     )
     channel = FakeChannel()
-    chat, posts = build(model)
+    chat, background = build(model)
 
     await chat.handle(message("text", text="armame algo para Navidad"), channel)
     await chat.handle(message("image", text=None), channel)
-    await chat.join()
-    await posts.join()
+    await background.join()
 
     assert [text for _, text in channel.sent] == [
         "¡Dale! Mandame las fotos 📸",
@@ -373,13 +381,13 @@ async def test_photos_without_text_proceed_with_the_post_the_owner_already_asked
 
 async def test_an_album_is_answered_once_with_all_its_photos() -> None:
     model, channel = ScriptedModel(), FakeChannel()
-    chat = handler(model)
+    chat, background = build(model)
 
     await chat.handle(message("text", kind="album", text=None), channel)
     await chat.handle(message("image", text="armame un post con estos muebles"), channel)
     await chat.handle(message("image", text=None), channel)
     await chat.handle(message("image", text=None), channel)
-    await chat.join()
+    await background.join()
 
     assert channel.sent == [(SENDER, REPLY_TEXT)]
     assert len(model.calls) == 1
@@ -391,11 +399,11 @@ async def test_an_album_is_answered_once_with_all_its_photos() -> None:
 
 async def test_a_text_right_after_the_photos_joins_them() -> None:
     model, channel = ScriptedModel(), FakeChannel()
-    chat = handler(model)
+    chat, background = build(model)
 
     await chat.handle(message("image", text=None), channel)
     await chat.handle(message("text", text="armame algo"), channel)
-    await chat.join()
+    await background.join()
 
     assert channel.sent == [(SENDER, REPLY_TEXT)]
     assert last_user_text(model.calls[0]) == "[foto f1] armame algo"
@@ -403,10 +411,10 @@ async def test_a_text_right_after_the_photos_joins_them() -> None:
 
 async def test_photos_are_attached_once_but_listed_while_recent() -> None:
     model, channel = ScriptedModel(), FakeChannel()
-    chat = handler(model)
+    chat, background = build(model)
 
     await chat.handle(message("image"), channel)
-    await chat.join()
+    await background.join()
     await chat.handle(message("text", text="la 2"), channel)
 
     later = model.calls[1][-1]
@@ -429,10 +437,10 @@ async def test_a_photo_declared_too_big_is_not_downloaded() -> None:
 async def test_a_photo_that_downloads_too_big_is_refused() -> None:
     model = ScriptedModel(replies=[text_reply(EVENT_REPLY)])
     channel = FakeChannel(media=b"x" * (MAX_PHOTO_MB * 1024 * 1024 + 1))
-    chat = handler(model)
+    chat, background = build(model)
 
     await chat.handle(message("image"), channel)
-    await chat.join()
+    await background.join()
 
     assert channel.sent == [(SENDER, EVENT_REPLY)]
     assert len(model.calls) == 1
@@ -468,11 +476,11 @@ async def test_a_post_request_sends_one_ack_then_the_image_with_its_text() -> No
         ]
     )
     channel, image_gen = FakeChannel(), CountingImageGen()
-    chat, posts = build(model, image_gen)
+    chat, background = build(model, image_gen)
 
     await chat.handle(message("image", text=None), channel)
     await chat.handle(message("text", text="armame un post con esta mesa, así nomás"), channel)
-    await posts.join()
+    await background.join()
 
     assert channel.sent == [
         (SENDER, "Dale, lo armo con la foto de la mesa ⏳"),
@@ -498,11 +506,10 @@ async def test_the_next_turn_sees_the_note_of_the_sent_post() -> None:
         ]
     )
     channel = FakeChannel()
-    chat, posts = build(model)
+    chat, background = build(model)
 
     await chat.handle(message("image", text="armala así nomás"), channel)
-    await chat.join()
-    await posts.join()
+    await background.join()
     await chat.handle(message("text", text="cambiale el texto"), channel)
 
     history = model.calls[-1]
@@ -516,14 +523,14 @@ async def test_a_second_request_while_generating_gets_generation_in_progress() -
     request = call_reply("create_post", brief="mesa", asset_ids=["f1"], style="design")
     model = ScriptedModel(replies=[request, text_reply("Dale ⏳"), request, text_reply("Esperá")])
     channel, image_gen = FakeChannel(), CountingImageGen(gate=gate)
-    chat, posts = build(model, image_gen)
+    chat, background = build(model, image_gen)
 
     await chat.handle(message("image", text=None), channel)
     await chat.handle(message("text", text="armame un post"), channel)
     await asyncio.sleep(0)
     await chat.handle(message("text", text="y otro"), channel)
     gate.set()
-    await posts.join()
+    await background.join()
 
     second_result = json.loads(model.calls[3][-1]["result"])
     assert second_result == {"error": "generation_in_progress"}
@@ -537,12 +544,12 @@ async def test_the_request_past_the_daily_limit_gets_daily_limit() -> None:
         + [request, text_reply("Mañana")]
     )
     channel, image_gen = FakeChannel(), CountingImageGen()
-    chat, posts = build(model, image_gen, max_posts_per_day=2)
+    chat, background = build(model, image_gen, max_posts_per_day=2)
 
     await chat.handle(message("image", text=None), channel)
     for _ in range(3):
         await chat.handle(message("text", text="armame un post"), channel)
-        await posts.join()
+        await background.join()
 
     assert json.loads(model.calls[-1][-1]["result"]) == {"error": "daily_limit"}
     assert len(image_gen.calls) == 2
@@ -636,26 +643,26 @@ CREATE = call_reply("create_post", brief="mesa", asset_ids=["f1"], style="design
 
 async def start_gated_post(
     model: ScriptedModel, monkeypatch: pytest.MonkeyPatch
-) -> tuple[ChatHandler, PostMaker, FakeChannel, asyncio.Event]:
+) -> tuple[ChatHandler, BackgroundWork, FakeChannel, asyncio.Event]:
     """A design post asked for and generating: it is sent once the returned gate is set."""
     monkeypatch.setattr(
         "app.posts.maker.uuid", SimpleNamespace(uuid4=lambda: SimpleNamespace(hex=POST_ID * 2))
     )
     gate, channel = asyncio.Event(), FakeChannel()
-    chat, posts = build(model, CountingImageGen(gate=gate))
+    chat, background = build(model, CountingImageGen(gate=gate))
     await chat.handle(message("image", text=None), channel)
     await chat.handle(message("text", text="armame un post"), channel)
-    return chat, posts, channel, gate
+    return chat, background, channel, gate
 
 
 async def test_the_model_answers_the_sent_note_with_its_own_words(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳"), text_reply(FOLLOW_UP)])
-    chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
+    chat, background, channel, gate = await start_gated_post(model, monkeypatch)
 
     gate.set()
-    await posts.join()
+    await background.join()
 
     assert len(model.calls) == 3
     assert step_text(model.calls[2][-1]).startswith(f"[post {POST_ID} sent to the Owner]")
@@ -669,11 +676,11 @@ async def test_the_note_turn_cannot_approve_and_keeps_the_numbered_list(
 ) -> None:
     approve = call_reply("approve_post", post_id=POST_ID, next="publish_now")
     model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳"), approve, text_reply("¿Lo subo?")])
-    chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
+    chat, background, channel, gate = await start_gated_post(model, monkeypatch)
     show_numbered_list(chat, "o1", "o2")
 
     gate.set()
-    await posts.join()
+    await background.join()
 
     result = json.loads(model.calls[3][-1]["result"])
     assert result == {"error": "approval_not_explicit"}
@@ -684,10 +691,10 @@ async def test_the_note_turn_cannot_approve_and_keeps_the_numbered_list(
 
 async def test_the_note_turn_cannot_start_another_post(monkeypatch: pytest.MonkeyPatch) -> None:
     model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳"), CREATE, text_reply("Listo")])
-    chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
+    chat, background, channel, gate = await start_gated_post(model, monkeypatch)
 
     gate.set()
-    await posts.join()
+    await background.join()
 
     assert json.loads(model.calls[3][-1]["result"]) == {"error": "not_owner_request"}
     assert len(channel.images) == 1
@@ -698,7 +705,7 @@ async def test_the_follow_up_waits_for_an_owner_turn_in_progress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳"), text_reply(FOLLOW_UP)])
-    chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
+    chat, background, channel, gate = await start_gated_post(model, monkeypatch)
 
     async with chat._history.lock(SENDER):  # an Owner turn is being answered
         gate.set()
@@ -710,7 +717,7 @@ async def test_the_follow_up_waits_for_an_owner_turn_in_progress(
         assert len(model.calls) == 2
         assert channel.sent == [(SENDER, "Dale ⏳")]
         await chat._history.extend(SENDER, [user_step("gracias")])
-    await posts.join()
+    await background.join()
 
     texts = [step_text(step) for step in (await chat._history.get(SENDER))]
     assert texts.index("gracias") < texts.index(next(t for t in texts if t.startswith("[post ")))
@@ -721,7 +728,7 @@ async def test_a_post_approved_before_the_follow_up_gets_no_question(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳"), text_reply(FOLLOW_UP)])
-    chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
+    chat, background, channel, gate = await start_gated_post(model, monkeypatch)
 
     async with chat._history.lock(SENDER):
         gate.set()
@@ -730,7 +737,7 @@ async def test_a_post_approved_before_the_follow_up_gets_no_question(
                 break
             await asyncio.sleep(0.01)
         chat._lifecycle.approve(SENDER, POST_ID)
-    await posts.join()
+    await background.join()
 
     assert len(model.calls) == 2
     assert channel.sent == [(SENDER, "Dale ⏳")]
@@ -742,11 +749,11 @@ async def test_a_failing_follow_up_sends_only_the_buttons_and_keeps_the_post(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     model = ScriptedModel(replies=[CREATE, text_reply("Dale ⏳")])
-    chat, posts, channel, gate = await start_gated_post(model, monkeypatch)
+    chat, background, channel, gate = await start_gated_post(model, monkeypatch)
     model.fail = True
 
     gate.set()
-    await posts.join()
+    await background.join()
 
     # No follow-up and no JOB_FAILED: only the post's buttons, with their fixed line.
     assert channel.sent == [(SENDER, "Dale ⏳"), (SENDER, messages_es.post_actions())]
@@ -975,7 +982,7 @@ async def test_a_model_that_never_answers_an_event_counts_as_down() -> None:
 
 async def test_a_sent_post_event_with_the_model_down_still_sends_its_buttons() -> None:
     model, channel = ScriptedModel(fail=True), FakeChannel()
-    chat, _ = build(model)
+    chat, background = build(model)
     pending_post(chat)
 
     await chat.notify(SENDER, SENT, channel)
@@ -996,12 +1003,12 @@ async def test_a_sent_post_event_with_the_model_down_still_sends_its_buttons() -
 async def test_another_event_turn_does_not_mark_pending_photos_seen() -> None:
     model = ScriptedModel(replies=[text_reply("Ok"), text_reply(EVENT_REPLY)])
     channel = FakeChannel()
-    chat = handler(model)
+    chat, background = build(model)
 
     await chat.handle(message("image", text=None), channel)  # the batch waits out its debounce
     await chat.notify(SENDER, StaleButton(), channel)  # a successful turn that shows no photos
     assert not chat._photos.recent(SENDER)[0].seen
-    await chat.join()
+    await background.join()
 
     current = model.calls[1][-1]
     assert step_text(current) == PhotosReceived(("f1",)).note()
@@ -1031,10 +1038,10 @@ async def test_a_post_can_use_a_wizard_photo() -> None:
         ]
     )
     channel = FakeChannel()
-    chat, posts = build(model, library=FakeLibrary("Mesa nórdica: Mesa de roble."))
+    chat, background = build(model, library=FakeLibrary("Mesa nórdica: Mesa de roble."))
 
     await chat.handle(message("text", text="hacé un post de la mesa nórdica así nomás"), channel)
-    await posts.join()
+    await background.join()
 
     assert json.loads(model.calls[1][-1]["result"])["status"] == "generating"
     assert len(channel.images) == 1
@@ -1083,10 +1090,10 @@ async def test_a_post_with_the_logo_needs_an_uploaded_logo() -> None:
             text_reply("Todavía no tengo tu logo"),
         ]
     )
-    chat, posts = build(model, library=FakeLibrary("Mesa"))
+    chat, background = build(model, library=FakeLibrary("Mesa"))
 
     await chat.handle(message("text", text="subí la mesa con mi logo"), FakeChannel())
-    await posts.join()
+    await background.join()
 
     assert "<brand_logo>" not in model.calls[0][-1]["content"][1]["text"]
     assert json.loads(model.calls[-1][-1]["result"]) == {"error": "no_logo"}

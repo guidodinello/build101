@@ -1,6 +1,7 @@
 import logging
 from dataclasses import dataclass
 
+from app.background import get_background_work
 from app.channels.inbound import EchoHandler, InboundHandler
 from app.config import Settings
 from app.db.session import get_sessionmaker
@@ -61,6 +62,7 @@ def build_conversation(
                     "post images from it"
                 )
             model = GeminiChat.from_api_key(settings.gemini_api_key, settings.gemini_chat_model)
+            background = get_background_work()
             photos, store = InMemoryPhotos(), InMemoryPosts()
             lifecycle = PostLifecycle(store)
             account_id = settings.zernio_account_id or (
@@ -91,6 +93,7 @@ def build_conversation(
                 settings.public_backend_url,
                 settings.max_posts_per_day,
                 knowledge=knowledge,
+                background=background,
             )
             public_videos = videos or PublicVideos()
             public_videos.serve_from(store.video)
@@ -100,6 +103,7 @@ def build_conversation(
                 images,
                 settings.public_backend_url,
                 account_id,
+                background=background,
                 videos=public_videos,
             )
             # None while VIDEO_GEN_ENABLED is off: no maker, so no tool and no Veo call (ADR 0033)
@@ -111,6 +115,7 @@ def build_conversation(
                     public_videos,
                     settings.public_backend_url,
                     settings.max_videos_per_day,
+                    background=background,
                 )
                 if video_gen
                 else None
@@ -137,6 +142,7 @@ def build_conversation(
                 knowledge=knowledge,
                 videos=video_maker,
                 keeper=PhotoKeeper(model, sessions, storage),
+                background=background,
             )
             posts.on_event(chat.notify)
             publishing.on_event(chat.notify)
