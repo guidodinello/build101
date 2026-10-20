@@ -956,7 +956,29 @@ async def test_a_failed_asset_is_refused_again_without_downloading_it(
     again = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
 
     assert again.status_code == 422
-    assert error_code(again) == "unsupported_file"
+    assert error_code(again) == "upload_failed"
+    assert again.json()["error"]["message"] == onboarding.UPLOAD_FAILED
+    assert counting.downloads == downloads
+
+
+async def test_a_retried_over_cap_upload_says_upload_failed_not_image_too_large(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(uploads, "MAX_PIXELS", 100 * 100)
+    counting = CountingStorage()
+    app.dependency_overrides[get_storage] = lambda: counting
+    token = await new_link(client)
+    asset_id = await ticket_with_object(
+        client, counting, token, make_image((101, 100)), content_type="image/jpeg"
+    )
+    first = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+    downloads = counting.downloads
+
+    retry = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+
+    assert error_code(first) == "image_too_large"
+    assert retry.status_code == 422
+    assert error_code(retry) == "upload_failed"
     assert counting.downloads == downloads
 
 

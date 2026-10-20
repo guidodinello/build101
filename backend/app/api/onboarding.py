@@ -68,6 +68,8 @@ UNKNOWN_ASSET = "No encontramos una de las fotos. Recargá la página y probá d
 MISSING_COLORS = 'Sumá al menos un color, o elegí "Todavía no tengo logo ni colores".'
 UNSUPPORTED_FILE = "Este archivo no lo podemos usar. Subí fotos."
 UNREADABLE_FILE = "No pudimos abrir esta foto. Probá con otra."
+# A retry of an asset that already failed: the cause is not kept, so the message is generic.
+UPLOAD_FAILED = "No pudimos usar ese archivo. Subí uno nuevo."
 IMAGE_TOO_LARGE = "Esta foto es demasiado grande. Probá con una de menos resolución."
 TOO_MANY_PHOTOS = f"Ya tenés {MAX_PHOTOS} fotos."
 PHOTO_UPLOADS_USED_UP = (
@@ -372,7 +374,7 @@ async def complete_upload(
     asset = await _active_asset(session, business.id, asset_id)
     if asset.status == "failed":
         # Already read and refused once: don't download and decode it again.
-        raise ApiError(422, "unsupported_file", UNREADABLE_FILE)
+        raise ApiError(422, "upload_failed", UPLOAD_FAILED)
     if asset.status != "ready":
         await _finish_upload(asset, business, session, storage, settings)
     urls = await storage.create_signed_urls(ASSETS_BUCKET, [asset.storage_path], SIGNED_URL_TTL_S)
