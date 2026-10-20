@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.background import BackgroundWork, get_background_work
 from app.channels.base import ChannelError, ChannelPort, InboundMessage
-from app.channels.inbound import DbDedupeStore, InMemoryDedupeStore
+from app.channels.inbound import DbDedupeStore, InboundHandler, InMemoryDedupeStore
 from app.channels.kapso_webhook import REPLAY_WINDOW_S
 from app.channels.router import (
     MAX_BODY_BYTES,
@@ -47,8 +47,7 @@ def handler() -> RecordingHandler:
     return RecordingHandler()
 
 
-@pytest.fixture
-def client(handler: RecordingHandler) -> Iterator[TestClient]:
+def override_webhook_dependencies(handler: InboundHandler) -> None:
     background = BackgroundWork()
     app.dependency_overrides[get_background_work] = lambda: background
     app.dependency_overrides[get_settings] = lambda: Settings(kapso_webhook_secret=SECRET)
@@ -58,6 +57,11 @@ def client(handler: RecordingHandler) -> Iterator[TestClient]:
     app.dependency_overrides[get_clock] = lambda: float(FIXTURE_TIME)
     app.dependency_overrides[get_inbound_handler] = lambda: handler
     app.dependency_overrides[get_channel] = lambda: object()
+
+
+@pytest.fixture
+def client(handler: RecordingHandler) -> Iterator[TestClient]:
+    override_webhook_dependencies(handler)
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
@@ -266,13 +270,13 @@ def test_a_failing_handler_is_logged_with_the_message_id_and_no_payload(
     app.dependency_overrides[get_inbound_handler] = FailingHandler
     raw = raw_fixture("text")
 
-    with caplog.at_level(logging.ERROR, logger="app.channels.router"):
+    with caplog.at_level(logging.ERROR, logger="app.background"):
         response = post(client, raw, signature=sign(raw, SECRET))
 
     assert response.status_code == 200
     failure = next(r for r in caplog.records if r.levelno == logging.ERROR)
     assert failure.getMessage() == (
-        "inbound handling failed: text id=wamid.FAKE0000000000000000000001"
+        "background work inbound text wamid.FAKE0000000000000000000001 from ***0001 failed"
     )
     assert "hola bot" not in caplog.text
 
@@ -286,12 +290,7 @@ class SlowHandler(RecordingHandler):
 
 def test_a_turn_still_being_answered_when_the_app_stops_is_finished() -> None:
     handler = SlowHandler()
-    store = InMemoryDedupeStore()
-    app.dependency_overrides[get_settings] = lambda: Settings(kapso_webhook_secret=SECRET)
-    app.dependency_overrides[get_dedupe_store] = lambda: store
-    app.dependency_overrides[get_clock] = lambda: float(FIXTURE_TIME)
-    app.dependency_overrides[get_inbound_handler] = lambda: handler
-    app.dependency_overrides[get_channel] = lambda: object()
+    override_webhook_dependencies(handler)
     raw = raw_fixture("text")
     try:
         with TestClient(app) as test_client:

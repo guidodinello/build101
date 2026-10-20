@@ -19,7 +19,7 @@ from app.media.public import get_public_images, get_public_videos
 from app.publishing.factory import get_publisher
 from app.ratelimit import TURNS_BURST, TURNS_PER_MINUTE, RateLimiter
 
-from .base import ChannelError, ChannelPort, InboundMessage
+from .base import ChannelError, ChannelPort
 from .factory import build_channel
 from .inbound import (
     DbDedupeStore,
@@ -115,16 +115,6 @@ async def read_capped_body(request: Request) -> bytes:
     return bytes(body)
 
 
-async def run_handler(
-    handler: InboundHandler, message: InboundMessage, channel: ChannelPort
-) -> None:
-    # Runs after the 200 went out, so nobody else would see a failure: log it with the ids only.
-    try:
-        await handler.handle(message, channel)
-    except Exception:
-        logger.exception("inbound handling failed: %s id=%s", message.kind, message.message_id)
-
-
 @router.post("/webhooks/whatsapp")
 async def whatsapp_webhook(
     request: Request,
@@ -169,7 +159,7 @@ async def whatsapp_webhook(
     # Not the request's BackgroundTasks: uvicorn waits for those before the shutdown even starts,
     # while the job poller still claims jobs.
     background.start(
-        run_handler(handler, message, channel),
+        handler.handle(message, channel),
         f"inbound {message.kind} {message.message_id} from {mask(message.sender)}",
     )
     return {"status": "ok"}

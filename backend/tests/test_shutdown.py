@@ -1,5 +1,5 @@
 """The shutdown on a deploy (#180): work in flight finishes, then the Kapso and Zernio clients
-close. The job runner's part is in test_jobs.py, the webhook's in test_whatsapp_router.py."""
+close. The job runner's own part is in test_jobs.py, the webhook's in test_whatsapp_router.py."""
 
 import asyncio
 import logging
@@ -7,13 +7,27 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.background import BackgroundWork, get_background_work
 from app.channels.base import ChannelError
 from app.channels.router import get_channel, get_inbound_handler
+from app.conversation.history import InMemoryHistory
+from app.conversation.outbound import FixedReplies
+from app.jobs.runner import JobRunner
 from app.main import app
 from app.publishing.base import PublisherError, PublishResult
 from app.publishing.factory import get_publisher
-from tests.fakes import PERMALINK, FakeChannel, FakePublisher, ScriptedModel, text_reply
+from tests.conftest import requires_db
+from tests.fakes import (
+    PERMALINK,
+    FakeChannel,
+    FakePublisher,
+    FakeStorage,
+    ScriptedModel,
+    SequenceModel,
+    text_reply,
+)
 from tests.test_chat_handler import (
     CREATE,
     FOLLOW_UP,
@@ -113,9 +127,9 @@ async def test_kapso_and_zernio_close_after_a_publish_that_ends_during_the_shutd
     publisher = rig.publisher
     assert isinstance(publisher, ClosingPublisher)
     # The app as deployed, with the clients a first request would have built.
-    monkeypatch.setattr("app.main.get_background_work", lambda: rig.background)
     monkeypatch.setattr("app.channels.router.build_channel", lambda settings: channel)
     monkeypatch.setattr("app.publishing.factory.build_publisher", lambda settings: publisher)
+    app.dependency_overrides[get_background_work] = lambda: rig.background
     app.dependency_overrides[get_inbound_handler] = lambda: rig.chat.handler
     get_channel.cache_clear()
     get_publisher.cache_clear()
@@ -133,3 +147,35 @@ async def test_kapso_and_zernio_close_after_a_publish_that_ends_during_the_shutd
     assert (post.status, post.permalink) == ("published", PERMALINK)
     assert rig.said == [STARTED.text, f"{LIVE.text}\n{PERMALINK}"]
     assert channel.closed and publisher.closed
+
+
+@requires_db
+async def test_the_app_stops_the_job_poller_before_it_waits_for_the_work(
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    background, channel = BackgroundWork(), FakeChannel()
+    jobs = JobRunner(
+        sessions,
+        {},
+        FakeStorage(),
+        channel,
+        SequenceModel([]),
+        FixedReplies(InMemoryHistory()),
+        poll_interval_s=0.01,
+        background=background,
+    )
+    monkeypatch.setenv("SHUTDOWN_TIMEOUT_S", "1")
+    monkeypatch.setattr("app.main.get_channel", lambda: channel)
+    monkeypatch.setattr("app.main.build_job_runner", lambda *args: jobs)
+    app.dependency_overrides[get_background_work] = lambda: background
+    app.dependency_overrides[get_inbound_handler] = lambda: object()
+    try:
+        with caplog.at_level(logging.WARNING, logger="app.background"):
+            async with app.router.lifespan_context(app):
+                await asyncio.sleep(0.05)
+    finally:
+        app.dependency_overrides.clear()
+
+    assert "shutdown deadline passed" not in caplog.text

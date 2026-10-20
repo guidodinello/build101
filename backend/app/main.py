@@ -44,7 +44,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     if runner:
         runner.stop()
-    await get_background_work().drain(get_settings().shutdown_timeout_s)
+    background = app.dependency_overrides.get(get_background_work, get_background_work)()
+    await background.drain(get_settings().shutdown_timeout_s)
     # Not in the channel router's lifespan, which ends before this one: work that finishes in the
     # drain still tells the Owner through these clients.
     await close_clients()

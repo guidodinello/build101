@@ -11,11 +11,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Response
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.background import BackgroundWork, get_background_work
 from app.channels.base import ChannelPort
+from app.channels.inbound import mask
 from app.channels.router import get_channel, get_owner_notify
 from app.config import Settings, get_settings
 from app.conversation.events import BrandGenerating, Notify
@@ -399,7 +401,7 @@ async def archive_asset(
 async def complete_onboarding(
     onboarding: OnboardingDep,
     session: SessionDep,
-    background: BackgroundTasks,
+    background: Annotated[BackgroundWork, Depends(get_background_work)],
     channel: Annotated[ChannelPort, Depends(get_channel)],
     notify: Annotated[Notify, Depends(get_owner_notify)],
 ) -> schemas.CompleteResponse:
@@ -419,7 +421,10 @@ async def complete_onboarding(
     enqueue(session, "generate_brand", business.id, {})
     await session.commit()
     if business.channel == "whatsapp":
-        background.add_task(_send_brand_generating, notify, channel, business.owner_phone)
+        background.start(
+            _send_brand_generating(notify, channel, business.owner_phone),
+            f"brand generating for {mask(business.owner_phone)}",
+        )
     return schemas.CompleteResponse(status="generating_brand")
 
 
