@@ -496,7 +496,7 @@ async def test_a_check_with_no_period_runs_until_it_succeeds_once(
     assert len(runs) == 2
 
 
-async def test_the_migration_counts_past_runs_and_the_reintentar_already_sent(
+async def test_the_migration_counts_past_runs_and_marks_no_reintentar_as_sent(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     finished = datetime(2026, 10, 19, 12, tzinfo=UTC)
@@ -550,5 +550,4 @@ async def test_the_migration_counts_past_runs_and_the_reintentar_already_sent(
         "photo failed": 1,
         "simulator": 1,
     }
-    assert [name for name, job in jobs.items() if job.retry_offered_at] == ["brand failed"]
-    assert jobs["brand failed"].retry_offered_at == finished
+    assert [name for name, job in jobs.items() if job.retry_offered_at] == []
