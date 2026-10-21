@@ -75,3 +75,13 @@ async def test_dedupe_store_is_bounded_and_evicts_the_oldest_key() -> None:
     assert await store.first_seen("c")  # evicts "a"
     assert await store.first_seen("a")
     assert not await store.first_seen("c")
+
+
+async def test_reaction_is_silent_and_does_not_show_typing() -> None:
+    incoming = message("text").model_copy(update={"kind": "reaction"})
+    channel = FakeChannel()
+
+    await EchoHandler().handle(incoming, channel)
+
+    assert channel.sent == []
+    assert channel.read == [(incoming.message_id, False)]

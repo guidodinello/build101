@@ -126,6 +126,6 @@ _Avoid_: Reel order, animate button
 _Status_: draft
 
 **Approval**:
-The Owner's explicit yes to a specific Post (a tap, "subilo", or a "sí" to the question about publishing it); nothing is published without it.
+The Owner's explicit yes to a specific Post (a button tap, "subilo", a "sí" to the publish question, or a 👍 / ✅ reaction to that exact question message); nothing is published without it.
 _Avoid_: Confirmation, sign-off
 _Status_: draft

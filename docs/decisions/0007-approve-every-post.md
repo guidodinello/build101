@@ -9,7 +9,7 @@ Owners fear losing control of their account and publishing something "not like u
 
 ## Decision
 
-**Each post** is approved with a button tap (or an explicit approval in text that maps to the same handler). The rule is enforced in code: the publisher refuses any post that is not `approved`/`scheduled`, whatever the LLM says.
+**Each post** is approved with a button tap (or an explicit approval in text or reaction that maps to the same handler). A 👍 or ✅ reaction is explicit Approval only when it targets the exact delivered message that asked whether to publish that Post. A reaction to any other message is not approval. The rule is enforced in code: the publisher refuses any post that is not `approved`/`scheduled`, whatever the LLM says.
 
 ## Consequences
 

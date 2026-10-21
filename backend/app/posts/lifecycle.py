@@ -16,7 +16,7 @@ chat asks "what may this message publish?" instead of computing it.
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.conversation.approval import Approval, asks_to_publish, decide
+from app.conversation.approval import YES_EMOJI, Approval, asks_to_publish, decide
 from app.conversation.photos import Photo
 
 from .store import APPROVABLE, InMemoryPosts, Post
@@ -53,6 +53,7 @@ class PostLifecycle:
         self._listed: dict[str, list[str]] = {}
         # The post the assistant's last message asked to publish, which a bare "sí" approves.
         self._offered: dict[str, str] = {}
+        self._offered_message: dict[str, str] = {}
 
     # Reading
 
@@ -209,8 +210,36 @@ class PostLifecycle:
         target = post_id or (pending[0] if len(pending) == 1 else None)
         if target in pending and asks_to_publish(text):
             self._offered[sender] = target
+            self._offered_message.pop(sender, None)
         else:
             self._offered.pop(sender, None)
+            self._offered_message.pop(sender, None)
+
+    def note_sent(self, sender: str, message_id: str) -> None:
+        """Bind the publish question to the exact WhatsApp message that was delivered."""
+        if sender in self._offered:
+            self._offered_message[sender] = message_id
+
+    def reaction_approval(
+        self,
+        sender: str,
+        emoji: str | None,
+        target_message_id: str | None,
+        recent_photos: list[Photo],
+    ) -> Approval:
+        """A yes reaction approves only the Post asked about in that exact delivered message."""
+        post_id = self._offered.get(sender)
+        if (
+            emoji not in YES_EMOJI
+            or not target_message_id
+            or target_message_id != self._offered_message.get(sender)
+            or post_id is None
+        ):
+            return Approval()
+        pending = self.pending(sender)
+        if post_id not in {post.id for post in pending} or photos_after(recent_photos, pending):
+            return Approval()
+        return Approval(post_id=post_id)
 
 
 def photos_after(photos: list[Photo], pending: list[Post]) -> list[Photo]:
