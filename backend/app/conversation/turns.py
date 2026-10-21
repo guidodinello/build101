@@ -18,6 +18,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.background import BackgroundWork
 from app.channels.base import ChannelError, ChannelPort
 from app.channels.inbound import mark_read, mask
+from app.conversation import commercial_dates
+from app.conversation.commercial_dates import WEEKDAYS
 from app.copy import messages_es
 from app.knowledge.base import Knowledge
 from app.llm.client import (
@@ -64,7 +66,6 @@ KEEP_ALIVE_S = 20.0
 OWNER_THINKING: ThinkingLevel = "medium"
 EVENT_THINKING: ThinkingLevel = "low"
 LOGGED_REPLY_CHARS = 300
-WEEKDAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 
 
 @cache
@@ -401,6 +402,8 @@ def context_block(
     if attached:
         lines.append(f"Attached below, in this order: {', '.join(photo.id for photo in attached)}")
     block = f"<now>{local_time(now)}</now>\n" if now else ""
+    if now and (dates := commercial_dates.render(now)):
+        block += f"<upcoming_dates>\n{dates}\n</upcoming_dates>\n"
     block += "<recent_photos>\n" + "\n".join(lines) + "\n</recent_photos>"
     # A photo sent in the chat is also a Brand asset: list it once, as recent.
     listed = {photo.asset_id for photo in recent if photo.asset_id}
