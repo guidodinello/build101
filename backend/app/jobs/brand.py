@@ -95,9 +95,9 @@ async def queue_stranded_brands(sessions: async_sessionmaker[AsyncSession]) -> i
 
     One whose last brand job is queued or running waits for it, and one whose last brand job
     failed with Reintentar sent waits for the Owner. Any other gets a copy of its last brand job,
-    which ended with no Reintentar sent or tapped (failed as interrupted, or its failure message
-    never reached the Owner), or a first one when it has none. The runner runs this once per
-    process, when it starts.
+    which ended with no Reintentar recorded as sent or tapped (failed as interrupted, its failure
+    message never reached the Owner, or it failed before `retry_offered_at` existed), or a first
+    one when it has none. The runner runs this once per process, when it starts.
     """
     queued = 0
     async with sessions() as db:
