@@ -90,6 +90,17 @@ def test_ttl_map_drops_expired_entries_when_it_is_written_and_never_exceeds_max_
     assert seen.get("c") is None  # the oldest went first
 
 
+def test_ttl_map_forgets_a_deleted_key() -> None:
+    seen = TtlMap[float](ttl_s=10, clock=Clock())
+    seen.set("a", 1.0)
+
+    seen.delete("a")
+    seen.delete("never set")
+
+    assert seen.get("a") is None
+    assert len(seen) == 0
+
+
 async def test_keyed_locks_serialize_a_key_and_forget_it_afterwards() -> None:
     locks = KeyedLocks()
     inside = 0

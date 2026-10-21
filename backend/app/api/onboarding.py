@@ -160,7 +160,7 @@ async def is_submitted(session: AsyncSession, business_id: uuid.UUID) -> bool:
     return completed is not None
 
 
-async def _check_pilot(pilot: PilotList, business: Business) -> None:
+async def check_pilot(pilot: PilotList, business: Business) -> None:
     """The PilotGate sends no new link to a number off the list, but one sent earlier still works,
     so every write checks the list before anything is saved, uploaded, analysed or imported."""
     if not await pilot.allows(business.owner_phone):
@@ -180,7 +180,7 @@ async def get_open_onboarding(
     write that passed the check waits there and can't commit after the form was submitted (the
     brand job would not see it). The lock lasts until the request's transaction ends.
     """
-    await _check_pilot(pilot, onboarding.business)
+    await check_pilot(pilot, onboarding.business)
     await session.refresh(onboarding.business, with_for_update=True)
     if await is_submitted(session, onboarding.business.id):
         raise ApiError(409, "onboarding_completed", ALREADY_COMPLETED)
@@ -433,7 +433,7 @@ async def complete_onboarding(
             await session.commit()
         return schemas.CompleteResponse(status="generating_brand")
 
-    await _check_pilot(pilot, business)
+    await check_pilot(pilot, business)
     await _check_complete(session, business)
     link.completed_at = datetime.now(UTC)
     form_submitted(business)

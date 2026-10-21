@@ -28,6 +28,7 @@ from app.instagram.oauth_state import (
 )
 from app.jobs.queue import enqueue
 from app.onboarding.links import onboarding_url
+from app.pilot import PilotList
 from app.ratelimit import limit_onboarding_token
 
 from .errors import ApiError, error_response
@@ -36,6 +37,7 @@ from .onboarding import (
     PilotDep,
     SessionDep,
     SettingsDep,
+    check_pilot,
     get_onboarding,
     get_open_onboarding,
     is_submitted,
@@ -113,6 +115,7 @@ async def instagram_callback(
     session: SessionDep,
     settings: SettingsDep,
     instagram: InstagramDep,
+    pilot: PilotDep,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
@@ -122,7 +125,7 @@ async def instagram_callback(
     try:
         token = _bound_token(binding, state, settings)
         response: Response = await _finish_connect(
-            token, code, error, request, session, settings, instagram
+            token, code, error, request, session, settings, instagram, pilot
         )
     except ApiError as exc:
         response = error_response(exc)
@@ -149,9 +152,11 @@ async def _finish_connect(
     session: AsyncSession,
     settings: Settings,
     instagram: InstagramPort,
+    pilot: PilotList,
 ) -> RedirectResponse:
     onboarding = await get_onboarding(token, session)
     business = onboarding.business
+    await check_pilot(pilot, business)
     wizard = onboarding_url(settings.frontend_url, token)
     # Locked before the check, as in get_open_onboarding: a submit in flight finishes first.
     await session.refresh(business, with_for_update=True)

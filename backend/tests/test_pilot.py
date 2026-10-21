@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from collections.abc import Callable
@@ -215,6 +216,45 @@ async def test_a_failing_waitlist_reply_does_not_break_the_webhook_task() -> Non
     assert inner.handled == []
 
 
+@dataclass
+class FlakyChannel(FakeChannel):
+    failures: int = 1
+
+    async def send_text(self, to: str, text: str) -> str:
+        if self.failures:
+            self.failures -= 1
+            raise ChannelError("kapso 500")
+        return await super().send_text(to, text)
+
+
+async def test_a_failed_waitlist_reply_goes_out_on_the_next_message() -> None:
+    gate, _ = gated(PILOT)
+    channel = FlakyChannel()
+
+    await gate.handle(inbound("text", message_id="wamid.1"), channel)
+    assert channel.sent == []
+
+    await gate.handle(inbound("text", message_id="wamid.2"), channel)
+    await gate.handle(inbound("text", message_id="wamid.3"), channel)
+    assert channel.sent == [(STRANGER, WAITLIST)]
+
+
+async def test_messages_arriving_together_get_one_waitlist_reply() -> None:
+    class SlowChannel(FakeChannel):
+        async def send_text(self, to: str, text: str) -> str:
+            await asyncio.sleep(0)
+            return await super().send_text(to, text)
+
+    gate, _ = gated(PILOT)
+    channel = SlowChannel()
+
+    await asyncio.gather(
+        *(gate.handle(inbound(kind, message_id=f"wamid.{kind}"), channel) for kind in KINDS)
+    )
+
+    assert channel.sent == [(STRANGER, WAITLIST)]
+
+
 async def test_the_log_lines_mask_the_number(caplog: pytest.LogCaptureFixture) -> None:
     gate, _ = gated(PILOT)
 
@@ -371,6 +411,32 @@ async def test_a_failed_read_keeps_the_last_list(
 
     assert await pilot.allows(PILOT)
     assert not await pilot.allows(STRANGER)
+
+
+@requires_db
+async def test_with_no_list_read_a_configured_number_gets_in_while_the_database_is_down(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    listed = "59899000003"
+    async with sessions() as db:
+        db.add(PilotSender(phone=listed))
+        await db.commit()
+    flaky = FlakySessions(sessions, down=True)
+    inner = RecordingHandler()
+    pilot = PilotList(frozenset({PILOT}), flaky, open_when_empty=True)
+    gate = PilotGate(inner, pilot, WAITLIST)
+    channel = FakeChannel()
+
+    await gate.handle(inbound("text", sender=PILOT), channel)
+    await gate.handle(inbound("text", sender=listed), channel)
+    assert [m.sender for m in inner.handled] == [PILOT]
+    assert channel.sent == []
+
+    flaky.down = False
+    await gate.handle(inbound("text", sender=listed), channel)
+    await gate.handle(inbound("text", sender=STRANGER), channel)
+    assert [m.sender for m in inner.handled] == [PILOT, listed]
+    assert channel.sent == [(STRANGER, WAITLIST)]
 
 
 @pytest.fixture

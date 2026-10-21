@@ -378,6 +378,27 @@ async def test_the_start_hop_refuses_a_number_not_on_the_pilot_list(
     assert "set-cookie" not in response.headers
 
 
+async def test_a_callback_for_a_number_not_on_the_pilot_list_connects_and_imports_nothing(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    started = await start(client, token)
+    app.dependency_overrides[get_pilot_list] = off_the_pilot_list
+
+    response = await client.get(
+        urlsplit(started.headers["location"]).path,
+        params=callback_params(started, code="c"),
+        headers=binding_cookie(started),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "not_in_pilot"
+    assert_cookie_cleared(response)
+    async with sessions() as db:
+        assert await db.scalar(select(SocialAccount)) is None
+        assert (await db.scalars(select(Job.kind))).all() == []
+
+
 def job_context(
     sessions: async_sessionmaker[AsyncSession], storage: FakeStorage, business_id: uuid.UUID
 ) -> JobContext:

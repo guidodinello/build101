@@ -42,8 +42,9 @@ def configured_numbers(numbers: str) -> frozenset[str]:
 class PilotList:
     """Whether a WhatsApp number may onboard, chat and publish.
 
-    The table is read at most once per `ttl_s`. When a read fails the last list read stands; with
-    none read yet, the error reaches the caller.
+    A `configured` number gets in without reading the table, so it keeps working while the
+    database is down. Any other number needs the table, read at most once per `ttl_s`: when a
+    read fails the last list read stands; with none read yet, the error reaches the caller.
     """
 
     def __init__(
@@ -65,10 +66,13 @@ class PilotList:
         self._lock = asyncio.Lock()
 
     async def allows(self, phone: str) -> bool:
+        digits = phone_digits(phone)
+        if digits in self._configured:
+            return True
         numbers = await self.numbers()
         if not numbers:
             return self._open_when_empty
-        return phone_digits(phone) in numbers
+        return digits in numbers
 
     async def numbers(self) -> frozenset[str]:
         if self._sessions is None:
@@ -130,8 +134,9 @@ class PilotGate:
 
     No LLM call, no Business, no link, no job. Nothing about the number is kept but a masked log
     line and, in memory only, that it got the reply, which it gets at most once per
-    `reply_every_s`. Past `max_keys` the oldest are forgotten, so a flood of numbers can't grow
-    memory; at worst a forgotten number gets a second reply.
+    `reply_every_s`; a reply that fails to send goes out on its next message. Past `max_keys` the
+    oldest are forgotten, so a flood of numbers can't grow memory; at worst a forgotten number
+    gets a second reply.
     """
 
     def __init__(
@@ -163,9 +168,11 @@ class PilotGate:
         if self._replied.get(number):
             logger.info("%s from %s dropped: not on the pilot list", message.kind, mask(number))
             return
+        # Marked before the send, so a message arriving during it gets no second reply.
         self._replied.set(number, True)
         logger.info("%s from %s: not on the pilot list, waitlist reply", message.kind, mask(number))
         try:
             await channel.send_text(message.sender, self._reply)
         except ChannelError:
+            self._replied.delete(number)
             logger.warning("waitlist reply failed for %s", mask(number), exc_info=True)

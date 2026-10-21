@@ -98,6 +98,9 @@ class TtlMap[V]:
             return None
         return entry[0]
 
+    def delete(self, key: str) -> None:
+        self._items.pop(key, None)
+
     def __len__(self) -> int:
         return len(self._items)
 
