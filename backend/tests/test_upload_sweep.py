@@ -209,4 +209,5 @@ async def test_a_stuck_sweep_does_not_delay_a_due_job(
         await asyncio.wait_for(ran.wait(), timeout=2)
     finally:
         storage.release.set()
-        await runner.stop()
+        runner.stop()
+        await background.drain(1)

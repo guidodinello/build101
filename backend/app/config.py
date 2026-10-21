@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     enable_dev_endpoints: bool = False
     dev_token: str | None = None
 
+    # How long a shutdown lets the work in flight finish before cancelling it. Added to uvicorn's
+    # --timeout-graceful-shutdown (Dockerfile), it must end before Railway's SIGKILL, which comes
+    # RAILWAY_DEPLOYMENT_DRAINING_SECONDS after the SIGTERM (backend/README.md § Deploys and work
+    # in flight)
+    shutdown_timeout_s: float = 130.0
+
     image_gen: Literal["gemini", "openai", "mock"] = "mock"
     gemini_api_key: str | None = None
     gemini_image_model: str = "gemini-nano-banana-2.1"

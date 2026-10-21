@@ -119,12 +119,14 @@ def ready_soon(client: TestClient) -> httpx.Response:
 async def test_ready_when_the_database_answers_the_runner_polls_and_the_publisher_is_real(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
-    runner = new_runner(sessions)
+    background = BackgroundWork()
+    runner = new_runner(sessions, background=background)
     await runner.start()
     try:
         response = await get_ready(real(), DatabaseProbe(sessions), await polled(runner))
     finally:
-        await runner.stop()
+        runner.stop()
+        await background.stop()
 
     assert response.status_code == 200
     assert response.json() == {
@@ -139,12 +141,14 @@ async def test_not_ready_when_the_database_is_unreachable(
     sessions: async_sessionmaker[AsyncSession],
     unreachable: async_sessionmaker[AsyncSession],
 ) -> None:
-    runner = new_runner(sessions)
+    background = BackgroundWork()
+    runner = new_runner(sessions, background=background)
     await runner.start()
     try:
         response = await get_ready(real(), DatabaseProbe(unreachable), await polled(runner))
     finally:
-        await runner.stop()
+        runner.stop()
+        await background.stop()
 
     assert response.status_code == 503
     assert checks(response) == {"database": "fail", "job_runner": "ok", "publisher": "ok"}
@@ -166,7 +170,7 @@ async def test_not_ready_when_the_job_runner_is_off_or_stopped(
     runner = new_runner(sessions, background=background)
     await runner.start()
     await polled(runner)
-    await runner.stop()
+    runner.stop()
     await background.stop()
 
     off = await get_ready(real(), DatabaseProbe(sessions), None)
@@ -189,7 +193,12 @@ async def test_not_ready_when_the_job_runner_stopped_polling(
         if len(rounds) > 1:
             await never.wait()
 
-    runner = new_runner(sessions, PeriodicCheck("hangs", timedelta(0), hangs_after_the_first_round))
+    background = BackgroundWork()
+    runner = new_runner(
+        sessions,
+        PeriodicCheck("hangs", timedelta(0), hangs_after_the_first_round),
+        background=background,
+    )
     await runner.start()
     try:
         await polled(runner)
@@ -197,7 +206,8 @@ async def test_not_ready_when_the_job_runner_stopped_polling(
         monkeypatch.setattr(ready, "POLLED_WITHIN", timedelta(milliseconds=50))
         response = await get_ready(real(), DatabaseProbe(sessions), runner)
     finally:
-        await runner.stop()
+        runner.stop()
+        await background.stop()
 
     assert response.status_code == 503
     assert checks(response) == {"database": "ok", "job_runner": "fail", "publisher": "ok"}

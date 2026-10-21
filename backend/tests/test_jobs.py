@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -37,6 +39,7 @@ from app.jobs.asset import analyze_asset
 from app.jobs.brand import generate_brand
 from app.jobs.queue import enqueue, retry_failed
 from app.jobs.runner import JobContext, JobRunner
+from app.jobs.setup import NOTIFY_ON_FAILURE, REQUEUE_IF_INTERRUPTED, UNDO
 from app.llm.client import Step, user_step
 from app.media.public import PublicImages
 from app.posts.lifecycle import PostLifecycle
@@ -103,7 +106,9 @@ def runner(
         channel,
         model or SequenceModel([]),
         notify or FixedReplies(DbHistory(sessions)),
-        notify_on_failure=frozenset({"generate_brand"}),
+        NOTIFY_ON_FAILURE,
+        REQUEUE_IF_INTERRUPTED,
+        UNDO,
         background=background,
         **options,
     ), background
@@ -229,7 +234,71 @@ async def test_only_free_slots_are_claimed(sessions: async_sessionmaker[AsyncSes
     await background.join()
 
 
-async def test_jobs_left_running_by_a_restart_are_failed(
+async def test_once_stopped_the_poller_claims_no_new_job_and_ends_on_its_own(
+    sessions: async_sessionmaker[AsyncSession], caplog: pytest.LogCaptureFixture
+) -> None:
+    business, ran = await add_business(sessions), asyncio.Event()
+
+    async def ok(context: JobContext, payload: dict[str, Any]) -> None:
+        ran.set()
+
+    before = await queue(sessions, "analyze_asset", business)
+    jobs, background = runner(sessions, {"analyze_asset": ok}, FakeChannel(), poll_interval_s=0.01)
+    await jobs.start()
+    await asyncio.wait_for(ran.wait(), timeout=2)
+
+    jobs.stop()
+    after = await queue(sessions, "analyze_asset", business)
+    await asyncio.sleep(0.1)
+    with caplog.at_level(logging.WARNING, logger="app.background"):
+        await background.drain(timeout_s=1)
+
+    assert (await job_row(sessions, before)).status == "succeeded"
+    assert (await job_row(sessions, after)).status == "queued"
+    assert await jobs.run_due() == 0
+    assert "shutdown deadline passed" not in caplog.text
+
+
+async def test_a_brand_being_written_at_shutdown_still_reaches_the_owner(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    business, channel, gate = await add_business(sessions), FakeChannel(), asyncio.Event()
+    model = SequenceModel([brand_brain(whatsapp_summary="• *Cómo hablamos:* cálidos")], gate=gate)
+    job_id = await queue(sessions, "generate_brand", business)
+    jobs, background = runner(sessions, {"generate_brand": generate_brand}, channel, model)
+    assert await jobs.run_due() == 1
+
+    jobs.stop()
+    asyncio.get_running_loop().call_later(0.05, gate.set)
+    await background.drain(timeout_s=5)
+
+    assert (await job_row(sessions, job_id)).status == "succeeded"
+    assert [body for _, body, _ in channel.buttons] == [
+        messages_es.brand_summary("Katei", "• *Cómo hablamos:* cálidos")
+    ]
+
+
+async def test_a_job_still_running_at_the_deadline_is_cancelled_and_logged_with_its_ids(
+    sessions: async_sessionmaker[AsyncSession], caplog: pytest.LogCaptureFixture
+) -> None:
+    business = await add_business(sessions)
+
+    async def stuck(context: JobContext, payload: dict[str, Any]) -> None:
+        await asyncio.Event().wait()
+
+    job_id = await queue(sessions, "generate_brand", business)
+    jobs, background = runner(sessions, {"generate_brand": stuck}, FakeChannel())
+    assert await jobs.run_due() == 1
+
+    jobs.stop()
+    with caplog.at_level(logging.WARNING, logger="app.background"):
+        await asyncio.wait_for(background.drain(timeout_s=0.1), timeout=2)
+
+    assert f"job {job_id} (generate_brand) for business {business.id}" in caplog.text
+    assert (await job_row(sessions, job_id)).status == "queued"
+
+
+async def test_only_jobs_left_running_long_enough_are_taken_for_dead(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     business = await add_business(sessions)
@@ -238,19 +307,21 @@ async def test_jobs_left_running_by_a_restart_are_failed(
             business_id=business.id,
             kind="analyze_asset",
             status="running",
+            attempts=1,
             started_at=datetime.now(UTC) - timedelta(minutes=10),
         )
         fresh = Job(
             business_id=business.id,
             kind="analyze_asset",
             status="running",
+            attempts=1,
             started_at=datetime.now(UTC),
         )
         db.add_all([stale, fresh])
         await db.commit()
 
-    assert await runner(sessions, {}, FakeChannel())[0].fail_stale() == 1
-    assert (await job_row(sessions, stale.id)).status == "failed"
+    assert await runner(sessions, {}, FakeChannel())[0].recover_stale() == 1
+    assert (await job_row(sessions, stale.id)).status == "queued"
     assert (await job_row(sessions, fresh.id)).status == "running"
 
 
@@ -564,9 +635,13 @@ async def test_a_failed_revision_puts_an_active_business_back(
 ) -> None:
     business = await add_business(sessions, state="active")
     await BrandFlow(sessions).revise(PHONE, "más formales")
+    # The model has no answer: the Strategist fails.
+    jobs, background = runner(
+        sessions, {"generate_brand": generate_brand}, FakeChannel(), SequenceModel([])
+    )
 
-    with pytest.raises(IndexError):  # the model has no answer: the Strategist fails
-        await generate_brand(context(sessions, business, SequenceModel([])), {"correction": "x"})
+    await jobs.run_due()
+    await background.join()
 
     async with sessions() as db:
         restored = await db.get_one(Business, business.id)
@@ -577,9 +652,13 @@ async def test_a_failed_first_brand_stays_generating(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     business = await add_business(sessions)
+    await queue(sessions, "generate_brand", business)
+    jobs, background = runner(
+        sessions, {"generate_brand": generate_brand}, FakeChannel(), SequenceModel([])
+    )
 
-    with pytest.raises(IndexError):
-        await generate_brand(context(sessions, business, SequenceModel([])), {})
+    await jobs.run_due()
+    await background.join()
 
     async with sessions() as db:
         assert (await db.get_one(Business, business.id)).onboarding_state == "generating_brand"

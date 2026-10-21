@@ -56,6 +56,7 @@
 | `ENABLE_DEV_ENDPOINTS` | `true` | `/dev/*` |
 | `DEV_TOKEN` | random | Header `X-Dev-Token` |
 | `MAX_CONCURRENT_JOBS` | `4` | |
+| `SHUTDOWN_TIMEOUT_S` | `130` | How long a shutdown (a deploy) lets the work in flight finish before cancelling it. With the 10 s uvicorn gives requests, the default 130 stays under the 150 s `RAILWAY_DEPLOYMENT_DRAINING_SECONDS` ([backend/README.md](../../backend/README.md#deploys-and-work-in-flight)). `.env.example` sets `5`: `uvicorn --reload` waits for the work in flight before it restarts |
 | `MAX_PHOTO_MB` | `10` | Rejected before the signed upload URL is issued; a WhatsApp photo over it gets `photo_too_big` without being downloaded (or after, when Kapso doesn't say its size). A WhatsApp photo over 25 megapixels gets `photo_too_large` before it is decoded, and WhatsApp photos and carousel references decode under the same limit as onboarding uploads (2 at a time) |
 | `MAX_AUDIO_MB` | `3` | Voice notes over it get `audio_too_long` (~25 min of WhatsApp Opus) |
 | `MAX_VIDEO_MB` | `300` | Could (video work). Must not exceed the Supabase Storage global file size limit |

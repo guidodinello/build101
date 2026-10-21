@@ -143,6 +143,10 @@ class Job(Base):
     status: Mapped[str] = mapped_column(server_default="queued")
     result: Mapped[dict[str, Any] | None]
     error: Mapped[str | None]
+    # How many times the runner claimed it: an interrupted job runs again only once (#178)
+    attempts: Mapped[int] = mapped_column(server_default="0")
+    # When the Owner got the failure message with its Reintentar button
+    retry_offered_at: Mapped[datetime | None]
     started_at: Mapped[datetime | None]
     finished_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
