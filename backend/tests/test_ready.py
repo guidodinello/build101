@@ -247,6 +247,15 @@ async def test_concurrent_calls_share_one_database_probe(
     assert counted.opened == 1
 
 
+def test_every_ready_call_asks_the_same_database_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", UNREACHABLE)
+    get_sessionmaker.cache_clear()
+    try:
+        assert get_database(get_settings()) is get_database(get_settings())
+    finally:
+        get_sessionmaker.cache_clear()
+
+
 async def test_not_ready_on_the_mock_publisher() -> None:
     response = await get_ready(Settings(publisher="mock"), None, None)
 
