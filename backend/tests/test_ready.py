@@ -2,7 +2,7 @@ import asyncio
 import time
 from collections.abc import AsyncIterator
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -10,7 +10,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api import ready
-from app.api.ready import POLLED_WITHIN, get_database, get_job_runner
+from app.api.ready import (
+    DATABASE_RECHECK_S,
+    POLLED_WITHIN,
+    DatabaseProbe,
+    get_database,
+    get_job_runner,
+)
 from app.background import BackgroundWork
 from app.channels.router import get_channel, get_inbound_handler
 from app.config import Settings, get_settings
@@ -64,14 +70,29 @@ async def unreachable() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     await engine.dispose()
 
 
+class CountedSessions:
+    """Real sessions, counted: each database probe opens one."""
+
+    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
+        self.sessions = sessions
+        self.opened = 0
+
+    def __call__(self) -> AsyncSession:
+        self.opened += 1
+        return self.sessions()
+
+    def as_sessionmaker(self) -> async_sessionmaker[AsyncSession]:
+        return cast(async_sessionmaker[AsyncSession], self)
+
+
 async def get_ready(
     settings: Settings,
-    sessions: async_sessionmaker[AsyncSession] | None,
+    database: DatabaseProbe | None,
     runner: JobRunner | None,
     path: str = "/ready",
 ) -> httpx.Response:
     app.dependency_overrides[get_settings] = lambda: settings
-    app.dependency_overrides[get_database] = lambda: sessions
+    app.dependency_overrides[get_database] = lambda: database
     app.dependency_overrides[get_job_runner] = lambda: runner
     try:
         async with httpx.AsyncClient(
@@ -101,7 +122,7 @@ async def test_ready_when_the_database_answers_the_runner_polls_and_the_publishe
     runner = new_runner(sessions)
     await runner.start()
     try:
-        response = await get_ready(real(), sessions, await polled(runner))
+        response = await get_ready(real(), DatabaseProbe(sessions), await polled(runner))
     finally:
         await runner.stop()
 
@@ -121,7 +142,7 @@ async def test_not_ready_when_the_database_is_unreachable(
     runner = new_runner(sessions)
     await runner.start()
     try:
-        response = await get_ready(real(), unreachable, await polled(runner))
+        response = await get_ready(real(), DatabaseProbe(unreachable), await polled(runner))
     finally:
         await runner.stop()
 
@@ -131,7 +152,7 @@ async def test_not_ready_when_the_database_is_unreachable(
 
 async def test_not_ready_without_a_database(unreachable: async_sessionmaker[AsyncSession]) -> None:
     unset = await get_ready(real(), None, None)
-    down = await get_ready(real(), unreachable, None)
+    down = await get_ready(real(), DatabaseProbe(unreachable), None)
 
     assert unset.status_code == down.status_code == 503
     assert checks(unset)["database"] == checks(down)["database"] == "fail"
@@ -148,8 +169,8 @@ async def test_not_ready_when_the_job_runner_is_off_or_stopped(
     await runner.stop()
     await background.stop()
 
-    off = await get_ready(real(), sessions, None)
-    stopped = await get_ready(real(), sessions, runner)
+    off = await get_ready(real(), DatabaseProbe(sessions), None)
+    stopped = await get_ready(real(), DatabaseProbe(sessions), runner)
 
     for response in (off, stopped):
         assert response.status_code == 503
@@ -174,12 +195,56 @@ async def test_not_ready_when_the_job_runner_stopped_polling(
         await polled(runner)
         await asyncio.sleep(0.1)
         monkeypatch.setattr(ready, "POLLED_WITHIN", timedelta(milliseconds=50))
-        response = await get_ready(real(), sessions, runner)
+        response = await get_ready(real(), DatabaseProbe(sessions), runner)
     finally:
         await runner.stop()
 
     assert response.status_code == 503
     assert checks(response) == {"database": "ok", "job_runner": "fail", "publisher": "ok"}
+
+
+@requires_db
+async def test_ready_asks_the_database_once_per_recheck_window(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    now = [0.0]
+    counted = CountedSessions(sessions)
+    database = DatabaseProbe(counted.as_sessionmaker(), clock=lambda: now[0])
+
+    await get_ready(real(), database, None)
+    now[0] = DATABASE_RECHECK_S / 2
+    within = await get_ready(real(), database, None)
+    assert counted.opened == 1
+    assert checks(within)["database"] == "ok"
+
+    now[0] = DATABASE_RECHECK_S
+    await get_ready(real(), database, None)
+    assert counted.opened == 2
+
+
+async def test_a_failed_database_answer_is_reused_within_the_window_too(
+    unreachable: async_sessionmaker[AsyncSession],
+) -> None:
+    counted = CountedSessions(unreachable)
+    database = DatabaseProbe(counted.as_sessionmaker(), clock=lambda: 0.0)
+
+    responses = [await get_ready(real(), database, None) for _ in range(3)]
+
+    assert counted.opened == 1
+    assert [checks(response)["database"] for response in responses] == ["fail"] * 3
+
+
+@requires_db
+async def test_concurrent_calls_share_one_database_probe(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    counted = CountedSessions(sessions)
+    database = DatabaseProbe(counted.as_sessionmaker())
+
+    answers = await asyncio.gather(*(database.answers() for _ in range(5)))
+
+    assert answers == [True] * 5
+    assert counted.opened == 1
 
 
 async def test_not_ready_on_the_mock_publisher() -> None:
@@ -192,7 +257,7 @@ async def test_not_ready_on_the_mock_publisher() -> None:
 async def test_ready_shows_check_names_and_the_commit_only(
     unreachable: async_sessionmaker[AsyncSession],
 ) -> None:
-    response = await get_ready(real(), unreachable, None)
+    response = await get_ready(real(), DatabaseProbe(unreachable), None)
 
     assert response.json() == {
         "status": "fail",

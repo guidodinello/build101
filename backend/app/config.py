@@ -1,4 +1,5 @@
 import ipaddress
+import socket
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -160,9 +161,14 @@ def _is_public(url: str) -> bool:
     if not host:
         return False
     try:
-        return ipaddress.ip_address(host).is_global
+        ip = ipaddress.ip_address(host)
     except ValueError:
-        return host != "localhost" and not host.endswith(".localhost")
+        # Resolvers also read the IPv4 spellings ipaddress refuses: 127.1, 2130706433, 0x7f.0.0.1
+        try:
+            ip = ipaddress.IPv4Address(socket.inet_aton(host))
+        except (OSError, ValueError):
+            return host != "localhost" and not host.endswith(".localhost")
+    return ip.is_global
 
 
 def check_production(settings: Settings) -> None:
