@@ -31,7 +31,7 @@ stateDiagram-v2
     active --> active
 ```
 
-The states and these moves are owned by one module, `backend/app/onboarding/state.py`: nothing else writes `onboarding_state`. A failed first brand stays in `generating_brand` (the Owner gets `job_failed` with a retry button); a failed revision puts the Business back in the state it was in.
+The states and these moves are owned by one module, `backend/app/onboarding/state.py`: nothing else writes `onboarding_state`. A failed first brand stays in `generating_brand` (the Owner gets `job_failed` with a retry button); a failed revision puts the Business back in the state it was in. A brand job a restart interrupts runs again once before it counts as failed, and a Business still in `generating_brand` with nothing left to finish it gets a new brand job when the backend starts ([overview.md § Background jobs](../architecture/overview.md#background-jobs)).
 
 While `onboarding_state != active`, inbound messages are handled by the **onboarding router** (deterministic copy + light LLM for free-text answers). Once `active`, they go to the **orchestrator**.
 

@@ -370,7 +370,7 @@ create table inbound_deliveries (
 create index ix_inbound_deliveries_received_at on inbound_deliveries (received_at);
 alter table inbound_deliveries enable row level security;
 
--- The closed pilot (#186, migration 0008): the WhatsApp numbers that may onboard, chat and publish,
+-- The closed pilot (#186, migration 0009): the WhatsApp numbers that may onboard, chat and publish,
 -- on top of PILOT_SENDERS. Edited by hand in the Supabase SQL editor (setup.md § Pilot numbers) and
 -- read by the backend at most once a minute. Digits only, so a delete by the digits can't miss a
 -- row written another way. No Business link: a number gets in before it has a Business.
@@ -388,15 +388,18 @@ create table jobs (
   kind         text not null,
   payload      jsonb not null default '{}',
   status       text not null default 'queued',
-  result       jsonb,
+  result       jsonb,                                 -- a Reintentar tap, or the startup check of stuck brands, adds {"retried_by": <new job id>}
   error        text,
+  attempts     int not null default 0,                -- times the runner claimed it: an interrupted job runs again once
+  retry_offered_at timestamptz,                       -- the Owner got job_failed with its Reintentar
   started_at   timestamptz,
   finished_at  timestamptz,
   created_at   timestamptz not null default now(),
   constraint ck_jobs_kind check (kind in ('analyze_asset','generate_brand','generate_plan',
     'generate_post','revise_post','redo_slides','publish_post','import_instagram',
     'generate_niche_report')),  -- generate_niche_report: business_id null, payload {"niche_id": ...}
-  constraint ck_jobs_status check (status in ('queued','running','succeeded','failed'))
+  constraint ck_jobs_status check (status in ('queued','running','succeeded','failed')),
+  constraint ck_jobs_attempts_not_negative check (attempts >= 0)
 );
 create index ix_jobs_business_id on jobs (business_id);
 create index ix_jobs_status_created_at on jobs (status, created_at);
@@ -450,4 +453,5 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 | `0005` | Instagram tokens are not kept (security audit M-5, [ADR 0028](../decisions/0028-read-instagram-with-our-meta-app.md)): sets `social_accounts.access_token` to null for every row; `import_instagram` now claims it (reads and nulls it in one transaction) when it starts. The downgrade is a no-op, since the tokens can't be restored |
 | `0006` | Durable webhook dedupe (security audit L-3): `inbound_deliveries(external_id pk, received_at)`, RLS on, rows pruned after 48 h by the webhook itself |
 | `0007` | The Data API is closed (2026-10-19 audit, finding SEC-1): RLS on every table in `public`, `alembic_version` included; every grant of `anon` and `authenticated` on tables, sequences and functions in `public` revoked, along with the default privileges `postgres` gives them there (skipped where those roles don't exist, as in CI); `PUBLIC`'s `EXECUTE` on functions in `public` revoked, and on functions `postgres` creates later. Sets a 5 s `lock_timeout`. The downgrade turns RLS off again but leaves every grant revoked |
-| `0008` | The closed pilot (#186, audit SEC-4): `pilot_senders(phone pk, created_at)`, digits only (8 to 15), RLS on. The downgrade drops it |
+| `0008` | Recovering interrupted jobs ([#178](https://github.com/guidodinello/build101/issues/178), [overview.md § Background jobs](overview.md#background-jobs)): `jobs.attempts` (set to 1 on every job already started) and `jobs.retry_offered_at` (left empty on every existing job: whether its failure message reached the Owner went unrecorded, so the startup check gives a Business still stuck one more brand run rather than leave it stuck), with `ck_jobs_attempts_not_negative`. Sets a 5 s `lock_timeout` |
+| `0009` | The closed pilot (#186, audit SEC-4): `pilot_senders(phone pk, created_at)`, digits only (8 to 15), RLS on. The downgrade drops it |

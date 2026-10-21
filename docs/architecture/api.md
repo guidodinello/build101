@@ -11,7 +11,7 @@ FastAPI. JSON in and out, `snake_case` fields. Errors use `{"error": {"code": ".
 | Web app (owner) | Magic-link token in the path: `/api/o/{token}/...`. Server hashes it, looks up `magic_links`, checks expiry → `business_id` |
 | Dev tools | Header `X-Dev-Token: $DEV_TOKEN`, only if `ENABLE_DEV_ENDPOINTS=true` and `ENV` is not `prod` (404 otherwise) |
 
-CORS: allow every origin in `FRONTEND_ORIGINS` (comma-separated: Vercel URL + `http://localhost:3000`).
+CORS: allow every origin in `FRONTEND_ORIGINS` (comma-separated). Production lists only the Vercel URL, since `ENV=prod` refuses to start on a localhost origin; `http://localhost:3000` is for local runs.
 
 ## Endpoints
 
@@ -19,7 +19,8 @@ CORS: allow every origin in `FRONTEND_ORIGINS` (comma-separated: Vercel URL + `h
 
 | Method | Path | Response |
 |---|---|---|
-| GET | `/health` | `{"ok": true, "version": "<git sha>"}` |
+| GET | `/health` | `200 {"status": "ok"}` whenever the process is up; it checks nothing else |
+| GET | `/ready` | `200` only when every check passes, else `503`; same body either way: `{"status": "ok" \| "fail", "checks": {"database": "ok" \| "fail", "job_runner": "ok" \| "fail", "publisher": "ok" \| "fail"}, "commit": "<git sha>" \| null}`. `database`: a `select 1` answers within 5 s; its answer, pass or fail, is reused for 5 s and shared with the calls that arrive while it runs, so callers can't tie up the app's database connections. `job_runner`: the job runner is on and its poller last polled for jobs less than 30 s ago. `publisher`: `PUBLISHER` is not `mock`. `commit` is Railway's `RAILWAY_GIT_COMMIT_SHA` (`null` locally and after a `railway up`). It shows check names and the commit only: no setting, hostname or error text. Railway's deploy healthcheck ([backend/README.md](../../backend/README.md#service-settings)) |
 
 ### WhatsApp webhook
 

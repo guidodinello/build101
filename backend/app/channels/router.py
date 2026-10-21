@@ -7,9 +7,9 @@ from dataclasses import replace
 from functools import cache
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
 
-from app.background import get_background_work
+from app.background import BackgroundWork, get_background_work
 from app.config import Settings, get_settings
 from app.conversation.events import Notify
 from app.conversation.factory import Conversation, build_conversation
@@ -20,7 +20,7 @@ from app.pilot import PilotGate, PilotList, get_pilot_list
 from app.publishing.factory import get_publisher
 from app.ratelimit import TURNS_BURST, TURNS_PER_MINUTE, RateLimiter
 
-from .base import ChannelError, ChannelPort, InboundMessage
+from .base import ChannelError, ChannelPort
 from .factory import build_channel
 from .inbound import (
     DbDedupeStore,
@@ -89,7 +89,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     pilot: PilotList = app.dependency_overrides.get(get_pilot_list, get_pilot_list)()
     await pilot.log_at_boot()
     yield
-    # Close the HTTP clients only if a request ever built them.
+
+
+async def close_clients() -> None:
+    """Close the Kapso and Zernio HTTP clients, only if a request ever built them."""
     for cached, get in ((get_channel, get_channel), (get_publisher, get_publisher)):
         if cached.cache_info().currsize:
             aclose = getattr(get(), "aclose", None)
@@ -117,20 +120,10 @@ async def read_capped_body(request: Request) -> bytes:
     return bytes(body)
 
 
-async def run_handler(
-    handler: InboundHandler, message: InboundMessage, channel: ChannelPort
-) -> None:
-    # Runs after the 200 went out, so nobody else would see a failure: log it with the ids only.
-    try:
-        await handler.handle(message, channel)
-    except Exception:
-        logger.exception("inbound handling failed: %s id=%s", message.kind, message.message_id)
-
-
 @router.post("/webhooks/whatsapp")
 async def whatsapp_webhook(
     request: Request,
-    background_tasks: BackgroundTasks,
+    background: Annotated[BackgroundWork, Depends(get_background_work)],
     settings: Annotated[Settings, Depends(get_settings)],
     dedupe: Annotated[DedupeStore, Depends(get_dedupe_store)],
     handler: Annotated[InboundHandler, Depends(get_inbound_handler)],
@@ -168,5 +161,10 @@ async def whatsapp_webhook(
     logger.info(
         "queued inbound %s id=%s from=%s", message.kind, message.message_id, mask(message.sender)
     )
-    background_tasks.add_task(run_handler, handler, message, channel)
+    # Not the request's BackgroundTasks: uvicorn waits for those before the shutdown even starts,
+    # while the job poller still claims jobs.
+    background.start(
+        handler.handle(message, channel),
+        f"inbound {message.kind} {message.message_id} from {mask(message.sender)}",
+    )
     return {"status": "ok"}

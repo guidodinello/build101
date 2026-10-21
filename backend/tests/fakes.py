@@ -316,6 +316,7 @@ class SequenceModel:
 
     answers: list[BaseModel]
     contents: list[list[Content]] = field(default_factory=list)
+    gate: asyncio.Event | None = None  # when set, answers wait for it
 
     async def structured[T: BaseModel](
         self,
@@ -326,4 +327,6 @@ class SequenceModel:
         thinking_level: str,
     ) -> T:
         self.contents.append(list(content))
+        if self.gate is not None:
+            await self.gate.wait()
         return self.answers.pop(0)  # type: ignore[return-value]

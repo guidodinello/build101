@@ -1,6 +1,9 @@
+import ipaddress
+import socket
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -9,6 +12,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     env: Literal["local", "prod"] = "local"
+    # Set by Railway on deploys from GitHub (not on `railway up`); /ready reports it
+    railway_git_commit_sha: str | None = None
 
     # ADR 0003. DATABASE_URL is Supabase's session pooler: postgresql+asyncpg://...
     database_url: str | None = None
@@ -25,6 +30,12 @@ class Settings(BaseSettings):
 
     enable_dev_endpoints: bool = False
     dev_token: str | None = None
+
+    # How long a shutdown lets the work in flight finish before cancelling it. Added to uvicorn's
+    # --timeout-graceful-shutdown (Dockerfile), it must end before Railway's SIGKILL, which comes
+    # RAILWAY_DEPLOYMENT_DRAINING_SECONDS after the SIGTERM (backend/README.md § Deploys and work
+    # in flight)
+    shutdown_timeout_s: float = 130.0
 
     image_gen: Literal["gemini", "openai", "mock"] = "mock"
     gemini_api_key: str | None = None
@@ -89,6 +100,98 @@ class Settings(BaseSettings):
     @property
     def whatsapp_url(self) -> str:
         return f"https://wa.me/{self.whatsapp_bot_number or ''}"
+
+    @property
+    def frontend_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.frontend_origins.split(",") if origin.strip()]
+
+
+# Kept working for local runs and rehearsals, never in front of a real Owner: the mock publisher
+# answers that a Post is live when nothing reached Instagram
+DEMO_FALLBACKS = frozenset({"mock", "echo", "simulator"})
+
+
+def adapters_in_use(settings: Settings) -> dict[str, str]:
+    """The adapter behind each port, by setting name: names only, never a key."""
+    return {
+        "IMAGE_GEN": settings.image_gen,
+        "RENDERER": settings.renderer,
+        "PUBLISHER": settings.publisher,
+        "INSTAGRAM": settings.instagram,
+        "VIDEO_GEN": settings.video_gen if settings.video_gen_enabled else "off",
+        "INBOUND_HANDLER": settings.inbound_handler,
+        "WHATSAPP_CHANNEL": settings.whatsapp_channel,
+    }
+
+
+def production_problems(settings: Settings) -> dict[str, str]:
+    """Why each setting can't serve real Owners, by setting name; never its value."""
+    problems = {
+        name: "demo fallback"
+        for name, adapter in adapters_in_use(settings).items()
+        if adapter in DEMO_FALLBACKS
+    }
+    required = {
+        "DATABASE_URL": settings.database_url,
+        "SUPABASE_URL": settings.supabase_url,
+        "SUPABASE_SERVICE_ROLE_KEY": settings.supabase_service_role_key,
+        "GEMINI_API_KEY": settings.gemini_api_key,
+        "KAPSO_API_KEY": settings.kapso_api_key,
+        "KAPSO_WEBHOOK_SECRET": settings.kapso_webhook_secret,
+        "KAPSO_PHONE_NUMBER_ID": settings.kapso_phone_number_id,
+        "RENDERER_SECRET": settings.renderer_secret,
+        "ZERNIO_API_KEY": settings.zernio_api_key,
+        # Every Post goes to the one demo account (ADR 0024)
+        "ZERNIO_ACCOUNT_ID": settings.zernio_account_id,
+        "INSTAGRAM_APP_ID": settings.instagram_app_id,
+        "INSTAGRAM_APP_SECRET": settings.instagram_app_secret,
+        "WHATSAPP_BOT_NUMBER": settings.whatsapp_bot_number,
+    }
+    if settings.video_gen_enabled:
+        required["GEMINI_VIDEO_API_KEY"] = settings.gemini_video_api_key
+    problems |= {name: "not set" for name, value in required.items() if not (value or "").strip()}
+    public_urls = {
+        "PUBLIC_BACKEND_URL": [settings.public_backend_url or ""],
+        "RENDERER_URL": [settings.renderer_url or ""],
+        "FRONTEND_URL": [settings.frontend_url],
+        "FRONTEND_ORIGINS": settings.frontend_origin_list,
+    }
+    for name, urls in public_urls.items():
+        listed = [url.strip() for url in urls if url.strip()]
+        if not listed:
+            problems[name] = "not set"
+        elif not all(_is_public(url) for url in listed):
+            problems[name] = "not a public URL"
+    return problems
+
+
+def _is_public(url: str) -> bool:
+    try:
+        host = (urlsplit(url).hostname or "").rstrip(".")
+    except ValueError:
+        return False
+    if not host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        # Resolvers also read the IPv4 spellings ipaddress refuses: 127.1, 2130706433, 0x7f.0.0.1
+        try:
+            ip = ipaddress.IPv4Address(socket.inet_aton(host))
+        except (OSError, ValueError):
+            return host != "localhost" and not host.endswith(".localhost")
+    return ip.is_global
+
+
+def check_production(settings: Settings) -> None:
+    """With ENV=prod, refuse to start on a demo fallback or a missing setting: Railway variables
+    are typed by hand, and an unset or misspelled name falls back without a word."""
+    if settings.env != "prod":
+        return
+    problems = production_problems(settings)
+    if problems:
+        listed = ", ".join(f"{name} ({problem})" for name, problem in problems.items())
+        raise ValueError(f"ENV=prod refuses to start; fix these settings: {listed}")
 
 
 @lru_cache

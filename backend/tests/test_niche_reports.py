@@ -290,6 +290,7 @@ async def test_the_runner_runs_its_checks_when_it_starts_and_survives_a_failing_
         PeriodicCheck("failing", timedelta(minutes=15), failing),
         PeriodicCheck("queueing", timedelta(minutes=15), queueing),
     )
+    background = BackgroundWork()
     runner = JobRunner(
         sessions,
         {},
@@ -299,11 +300,12 @@ async def test_the_runner_runs_its_checks_when_it_starts_and_survives_a_failing_
         EventLog(),
         poll_interval_s=0.01,
         checks=checks,
-        background=BackgroundWork(),
+        background=background,
     )
     await runner.start()
     await asyncio.sleep(0.1)
-    await runner.stop()
+    runner.stop()
+    await background.drain(1)
 
     # Once at start, not again on each poll within 15 minutes
     assert calls == ["failing", "queueing"]

@@ -13,7 +13,7 @@ Commands run from this folder (`uv run ruff check .`, `uv run pyright`, `uv run 
 
 ## What exists today
 
-- `app/main.py`: `/health` (`uv run uvicorn app.main:app --reload`).
+- `app/main.py`: `/health` (`uv run uvicorn app.main:app --reload`); `app/api/ready.py`: `/ready`, the deploy healthcheck ([api.md § Health](../docs/architecture/api.md#health)).
 - `app/imagegen/`: `ImageGenPort` with the Gemini and mock adapters, selected by `IMAGE_GEN`.
 - `app/media/images.py`: reference photo normalization, the 1080×1350 resize, panorama slicing and logo prep.
 - `app/carousel/`: carousel schemas, scene prompts and `CarouselGenerator` (text-free scenes: cover first, other slides anchored on it, or one wide panorama sliced).
@@ -44,9 +44,9 @@ The backend runs on Railway ([ADR 0017](../docs/decisions/0017-backend-host-rail
 
 ### How it deploys
 
-- **Push to `main`** builds and deploys the service from the connected GitHub repo.
+- **Push to `main`** builds and deploys the service from the connected GitHub repo, only when it changes a file under `backend/` (the watch paths below). Docs-only and frontend-only pushes don't redeploy it.
 - **Manual deploy** from the repo root, with the service linked (`railway link`): `railway up --service backend --detach`. Run it from the repo root and not from `backend/`: the service's root directory is `/backend`, so Railway expects the repo layout in the upload.
-- Each deploy runs the pre-deploy command, then starts the container; Railway switches traffic only after `/health` answers.
+- Each deploy runs the pre-deploy command, then starts the container; Railway switches traffic only after `/ready` answers 200. A deploy that refuses to start (see [Environment variables](#environment-variables)) or never gets ready doesn't take traffic, and the previous deployment keeps serving. Then the old deployment gets a SIGTERM and has the draining time to finish its work in flight before the SIGKILL ([Deploys and work in flight](#deploys-and-work-in-flight)).
 
 ### Service settings
 
@@ -58,19 +58,41 @@ Railway "Config as Code" files (`railway.json`, `railway.toml`) are deprecated a
 | Root directory | `/backend` |
 | Builder / Dockerfile | Dockerfile, `Dockerfile` |
 | Pre-deploy command | `alembic upgrade head` (timeout 300 s) |
-| Healthcheck | `/health`, timeout 60 s |
+| Healthcheck | `/ready` (dashboard: service, Settings, Deploy, Healthcheck Path), timeout 60 s. Railway calls it only during a deploy, not once the deployment is live ([Railway docs](https://docs.railway.com/reference/healthchecks), read 2026-10-20) |
+| Watch paths | `/backend/**`: only a push that changes the backend redeploys it. Patterns match from the repo root even with the root directory set ([Railway: watch paths](https://docs.railway.com/builds/build-configuration#configure-watch-paths), read 2026-10-20) |
+| Draining time | 150 s, the service variable `RAILWAY_DEPLOYMENT_DRAINING_SECONDS=150`: the time between the old deployment's SIGTERM and its SIGKILL. Railway's default is 0 s ([Railway: deployments](https://docs.railway.com/reference/deployments), read 2026-10-20) |
 | Restart policy | on failure, up to 10 retries |
 | Region / replicas | `us-east4-eqdc4a` × 1 |
 | Domain | Railway-generated (`*.up.railway.app`) |
 
+### Deploys and work in flight
+
+On a deploy the old backend gets a SIGTERM once the new one answers `/ready`, and a SIGKILL `RAILWAY_DEPLOYMENT_DRAINING_SECONDS` (150 s) later. It uses that time to finish what it was doing ([#180](https://github.com/guidodinello/build101/issues/180)):
+
+1. uvicorn stops taking connections and gives the requests in flight 10 s to finish (`--timeout-graceful-shutdown 10` in the [`Dockerfile`](Dockerfile)). The webhook answers in well under a second: the Owner's turn runs after the 200, as background work.
+2. The app's shutdown ([`app/main.py`](app/main.py)): the job poller claims no new job, then the background work (Owner turns, the `brand_generating` message of a submitted onboarding form, Post and video generation, publishes, the wait that groups a photo album, running jobs) gets up to `SHUTDOWN_TIMEOUT_S` (130 s) to finish. What is still running at the deadline is cancelled and logged with its ids: `shutdown deadline passed, cancelling N background tasks: post <id> for ***1234; job <id> (generate_brand) for business <id>; ...`. A cancelled brand job or photo analysis goes back to the queue, and the new deployment runs it: `job <id> (generate_brand) interrupted on attempt 1: queued again` ([#178](https://github.com/guidodinello/build101/issues/178), [overview.md § Background jobs](../docs/architecture/overview.md#background-jobs)).
+3. The Kapso and Zernio clients close last, so the text that work ends with in step 2 still reaches the Owner: a reply, the brand summary, a publish's link.
+
+10 s plus 130 s stays under the 150 s drain, so the process exits on its own before the SIGKILL. Raising one of the three means checking the other two.
+
+Post images and videos are the exception. Kapso, WhatsApp and Zernio fetch them by link from `/media/<token>.jpg` (or `.mp4`), which each process serves from its own memory. Once Railway switches traffic, those requests reach the new deployment, which doesn't have them and answers 404, and from the SIGTERM on the old one stops listening anyway. So a Post, Carousel or video sent during the drain doesn't reach the Owner: the send fails and the Owner gets the failure message, or WhatsApp drops the image later. A publish whose media Zernio fetches after the switch fails the same way. The images are still paid for. Fixing it needs the media out of the process (T17: the Storage `renders` bucket).
+
+During the drain two processes talk to the same Owners: the new one answers their new messages while the old one finishes its turns. The per-Owner lock is in memory ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)), so the two don't wait for each other, and an Owner can get two replies that don't know about each other.
+
+Still lost on a deploy: work cancelled at the deadline other than those jobs (an Instagram import fails and needs a reconnect, a job interrupted a second time fails and a brand job's Owner gets Reintentar), Post images and videos sent during the drain, and the Posts and chat photos, which still live in memory ([One instance](#one-instance)). A crash or an out-of-memory kill gets no drain at all: the jobs it leaves `running` are recovered the same way once they started more than 5 minutes ago.
+
+### When to merge backend changes during the pilot
+
+While pilot Owners are active, merge PRs that change `backend/` outside Uruguayan business hours, by default 09:00-20:00 Montevideo time (UTC-3). A deploy still loses the Posts kept in memory, the Post images sent during the drain and any work that outlasts it, and during the drain two processes answer the same Owners. Owners write during business hours. Other PRs don't redeploy the backend (watch paths), so they can merge any time.
+
 ### Environment variables
 
-Set on the service (`railway variable set KEY --stdin --service backend`, value on stdin so it never lands in shell history). Names are in [`.env.example`](.env.example); the values that differ from local:
+Set on the service (`railway variable set KEY --stdin --service backend`, value on stdin so it never lands in shell history). Names are in [`.env.example`](.env.example); the production values:
 
 | Variable | Production value |
 |---|---|
-| `ENV` | `prod` |
-| `PUBLIC_BACKEND_URL` | the Railway domain (`https://<service>.up.railway.app`); the app refuses to start without it while `INBOUND_HANDLER=chat` |
+| `ENV` | `prod`. Without it nothing below is checked at startup (`/ready` still fails on the mock publisher) |
+| `PUBLIC_BACKEND_URL` | the Railway domain (`https://<service>.up.railway.app`) |
 | `DATABASE_URL` | Supabase **session pooler**, port 5432, `postgresql+asyncpg://` (the transaction pooler breaks asyncpg prepared statements, see [ADR 0003](../docs/decisions/0003-database-supabase-sqlalchemy.md)) |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | the project URL and its legacy `service_role` JWT (the code sends it as `apikey` and as a Bearer token) |
 | `FRONTEND_URL`, `FRONTEND_ORIGINS` | the Vercel domain, `https://neitorai.vercel.app` (no `localhost` in production CORS) |
@@ -79,8 +101,20 @@ Set on the service (`railway variable set KEY --stdin --service backend`, value 
 | `ZERNIO_OWNER_PHONE` | the WhatsApp number of the Owner whose Instagram `ZERNIO_ACCOUNT_ID` is; unset, nobody publishes ([ADR 0024](../docs/decisions/0024-mvp-single-demo-instagram-account.md#interim-publish-guard-2026-10-20)) |
 | `ENABLE_DEV_ENDPOINTS`, `DEV_TOKEN` | unset (dev endpoints off) |
 | `RENDERER`, `RENDERER_URL`, `RENDERER_SECRET` | `takumi`, the Vercel domain, and the same secret as the frontend's `RENDER_SECRET` |
+| `IMAGE_GEN` | `gemini` |
+| `PUBLISHER` | `zernio` (`mock` tells the Owner a Post is live when nothing reached Instagram) |
+| `ZERNIO_API_KEY`, `ZERNIO_ACCOUNT_ID` | the Zernio API key and the demo account every Post goes to ([ADR 0024](../docs/decisions/0024-mvp-single-demo-instagram-account.md)) |
+| `INSTAGRAM`, `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | `meta` and our Meta app's id and secret ([ADR 0028](../docs/decisions/0028-read-instagram-with-our-meta-app.md)) |
+| `INBOUND_HANDLER` | `chat` |
+| `VIDEO_GEN_ENABLED`, `VIDEO_GEN` | `false` while AI Reels are off ([ADR 0033](../docs/decisions/0033-ai-generated-reels-veo.md)); once on, `true` and `gemini`, with `GEMINI_VIDEO_API_KEY` |
+| `WHATSAPP_CHANNEL` | `kapso` |
+| `KAPSO_API_KEY`, `KAPSO_WEBHOOK_SECRET`, `KAPSO_PHONE_NUMBER_ID` | the Kapso project key, the signing secret of the Railway webhook (see [below](#switching-whatsapp-between-railway-and-local-development)) and the number we send from |
+| `GEMINI_API_KEY` | a key of the Google project with billing linked |
+| `SHUTDOWN_TIMEOUT_S` | unset: the default 130 s ([Deploys and work in flight](#deploys-and-work-in-flight)). `.env.example` sets 5 for local runs |
 
-Everything else (`GEMINI_*`, `KAPSO_*`, `ZERNIO_*`, `PUBLISHER`, `IMAGE_GEN`, ...) carries the same value as local. Without `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and `GEMINI_API_KEY` the app still boots but the job runner is off (the startup log says so).
+Settings not listed (model names, limits, base URLs) can keep their defaults.
+
+With `ENV=prod` the app refuses to start when an adapter is a demo fallback (`mock`, `INBOUND_HANDLER=echo`, `WHATSAPP_CHANNEL=simulator`) or when a key, id, number or URL of this table is unset (`GEMINI_VIDEO_API_KEY` only while `VIDEO_GEN_ENABLED=true`); `FRONTEND_URL`, `FRONTEND_ORIGINS`, `PUBLIC_BACKEND_URL` and `RENDERER_URL` must also be public URLs: not `localhost` (or a `*.localhost` name), nor a loopback or private IP address. One error names every such setting and never prints a value (`check_production` in `app/config.py`). Every start logs the adapters in use, by name only: `adapters in use: IMAGE_GEN=gemini RENDERER=takumi PUBLISHER=zernio ...`. With `ENV=local` this check is skipped and the mocks stay the defaults. `INBOUND_HANDLER=chat` still needs `GEMINI_API_KEY` and `PUBLIC_BACKEND_URL` to boot, in any environment; without `DATABASE_URL`, `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` the app boots with the job runner off (the startup log says so).
 
 ### Migrations
 
@@ -89,7 +123,8 @@ Everything else (`GEMINI_*`, `KAPSO_*`, `ZERNIO_*`, `PUBLISHER`, `IMAGE_GEN`, ..
 ### Logs and checks
 
 - `railway logs --service backend` (deploy logs) and `railway logs --service backend --build` (build logs).
-- `curl -sS https://<service>.up.railway.app/health` returns `{"status":"ok"}`.
+- `curl -sS https://<service>.up.railway.app/health` returns `{"status":"ok"}` while the process is up.
+- `curl -sS https://<service>.up.railway.app/ready` returns `{"status":"ok","checks":{"database":"ok","job_runner":"ok","publisher":"ok"},"commit":"<sha>"}`, or a 503 with the failed checks. `commit` is the deployed commit (Railway's `RAILWAY_GIT_COMMIT_SHA`, so `null` after a `railway up`): compare it with `main`.
 - Pre-deploy output shows up in the deploy logs of the new deployment; `Running upgrade ...` lines appear only when a migration was pending.
 - uvicorn and the app log to stderr, so Railway tags every line `level=error`, including the normal `INFO` ones. It is known noise: read the message text, not the Railway level.
 
@@ -99,7 +134,7 @@ Redeploy the previous deployment from the Railway dashboard (service, Deployment
 
 ### One instance
 
-State kept in memory is lost on every deploy or restart: running jobs (the job runner marks jobs stuck for more than 5 minutes as failed), the webhook dedupe store, served post images (`/media/*.jpg`) and the in-memory photo and post stores. The orchestrator's history, its conversation summary and the Owner's notes are in Postgres ([ADR 0028](../docs/decisions/0030-orchestrator-memory-and-context.md)), and so are the chat photos once kept as Brand assets. Keep one replica ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)).
+State kept in memory is lost on every deploy or restart: the progress of jobs still running at the shutdown deadline, or when the process dies (the brand job and photo analyses start over once, [#178](https://github.com/guidodinello/build101/issues/178)), the webhook dedupe store when there is no `DATABASE_URL` (with one it is the `inbound_deliveries` table), served post images (`/media/*.jpg`) and the in-memory photo and post stores. The orchestrator's history, its conversation summary and the Owner's notes are in Postgres ([ADR 0028](../docs/decisions/0030-orchestrator-memory-and-context.md)), and so are the chat photos once kept as Brand assets. Keep one replica ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)).
 
 ### Switching WhatsApp between Railway and local development
 

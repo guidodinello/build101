@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app import ratelimit
 from app.api import onboarding
+from app.background import BackgroundWork, get_background_work
 from app.channels.router import get_channel, get_owner_notify
 from app.config import Settings, get_settings
 from app.conversation.history import InMemoryHistory
@@ -62,8 +63,16 @@ def channel() -> FakeChannel:
 
 
 @pytest.fixture
+def background() -> BackgroundWork:
+    return BackgroundWork()
+
+
+@pytest.fixture
 async def client(
-    sessions: async_sessionmaker[AsyncSession], storage: FakeStorage, channel: FakeChannel
+    sessions: async_sessionmaker[AsyncSession],
+    storage: FakeStorage,
+    channel: FakeChannel,
+    background: BackgroundWork,
 ) -> AsyncIterator[httpx.AsyncClient]:
     async def session() -> AsyncIterator[AsyncSession]:
         async with sessions() as db:
@@ -80,9 +89,11 @@ async def client(
     app.dependency_overrides[get_storage] = lambda: storage
     app.dependency_overrides[get_channel] = lambda: channel
     app.dependency_overrides[get_owner_notify] = lambda: FixedReplies(InMemoryHistory())
+    app.dependency_overrides[get_background_work] = lambda: background
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
         yield http
+    await background.join()
     app.dependency_overrides.clear()
 
 
@@ -675,6 +686,7 @@ async def test_complete_starts_the_brand_and_tells_the_owner_once(
     client: httpx.AsyncClient,
     storage: FakeStorage,
     channel: FakeChannel,
+    background: BackgroundWork,
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     token = await new_link(client)
@@ -689,6 +701,7 @@ async def test_complete_starts_the_brand_and_tells_the_owner_once(
     again = await client.post(f"/api/o/{token}/complete")
     late_edit = await client.put(f"/api/o/{token}/business", json=BUSINESS)
     state = (await client.get(f"/api/o/{token}")).json()
+    await background.join()
 
     assert (first.status_code, first.json()) == (202, {"status": "generating_brand"})
     assert again.status_code == 202
@@ -908,6 +921,7 @@ async def test_a_second_link_cannot_start_the_brand_again(
     client: httpx.AsyncClient,
     storage: FakeStorage,
     channel: FakeChannel,
+    background: BackgroundWork,
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     first = await new_link(client)
@@ -922,6 +936,7 @@ async def test_a_second_link_cannot_start_the_brand_again(
 
     again = await client.post(f"/api/o/{second}/complete")
     late_edit = await client.put(f"/api/o/{second}/business", json=BUSINESS)
+    await background.join()
 
     assert again.status_code == 202
     assert late_edit.status_code == 409

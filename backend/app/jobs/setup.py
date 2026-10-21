@@ -11,10 +11,10 @@ from app.llm.client import GeminiChat
 from app.storage import get_storage
 
 from .asset import analyze_asset
-from .brand import generate_brand
+from .brand import generate_brand, queue_stranded_brands, resume_revision
 from .instagram import import_instagram_job
 from .niche import CHECK_EVERY, enqueue_due_niche_reports, niche_report_job
-from .runner import JobFunction, JobRunner, PeriodicCheck
+from .runner import JobFunction, JobRunner, PeriodicCheck, Undo
 from .uploads import SWEEP_EVERY, upload_sweep
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,11 @@ JOBS: dict[str, JobFunction] = {
 }
 # A photo whose analysis fails is still usable, so only the brand bothers the Owner.
 NOTIFY_ON_FAILURE = frozenset({"generate_brand"})
+# Safe to run again from the start. The Instagram import isn't: it claims the Owner's token when
+# it starts, so an interrupted one needs a reconnect. A failed niche report is queued again by
+# its own check.
+REQUEUE_IF_INTERRUPTED = frozenset({"analyze_asset", "generate_brand"})
+UNDO: dict[str, Undo] = {"generate_brand": resume_revision}
 
 
 def build_job_runner(
@@ -67,7 +72,10 @@ def build_job_runner(
         model,
         owner_notify(),
         NOTIFY_ON_FAILURE,
+        REQUEUE_IF_INTERRUPTED,
+        UNDO,
         checks=(
+            PeriodicCheck("stranded brands", None, queue_stranded_brands),
             PeriodicCheck("niche reports", CHECK_EVERY, enqueue_due_niche_reports),
             PeriodicCheck(
                 "upload sweep", SWEEP_EVERY, upload_sweep(storage, get_background_work())

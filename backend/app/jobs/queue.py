@@ -19,7 +19,8 @@ def enqueue(
 
 
 def requeue(session: AsyncSession, failed: Job) -> Job:
-    """A new queued job with the same kind and payload as a failed one (`retry:{job_id}`)."""
+    """A new queued job with the same kind and payload as a failed one, recorded on it as
+    `retried_by` so it is retried only once (`retry:{job_id}`, `queue_stranded_brands`)."""
     job = Job(
         id=uuid.uuid4(),
         business_id=failed.business_id,
@@ -27,6 +28,7 @@ def requeue(session: AsyncSession, failed: Job) -> Job:
         payload=dict(failed.payload),
     )
     session.add(job)
+    failed.result = {**(failed.result or {}), "retried_by": str(job.id)}
     return job
 
 
@@ -48,7 +50,5 @@ async def retry_failed(
         if failed is None or (failed.result or {}).get("retried_by"):
             return None
         job = requeue(db, failed)
-        # So a second tap on the same button finds nothing to retry.
-        failed.result = {**(failed.result or {}), "retried_by": str(job.id)}
         await db.commit()
     return job
