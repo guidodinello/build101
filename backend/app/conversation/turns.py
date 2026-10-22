@@ -184,6 +184,7 @@ class Turns:
             # in after the send: a message that never reached the Owner leaves no note.
             text = fallback(event)
             if text is not None:
+                self._lifecycle.note_reply(sender, text, offered_post(event))
                 await send(channel, sender, text, event)
             await self._history_extend(sender, past, [step])
             return
