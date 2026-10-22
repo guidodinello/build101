@@ -215,6 +215,7 @@ A prompt can be composed from several files: a line that is only `{{include <pat
 **Purpose:** write the caption. Image Posts carry no text ([ADR 0018](../decisions/0018-ai-image-generation-service.md)), so there is no on-image copy; on a carousel the Copywriter also writes the text of each slide, the only text allowed on it ([ADR 0022](../decisions/0022-carousels-in-mvp.md)).
 
 - Input: Brand Brain, brief (plan item or ad-hoc request text), `owner_words` (the Owner's own messages about this post, verbatim: the request, the answer to the bot's question), `format` (`image` | `reel` | `carousel`), `slide_count` (carousel: the Owner's number, or none), the Products and Offer the brief references (from `<catalog>` / `<offers>`), the analyses of the photos the Owner sent with the request (if any), platform (`instagram`), optional `previous` copy + `feedback` (revise mode). For a Reel, also the video's `VideoAnalysis.description` so the caption matches what is on screen.
+- Enforced in code: the `PostDrafter` cleans the hashtags it gets back (`#` prefix, no spaces or punctuation, no duplicates, at most 10), whatever the model returned.
 - Output:
 
   ```python

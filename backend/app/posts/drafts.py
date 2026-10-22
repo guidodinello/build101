@@ -1,8 +1,11 @@
 import logging
+import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Annotated
 
-from pydantic import BaseModel
+from pydantic import BaseModel, BeforeValidator
 
 from app.agents.schemas import BrandBrain
 from app.carousel.schemas import (
@@ -26,9 +29,27 @@ BRAND_FIELDS_NOT_FOR_POSTS = {"whatsapp_summary", "posting"}
 SLOT_LIMITS = {"kicker": 40, "headline": 120, "body": 320}
 
 
+MAX_HASHTAGS = 10
+HASHTAG_JUNK = re.compile(r"\W")
+
+
+def clean_hashtags(raw: Iterable[str]) -> list[str]:
+    """`#` prefix, no spaces or punctuation, no duplicates, at most MAX_HASHTAGS (the prompt asks
+    for 5 to 10; Instagram refuses a caption with more than 30)."""
+    seen: dict[str, str] = {}
+    for tag in raw:
+        word = HASHTAG_JUNK.sub("", tag)
+        if word and not word.isdigit():
+            seen.setdefault(word.lower(), f"#{word}")
+    return list(seen.values())[:MAX_HASHTAGS]
+
+
+Hashtags = Annotated[list[str], BeforeValidator(clean_hashtags)]
+
+
 class PostCopy(BaseModel):
     caption: str
-    hashtags: list[str]
+    hashtags: Hashtags
 
 
 class SlideDraft(BaseModel):
@@ -41,7 +62,7 @@ class SlideDraft(BaseModel):
 
 class CarouselDraft(BaseModel):
     caption: str
-    hashtags: list[str]
+    hashtags: Hashtags
     family: TemplateFamily
     style_prompt: str
     style_notes: str
