@@ -51,7 +51,7 @@ YES_FILLER = frozenset(
 )
 YES_EMOJI = frozenset({"👍", "👌", "✅", "🙌", "💪"})
 # The question a reply ends on when it offers to publish: "¿Lo subo?", "¿Lo publico ya?"
-# (`asks_to_publish` checks it is the reply's last sentence).
+# (`publish_offer` checks it is the reply's last sentence).
 PUBLISH_QUESTION = re.compile(
     r"\b(lo|la|los|las) (subo|publico|subimos|publicamos)\b"
     r"|\b(subirlo|subirla|subirlos|subirlas|publicarlo|publicarla|publicarlos|publicarlas)\b"
@@ -84,8 +84,15 @@ def classify(text: str) -> Intent:
         return "none"
     if "?" in text or QUESTION_WORDS.intersection(words):
         return "none"
-    wants_later = TIME_WORDS.intersection(words) or CLOCK.search(plain(text))
-    return "approve_later" if wants_later and not NOW_WORDS.intersection(words) else "approve"
+    return "approve_later" if wants_later(text) else "approve"
+
+
+def wants_later(text: str) -> bool:
+    """A time for later ("mañana", "a las 8", "después") and no "ahora" or "ya"."""
+    words = normalize(text)
+    if NOW_WORDS.intersection(words):
+        return False
+    return bool(TIME_WORDS.intersection(words) or CLOCK.search(plain(text)))
 
 
 def is_yes(text: str) -> bool:
@@ -100,18 +107,21 @@ def is_yes(text: str) -> bool:
     )
 
 
-def asks_to_publish(text: str) -> bool:
-    """Whether the assistant's message ends by asking the Owner if it should publish a post.
+def publish_offer(text: str) -> Intent:
+    """What a bare "sí" to the assistant's message would mean: publish now, later, or nothing.
 
     Only the last sentence counts: a publish question in the middle of a reply (or followed by
-    another question) must not turn the Owner's next "bien" into an approval.
+    another question) must not turn the Owner's next "bien" into an approval. A question about
+    later ("¿Te parece si lo subo mañana?") offers what "subilo mañana" asks for, not a publish.
     """
     body = plain(KEYCAP.sub("", text))
     ending = TRAILING_NOISE.search(body)
     if ending is None or "?" not in ending.group():  # "¿Lo subo? 🙌" still ends on its question
-        return False
+        return "none"
     last_sentence = SENTENCE_END.split(body[: ending.start()])[-1]
-    return PUBLISH_QUESTION.search(last_sentence) is not None
+    if PUBLISH_QUESTION.search(last_sentence) is None:
+        return "none"
+    return "approve_later" if wants_later(last_sentence) else "approve"
 
 
 def ordinal(text: str, count: int) -> int | None:
@@ -136,12 +146,20 @@ class Approval:
     pending: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass(frozen=True, slots=True)
+class Offer:
+    """The post the assistant's last message asked to publish, and whether it asked about later."""
+
+    post_id: str
+    later: bool = False
+
+
 def decide(
     text: str,
     pending: list[Post],
     listed: list[str] | None,
     has_photos: bool,
-    offered: str | None = None,
+    offered: Offer | None = None,
 ) -> tuple[Approval, list[str] | None]:
     """The Approval for one turn and the post ids the next turn may name by number.
 
@@ -153,14 +171,17 @@ def decide(
     así" is a post request, not an approval of an older post.
 
     `offered`: the post the assistant's last message asked to publish ("¿Lo subo?"), so a bare
-    "sí" or "dale" is an explicit answer to that question.
+    "sí" or "dale" is an explicit answer to that question. A yes to publishing it later gets the
+    answer "subilo mañana" gets.
     """
     if has_photos:
         return Approval(), None
     if listed and (number := ordinal(text, len(listed))):
         return approve_if_pending(listed[number - 1], pending), None
     if offered and is_yes(text):
-        return approve_if_pending(offered, pending), None
+        if offered.later:
+            return Approval(reason="scheduling_not_available"), None
+        return approve_if_pending(offered.post_id, pending), None
     match classify(text):
         case "approve" if len(pending) == 1:
             return Approval(post_id=pending[0].id), None
