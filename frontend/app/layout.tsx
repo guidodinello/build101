@@ -26,7 +26,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="es"
-      className={`${figtree.variable} ${bricolage.variable} h-full antialiased`}
+      data-scroll-behavior="smooth"
+      className={`${figtree.variable} ${bricolage.variable} h-full antialiased motion-safe:scroll-smooth`}
     >
       <body className="flex min-h-full flex-col">
         {children}
