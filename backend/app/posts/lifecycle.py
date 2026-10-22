@@ -16,7 +16,7 @@ chat asks "what may this message publish?" instead of computing it.
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.conversation.approval import Approval, asks_to_publish, decide
+from app.conversation.approval import Approval, Offer, decide, publish_offer
 from app.conversation.photos import Photo
 
 from .store import APPROVABLE, InMemoryPosts, Post
@@ -52,7 +52,7 @@ class PostLifecycle:
         # shown, which the next turn may name by number.
         self._listed: dict[str, list[str]] = {}
         # The post the assistant's last message asked to publish, which a bare "sí" approves.
-        self._offered: dict[str, str] = {}
+        self._offered: dict[str, Offer] = {}
 
     # Reading
 
@@ -207,8 +207,9 @@ class PostLifecycle:
         """
         pending = [post.id for post in self.pending(sender)]
         target = post_id or (pending[0] if len(pending) == 1 else None)
-        if target in pending and asks_to_publish(text):
-            self._offered[sender] = target
+        offer = publish_offer(text)
+        if target in pending and offer != "none":
+            self._offered[sender] = Offer(target, later=offer == "approve_later")
         else:
             self._offered.pop(sender, None)
 
