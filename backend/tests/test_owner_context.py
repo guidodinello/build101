@@ -88,6 +88,21 @@ def test_a_chat_photo_kept_as_a_brand_photo_is_listed_once() -> None:
     assert "b4" not in block
 
 
+def test_a_low_quality_photo_is_tagged_for_the_orchestrator() -> None:
+    photos = InMemoryPhotos()
+    blurry = photos.add(PHONE, make_image((100, 100)), None)
+    blurry.low_quality = True
+    sharp = photos.add(PHONE, make_image((100, 100)), None)
+    old = InMemoryPhotos().add(PHONE, b"", "Silla: foto movida")
+    old.id, old.low_quality = "b2", True
+
+    block = context_block([blurry, sharp], [], [old])
+
+    assert "- f1 sent" in block and "[low quality]" in block.splitlines()[1]
+    assert "[low quality]" not in block.splitlines()[2]
+    assert "- b2: Silla: foto movida [low quality]" in block
+
+
 @requires_db
 async def test_db_notes_are_kept_per_business_and_archived_when_forgotten(
     sessions: async_sessionmaker[AsyncSession],
@@ -183,3 +198,13 @@ async def test_without_a_database_a_chat_photo_is_only_described() -> None:
     await PhotoKeeper(model).keep(PHONE, photo)
 
     assert (photo.description, photo.asset_id) == ("Mesa de roble en el living", None)
+
+
+async def test_a_chat_photo_the_analyst_rates_low_is_flagged() -> None:
+    low = analysis([]).model_copy(update={"quality": "low"})
+    model = ScriptedModel(drafts={AssetAnalysis: low})
+    photo = InMemoryPhotos().add(PHONE, make_image((300, 400)), None)
+
+    await PhotoKeeper(model).keep(PHONE, photo)
+
+    assert photo.low_quality

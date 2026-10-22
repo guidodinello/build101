@@ -65,6 +65,7 @@ class BrandLibrary:
                 asset.created_at,
                 seen=True,
                 asset_id=asset.id,
+                low_quality=(asset.analysis or {}).get("quality") == "low",
             )
             for photo_id, asset in numbered
             if asset.id in self._images

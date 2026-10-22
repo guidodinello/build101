@@ -43,6 +43,7 @@ class PhotoKeeper:
             business_id=business_id,
         )
         photo.description = analysis.description
+        photo.low_quality = analysis.quality == "low"
         if business_id is not None and self._sessions and self._storage:
             photo.asset_id = await store_photo(
                 self._sessions, self._storage, business_id, photo, analysis

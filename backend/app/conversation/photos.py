@@ -24,6 +24,7 @@ class Photo:
     used: bool = False
     seen: bool = False  # sent to the orchestrator as an image at least once
     description: str | None = None  # the Asset Analyst's, once it has looked at the photo
+    low_quality: bool = False  # the Asset Analyst rated it blurry, dark or too small
     asset_id: uuid.UUID | None = None  # the Brand asset it is stored as, when it is one
 
 

@@ -406,7 +406,10 @@ def context_block(
     listed = {photo.asset_id for photo in recent if photo.asset_id}
     kept = [photo for photo in library or [] if photo.asset_id not in listed]
     if kept:
-        described = "\n".join(f"- {photo.id}: {photo.caption}" for photo in kept)
+        described = "\n".join(
+            f"- {photo.id}: {photo.caption}{LOW_QUALITY_TAG if photo.low_quality else ''}"
+            for photo in kept
+        )
         block += f"\n<brand_photos>\n{described}\n</brand_photos>"
     if has_logo:
         block += "\n<brand_logo>uploaded</brand_logo>"
@@ -417,10 +420,15 @@ def local_time(now: datetime) -> str:
     return f"{WEEKDAYS[now.weekday()]} {now:%d/%m/%Y %H:%M}"
 
 
+LOW_QUALITY_TAG = " [low quality]"
+
+
 def describe_photo(photo: Photo) -> str:
     line = f"- {photo.id} sent {photo.received_at:%H:%M}"
     if photo.caption:
         line += f', caption "{photo.caption}"'
     if photo.description:
         line += f": {photo.description}"
+    if photo.low_quality:
+        line += LOW_QUALITY_TAG
     return line
