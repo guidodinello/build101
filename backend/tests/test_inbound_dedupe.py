@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import timedelta
 from typing import cast
 
@@ -62,6 +63,11 @@ async def test_only_expired_ids_are_pruned(sessions: async_sessionmaker[AsyncSes
 class FailingDelete:
     """A session whose DELETE fails, e.g. on a lock timeout."""
 
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error or OperationalError(
+            "delete from inbound_deliveries", {}, Exception("lock timeout")
+        )
+
     async def __aenter__(self) -> "FailingDelete":
         return self
 
@@ -69,20 +75,26 @@ class FailingDelete:
         return None
 
     async def execute(self, *args: object, **kwargs: object) -> None:
-        raise OperationalError("delete from inbound_deliveries", {}, Exception("lock timeout"))
+        raise self.error
 
 
 class UseCounter:
     """Hands out real sessions, except that the `fail_on`-th use is a failing prune."""
 
-    def __init__(self, sessions: async_sessionmaker[AsyncSession], fail_on: int) -> None:
+    def __init__(
+        self,
+        sessions: async_sessionmaker[AsyncSession],
+        fail_on: int,
+        error: Exception | None = None,
+    ) -> None:
         self.sessions = sessions
         self.fail_on = fail_on
+        self.error = error
         self.uses = 0
 
     def __call__(self) -> object:
         self.uses += 1
-        return FailingDelete() if self.uses == self.fail_on else self.sessions()
+        return FailingDelete(self.error) if self.uses == self.fail_on else self.sessions()
 
     def as_sessionmaker(self) -> async_sessionmaker[AsyncSession]:
         return cast(async_sessionmaker[AsyncSession], self)
@@ -101,6 +113,30 @@ async def test_a_failed_prune_never_fails_first_seen(
 
     assert counter.uses == 2
     assert await DbDedupeStore(sessions, BackgroundWork()).first_seen("wamid.A") is False
+
+
+@pytest.mark.parametrize(
+    "error", [OSError("connection reset"), RuntimeError("driver bug")], ids=["oserror", "other"]
+)
+async def test_a_prune_failing_with_any_error_is_logged_and_the_store_still_works(
+    sessions: async_sessionmaker[AsyncSession],
+    caplog: pytest.LogCaptureFixture,
+    error: Exception,
+) -> None:
+    now = [0.0]
+    counter = UseCounter(sessions, fail_on=2, error=error)  # asyncpg can raise a bare OSError
+    store = DbDedupeStore(counter.as_sessionmaker(), BackgroundWork(), clock=lambda: now[0])
+
+    with caplog.at_level(logging.WARNING, logger="app.channels.inbound"):
+        assert await store.first_seen("wamid.A") is True
+        await pruned(store)
+
+    assert "pruning inbound_deliveries failed" in caplog.text
+    now[0] = 60  # the retry delay, not a whole interval
+    assert await store.first_seen("wamid.B") is True
+    await pruned(store)
+    assert counter.uses == 4  # insert, failed prune, insert, prune that ran
+    assert await store.first_seen("wamid.A") is False
 
 
 async def test_a_failed_prune_is_retried_soon_and_a_good_one_waits_the_interval(
