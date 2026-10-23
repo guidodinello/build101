@@ -36,7 +36,7 @@ from app.onboarding.uploads import (
     read_upload,
 )
 from app.pilot import PilotList, get_pilot_list
-from app.ratelimit import limit_onboarding_token
+from app.ratelimit import KeyedLocks, limit_onboarding_token
 from app.storage import (
     ASSETS_BUCKET,
     SIGNED_UPLOAD_URL_TTL,
@@ -93,6 +93,11 @@ NOT_IN_PILOT = (
     "Por ahora estamos en un piloto cerrado con pocos negocios. Cuando abramos más lugares lo vas "
     "a ver en nuestra web."
 )
+
+
+# One /complete at a time per asset, in process (one instance, ADR 0005): a second /complete of a
+# photo being read waits here, holding no connection, and then finds it ready.
+_completing = KeyedLocks()
 
 
 def file_too_big(max_mb: int) -> str:
@@ -175,17 +180,22 @@ async def get_open_onboarding(
     pilot: PilotDep,
 ) -> Onboarding:
     """The link is reusable until the form is submitted (user-flows.md, Flow 1), for a number on
-    the pilot list.
-
-    The Business row is locked before the check, like `/complete` does before stamping a link: a
-    write that passed the check waits there and can't commit after the form was submitted (the
-    brand job would not see it). The lock lasts until the request's transaction ends.
-    """
+    the pilot list. The Business stays locked until the request's transaction ends."""
     await check_pilot(pilot, onboarding.business)
-    await session.refresh(onboarding.business, with_for_update=True)
-    if await is_submitted(session, onboarding.business.id):
-        raise ApiError(409, "onboarding_completed", ALREADY_COMPLETED)
+    await lock_open(session, onboarding.business)
     return onboarding
+
+
+async def lock_open(session: AsyncSession, business: Business) -> None:
+    """Lock the Business row, then refuse a submitted form.
+
+    Locked before the check, like `/complete` does before stamping a link: a write that passed the
+    check waits there and can't commit after the form was submitted (the brand job would not see
+    it).
+    """
+    await session.refresh(business, with_for_update=True)
+    if await is_submitted(session, business.id):
+        raise ApiError(409, "onboarding_completed", ALREADY_COMPLETED)
 
 
 OnboardingDep = Annotated[Onboarding, Depends(get_onboarding)]
@@ -340,23 +350,30 @@ async def save_preferences(
 @router.post("/uploads")
 async def request_upload(
     body: schemas.UploadRequest,
-    onboarding: OpenOnboardingDep,
+    onboarding: OnboardingDep,
     session: SessionDep,
     storage: StorageDep,
     settings: SettingsDep,
+    pilot: PilotDep,
 ) -> schemas.UploadTicket:
     if body.kind not in WIZARD_KINDS or body.content_type not in EXTENSIONS:
         raise ApiError(422, "unsupported_file", UNSUPPORTED_FILE)
     if body.size_bytes > settings.max_photo_mb * BYTES_PER_MB:
         raise ApiError(422, "unsupported_file", file_too_big(settings.max_photo_mb))
     business = onboarding.business
-    # The wizard uploads several files at once; the Business lock taken by OpenOnboardingDep
-    # makes the caps hold for all.
-    await _check_upload_caps(session, business.id, body.kind)
-
+    await check_pilot(pilot, business)
+    if await is_submitted(session, business.id):
+        raise ApiError(409, "onboarding_completed", ALREADY_COMPLETED)
+    # Signed with no transaction open (#161): the wizard uploads several files at once, and
+    # holding the Business lock across the Supabase call would queue them all behind it.
+    await session.commit()
     asset_id = uuid.uuid4()
     path = asset_path(business.id, asset_id, body.content_type)
     signed = await storage.create_signed_upload_url(ASSETS_BUCKET, path)
+
+    # The caps are checked and the row added under the Business lock, so they hold for all.
+    await lock_open(session, business)
+    await _check_upload_caps(session, business.id, body.kind)
     session.add(
         BrandAsset(
             id=asset_id,
@@ -391,14 +408,16 @@ async def complete_upload(
     # callback). So a photo can still end `ready` after the form was submitted; that is harmless,
     # since `generate_brand` only reads the assets present when it runs.
     await session.commit()
-    # The asset row stays locked across the download and decode, so a second /complete of the
-    # same asset waits and then finds it ready instead of reading it again.
-    asset = await _active_asset(session, business.id, asset_id)
-    if asset.status == "failed":
-        # Already read and refused once: don't download and decode it again.
-        raise ApiError(422, "upload_failed", UPLOAD_FAILED)
-    if asset.status != "ready":
-        await _finish_upload(asset, business, session, storage, settings)
+    async with _completing.hold(str(asset_id)):
+        asset = await _active_asset(session, business.id, asset_id)
+        # No transaction and no row lock across the Storage calls and the decode (#161): they
+        # would hold a pooled connection the webhooks need.
+        await session.commit()
+        if asset.status == "failed":
+            # Already read and refused once: don't download and decode it again.
+            raise ApiError(422, "upload_failed", UPLOAD_FAILED)
+        if asset.status != "ready":
+            await _finish_upload(asset, business, session, storage, settings)
     urls = await storage.create_signed_urls(ASSETS_BUCKET, [asset.storage_path], SIGNED_URL_TTL_S)
     return _to_asset(asset, urls.get(asset.storage_path, ""), [])
 
@@ -474,13 +493,26 @@ async def _finish_upload(
         await _fail(asset, session, storage)
         raise ApiError(422, "unsupported_file", UNREADABLE_FILE) from None
 
+    jpeg_path = None
     if processed.jpeg is not None:
         jpeg_path = asset_path(business.id, asset.id, "image/jpeg")
         await storage.upload(ASSETS_BUCKET, jpeg_path, processed.jpeg, "image/jpeg")
-        asset.storage_path, asset.mime_type = jpeg_path, "image/jpeg"
     await storage.upload(
         ASSETS_BUCKET, llm_copy_path(business.id, asset.id), processed.llm_copy, "image/jpeg"
     )
+
+    # A short transaction for the result. The row was not held during the read, so the Owner may
+    # have removed the photo meanwhile: then what was just uploaded goes too.
+    await session.refresh(asset, with_for_update=True)
+    if asset.archived_at is not None:
+        await session.commit()
+        await _delete_objects(storage, asset)
+        raise ApiError(404, "asset_not_found", ASSET_NOT_FOUND)
+    if asset.status != "uploading":
+        await session.commit()
+        return
+    if jpeg_path is not None:
+        asset.storage_path, asset.mime_type = jpeg_path, "image/jpeg"
     asset.status = "ready"
     asset.size_bytes = len(data)
     asset.width, asset.height = processed.width, processed.height
@@ -501,13 +533,11 @@ async def _fail(asset: BrandAsset, session: AsyncSession, storage: StoragePort) 
 async def _active_asset(
     session: AsyncSession, business_id: uuid.UUID, asset_id: uuid.UUID
 ) -> BrandAsset:
-    """The asset, locked: a second /complete of it waits and then finds it ready.
+    """The asset, if this Business may complete it.
 
     Only assets uploaded from the web form are ever "uploading", so any other source (Instagram
     import, WhatsApp photo) is 404 like an unknown asset."""
-    asset = await session.scalar(
-        select(BrandAsset).where(BrandAsset.id == asset_id).with_for_update()
-    )
+    asset = await session.get(BrandAsset, asset_id)
     if (
         asset is None
         or asset.business_id != business_id
