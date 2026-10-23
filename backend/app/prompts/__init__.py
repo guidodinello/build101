@@ -9,9 +9,12 @@ INCLUDE = re.compile(r"^\{\{include (?P<path>[^}]+)\}\}$")
 def tagged(tag: str, value: object) -> str:
     """`value` as JSON inside `<tag>…</tag>`, with `<` and `>` escaped so text the Owner wrote
     can't close the block or open another one."""
-    encoded = json.dumps(value, ensure_ascii=False, indent=1)
-    encoded = encoded.replace("<", "\\u003c").replace(">", "\\u003e")
-    return f"<{tag}>\n{encoded}\n</{tag}>"
+    return f"<{tag}>\n{escape(json.dumps(value, ensure_ascii=False, indent=1))}\n</{tag}>"
+
+
+def escape(text: str) -> str:
+    """`text` with `<` and `>` escaped, for a plain-text block it must not close or open."""
+    return text.replace("<", "\\u003c").replace(">", "\\u003e")
 
 
 def load_prompt(path: Path) -> str:
