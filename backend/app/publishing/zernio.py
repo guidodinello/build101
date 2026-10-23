@@ -23,6 +23,7 @@ POLL_INTERVAL_S = 2.0
 POLL_TIMEOUT_S = 90.0
 POLL_REQUEST_TIMEOUT_S = 10.0
 MAX_CAROUSEL_ITEMS = 10
+MAX_ALT_TEXT_CHARS = 1000  # `MediaItem.altText` (Zernio OpenAPI) and Instagram's `alt_text`
 MIN_CAROUSEL_ITEMS = 2
 INSTAGRAM = "instagram"
 STATUS_PUBLISHED = "published"
@@ -280,14 +281,14 @@ def _media_items(media: PublishMedia) -> list[dict[str, str]]:
         case "image":
             if not media.url:
                 raise ValueError("an image post needs media.url")
-            return [{"type": "image", "url": media.url}]
+            return [_image_item(media.url, media.alt_texts, 0)]
         case "carousel":
             if not MIN_CAROUSEL_ITEMS <= len(media.urls) <= MAX_CAROUSEL_ITEMS:
                 raise ValueError(
                     f"a carousel takes {MIN_CAROUSEL_ITEMS} to {MAX_CAROUSEL_ITEMS} images, "
                     f"got {len(media.urls)}"
                 )
-            return [{"type": "image", "url": url} for url in media.urls]
+            return [_image_item(url, media.alt_texts, n) for n, url in enumerate(media.urls)]
         case "reel":
             # A single video item with no contentType publishes as a Reel (Zernio Instagram
             # posts: https://docs.zernio.com/platforms/instagram/posts). Video limits (MP4/MOV,
@@ -297,6 +298,13 @@ def _media_items(media: PublishMedia) -> list[dict[str, str]]:
             if media.cover_offset_ms is not None and media.cover_offset_ms < 0:
                 raise ValueError(f"cover_offset_ms must be >= 0, got {media.cover_offset_ms}")
             return [{"type": "video", "url": media.url}]
+
+
+def _image_item(url: str, alt_texts: list[str], index: int) -> dict[str, str]:
+    item = {"type": "image", "url": url}
+    if index < len(alt_texts) and (alt := alt_texts[index].strip()):
+        item["altText"] = alt[:MAX_ALT_TEXT_CHARS]
+    return item
 
 
 def _instagram_data(media: PublishMedia) -> dict[str, Any]:

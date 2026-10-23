@@ -9,6 +9,7 @@ class PublishMedia(BaseModel):
     url: str | None = None  # image/reel: public or long-lived signed URL
     urls: list[str] = []  # carousel, in slide order, <= 10 JPEGs (ADR 0022)
     cover_offset_ms: int | None = None  # reel only
+    alt_texts: list[str] = []  # image: one entry; carousel: one per slide, in order
     ai_generated: bool = False  # asks Instagram to label the post as AI-generated media
 
 

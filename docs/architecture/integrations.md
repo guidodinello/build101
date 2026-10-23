@@ -188,6 +188,8 @@ POST /v1/posts
 }
 ```
 
+A designed Post's text lives in its pixels, so each image item also carries `altText` (`PublishMedia.alt_texts`, max 1000 chars): the Slide headline, prefixed "Diapositiva N: " on a carousel; photos as they are send none ([Zernio OpenAPI `MediaItem.altText`](https://docs.zernio.com/api/openapi), read 2026-10-23; audit [GAP-5](../research/audit-2026-10/cross-cutting-gaps.md#gap-5-published-posts-have-no-alt-text-and-carousel-text-is-baked-into-the-images)).
+
 Zernio's Instagram page says carousels take up to 10 items and are cropped to the first item's ratio ([Zernio Instagram](https://docs.zernio.com/platforms/instagram), [research](../research/media-uploads.md#publishing-video-and-carousels-zernio-instagram)); every slide is 1080×1350, so nothing is cropped. **Not verified:** that several `mediaItems` without any other field publish as a carousel, and that it works with our public `renders` URLs. Test one carousel publish on the demo IG before relying on it (T55).
 
 ```python

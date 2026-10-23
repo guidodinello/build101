@@ -143,6 +143,29 @@ async def test_a_carousel_goes_out_with_its_slides_in_order() -> None:
     assert call["media"].urls == [BASE_URL + image.path for image in post.images]
 
 
+async def test_a_designed_carousel_sends_each_headline_as_alt_text() -> None:
+    rig = Rig(ScriptedModel(replies=[approve("p1"), STARTED]))
+    post = rig.add_post("p1", slides=2)
+    post.headlines = ["Roble macizo", "Hecha a mano"]
+
+    await rig.say("publicalo")
+    await rig.finish()
+
+    [call] = rig.publisher.calls
+    assert call["media"].alt_texts == ["Diapositiva 1: Roble macizo", "Diapositiva 2: Hecha a mano"]
+
+
+async def test_photos_as_they_are_send_no_alt_text() -> None:
+    rig = Rig(ScriptedModel(replies=[approve("p1"), STARTED]))
+    rig.add_post("p1", slides=2)
+
+    await rig.say("publicalo")
+    await rig.finish()
+
+    [call] = rig.publisher.calls
+    assert call["media"].alt_texts == []
+
+
 async def test_a_post_with_a_video_goes_out_as_a_reel() -> None:
     rig = Rig(ScriptedModel(replies=[approve("p1"), STARTED]))
     post = rig.add_post("p1")
