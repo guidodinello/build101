@@ -149,6 +149,19 @@ class Turns:
         await self._remember(sender, past, [turn.stored, *steps], reply, offered=None)
         return reply
 
+    def note_sent(self, sender: str, message_id: str) -> None:
+        self._lifecycle.note_sent(sender, message_id)
+
+    async def reaction(
+        self, sender: str, emoji: str | None, target_message_id: str | None, channel: ChannelPort
+    ) -> None:
+        """Apply a yes reaction only to the exact message that most recently asked to publish."""
+        approval = self._lifecycle.reaction_approval(
+            sender, emoji, target_message_id, self._photos.recent(sender)
+        )
+        if approval.post_id:
+            self._toolbox.approve_reaction(sender, approval.post_id, approval, channel, self.notify)
+
     async def notify(self, sender: str, event: Event, channel: ChannelPort) -> None:
         """The model's own message about `event` (ADR 0026), under the sender's history lock.
 
@@ -212,7 +225,8 @@ class Turns:
             # The link is data, not copy: it reaches the Owner exactly, whatever the model wrote.
             text = f"{text}\n{event.permalink}"
         await self._remember(sender, past, [step, *steps], text, offered_post(event))
-        await send(channel, sender, text, event)
+        sent_id = await send(channel, sender, text, event)
+        self.note_sent(sender, sent_id)
 
     async def _run(
         self, sender: str, past: list[Step], turn: _Turn, channel: ChannelPort
@@ -269,7 +283,8 @@ class Turns:
         told = user_step(f'{event.note()}\nThe Owner was told: "{text}"')
         await self._history_extend(sender, past, [told])
         self._lifecycle.note_reply(sender, text, offered_post(event))
-        await send(channel, sender, text, event)
+        sent_id = await send(channel, sender, text, event)
+        self.note_sent(sender, sent_id)
 
     async def _converse(
         self, sender: str, past: list[Step], current: Step, turn: _Turn, channel: ChannelPort

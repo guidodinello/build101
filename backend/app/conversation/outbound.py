@@ -67,16 +67,15 @@ def header_video_url(event: Event) -> str | None:
     return event.video_url if isinstance(event, VideoSent) else None
 
 
-async def send(channel: ChannelPort, to: str, text: str, event: Event) -> None:
+async def send(channel: ChannelPort, to: str, text: str, event: Event) -> str:
     """`text` with `event`'s buttons under it (and its video as their header), or alone when the
     event has none. A body over the WhatsApp limit goes first as plain text."""
     attached = buttons(event)
     if not attached:
-        await channel.send_text(to, text)
-        return
+        return await channel.send_text(to, text)
     if len(text) > WHATSAPP_BODY_MAX:
         text = await _send_overflow(channel, to, text, event)
-    await channel.send_buttons(to, text, attached, header_video_url=header_video_url(event))
+    return await channel.send_buttons(to, text, attached, header_video_url=header_video_url(event))
 
 
 async def _send_overflow(channel: ChannelPort, to: str, text: str, event: Event) -> str:

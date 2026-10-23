@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.channels.base import ChannelError, ChannelPort, InboundMessage
-from app.channels.inbound import InboundHandler, mask, phone_digits
+from app.channels.inbound import InboundHandler, mark_read, mask, phone_digits
 from app.config import Settings, get_settings
 from app.db.models import PilotSender
 from app.db.session import get_sessionmaker
@@ -154,6 +154,19 @@ class PilotGate:
         self._replied = TtlMap[bool](reply_every_s, max_keys, clock)
 
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
+        if message.kind == "reaction":
+            try:
+                allowed = await self._pilot.allows(message.sender)
+            except DATABASE_DOWN:
+                logger.exception(
+                    "pilot list unavailable, dropping reaction from %s", mask(message.sender)
+                )
+                return
+            if allowed:
+                await self._inner.handle(message, channel)
+            else:
+                await mark_read(message.message_id, channel, typing=False)
+            return
         try:
             allowed = await self._pilot.allows(message.sender)
         except DATABASE_DOWN:

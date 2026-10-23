@@ -57,10 +57,10 @@ class InMemoryDedupeStore:
             return True
 
 
-async def mark_read(message_id: str, channel: ChannelPort) -> None:
-    """Show the Owner their message was read, with the typing indicator; a failure only logs."""
+async def mark_read(message_id: str, channel: ChannelPort, *, typing: bool = True) -> None:
+    """Mark a message read; show typing for normal turns, and only log failures."""
     try:
-        await channel.mark_read(message_id, typing=True)
+        await channel.mark_read(message_id, typing=typing)
     except ChannelError:
         logger.warning("mark_read failed for %s", message_id, exc_info=True)
 
@@ -154,6 +154,9 @@ class RateLimitedHandler:
         self._notified: OrderedDict[str, None] = OrderedDict()
 
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
+        if message.kind == "reaction":
+            await self._inner.handle(message, channel)
+            return
         if message.kind == "album":
             if self._albums.take(message.sender):
                 await self._inner.handle(message, channel)
@@ -182,6 +185,9 @@ class EchoHandler:
     """Placeholder until the conversation router (T23): echoes and describes what arrived."""
 
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
+        if message.kind == "reaction":
+            await mark_read(message.message_id, channel, typing=False)
+            return
         logger.info(
             "inbound %s id=%s from=%s", message.kind, message.message_id, mask(message.sender)
         )
