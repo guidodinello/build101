@@ -49,7 +49,7 @@ from app.conversation.photos import Photo, local_now
 from app.conversation.turns import MAX_STEPS
 from app.copy import messages_es
 from app.llm.client import Step, user_step
-from app.media.public import PublicImages
+from app.media.public import PublicImages, PublicVideos
 from app.posts.drafts import CarouselDraft, PostCopy, SlideDraft
 from app.posts.store import Post, PostImage
 from app.publishing.mock import MOCK_ACCOUNT_ID, MockPublisher
@@ -142,6 +142,7 @@ def build(
             renderer=MockRenderer(),
             publisher=MockPublisher(delay_s=0),
             images=PublicImages(),
+            videos=PublicVideos(),
             background=background,
             public_backend_url="https://backend.test",
             account_id=MOCK_ACCOUNT_ID,
@@ -582,12 +583,14 @@ def test_chat_handler_needs_a_gemini_key_and_a_public_url() -> None:
             Settings(inbound_handler="chat", gemini_api_key=None),
             PublicImages(),
             MockPublisher(),
+            PublicVideos(),
         )
     with pytest.raises(ValueError, match="PUBLIC_BACKEND_URL"):
         build_conversation(
             Settings(inbound_handler="chat", gemini_api_key="key", public_backend_url=None),
             PublicImages(),
             MockPublisher(),
+            PublicVideos(),
         )
 
 
@@ -601,8 +604,14 @@ def test_factory_builds_each_handler() -> None:
         ),
         PublicImages(),
         MockPublisher(),
+        PublicVideos(),
     )
-    echo = build_conversation(Settings(inbound_handler="echo"), PublicImages(), MockPublisher())
+    echo = build_conversation(
+        Settings(inbound_handler="echo"),
+        PublicImages(),
+        MockPublisher(),
+        PublicVideos(),
+    )
 
     assert isinstance(chat.handler, ChatHandler)
     assert isinstance(echo.handler, EchoHandler)
