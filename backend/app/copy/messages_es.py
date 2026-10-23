@@ -9,8 +9,9 @@ module holds only:
 - verbatim events, sent as written without a model turn (`events.verbatim`): `brand_summary`,
   `JOB_FAILED` for a failed job and `BRAND_GENERATING`;
 - text sent directly, outside the chat: Flow 1 before the web form (`welcome`, `name_ack_link`,
-  `link_reminder`, the `OnboardingGate`, an exception recorded in ADR 0026), and `waitlist` to a
-  number not on the pilot list (the `PilotGate`, #186);
+  `link_reminder`, the `OnboardingGate`, an exception recorded in ADR 0026), `waitlist` to a
+  number not on the pilot list (the `PilotGate`, #186), and the sender limit's `RATE_LIMITED` and
+  `photos_not_received` (#106, #162);
 - labels, not conversation: `carousel_slide`.
 """
 
@@ -98,6 +99,14 @@ def link_reminder(url: str) -> str:
 
 def photo_too_big(max_mb: int) -> str:
     return f"Esa foto es muy pesada 🙈 ¿Me mandás una más liviana? (hasta {max_mb} MB)"
+
+
+def photos_not_received(count: int) -> str:
+    if count == 1:
+        return "No me llegó 1 foto, eran demasiadas juntas 🙈 Esperá un minuto y reenviámela."
+    return (
+        f"No me llegaron {count} fotos, eran demasiadas juntas 🙈 Esperá un minuto y reenviámelas."
+    )
 
 
 def published(permalink: str) -> str:

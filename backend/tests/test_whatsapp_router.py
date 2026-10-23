@@ -358,3 +358,45 @@ def test_webhook_turns_are_rate_limited_per_sender(monkeypatch: pytest.MonkeyPat
     assert len(inner.handled) == TURNS_BURST
     assert [m.message_id for m in inner.handled] == [f"wamid.{n}" for n in range(TURNS_BURST)]
     assert channel.sent == [(body["message"]["from"], messages_es.RATE_LIMITED)]
+
+
+def test_a_40_photo_burst_reaches_the_handler_whole(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#162: every photo of a large album gets through the real sender limit, and the Owner's
+    next text still gets a turn."""
+    inner = RecordingHandler()
+    channel = FakeChannel()
+
+    async def notify(sender: str, event: Event, channel: ChannelPort) -> None:
+        pass
+
+    monkeypatch.setattr(
+        "app.channels.router.build_conversation",
+        lambda *args: Conversation(handler=inner, notify=notify),
+    )
+    get_conversation.cache_clear()
+    store = InMemoryDedupeStore()
+    app.dependency_overrides[get_settings] = lambda: Settings(kapso_webhook_secret=SECRET)
+    app.dependency_overrides[get_dedupe_store] = lambda: store
+    app.dependency_overrides[get_clock] = lambda: float(FIXTURE_TIME)
+    app.dependency_overrides[get_channel] = lambda: channel
+    photo = json.loads(raw_fixture("image"))
+    words = json.loads(raw_fixture("text"))
+    try:
+        with TestClient(app) as test_client:
+            for number in range(TURNS_BURST):  # the turn bucket, emptied by texts first
+                words["message"]["id"] = f"wamid.text{number}"
+                raw = json.dumps(words).encode()
+                post(test_client, raw, signature=sign(raw, SECRET))
+            for number in range(40):
+                photo["message"]["id"] = f"wamid.photo{number}"
+                raw = json.dumps(photo).encode()
+                assert post(test_client, raw, signature=sign(raw, SECRET)).json() == {
+                    "status": "ok"
+                }
+    finally:
+        app.dependency_overrides.clear()
+        get_conversation.cache_clear()
+
+    photos = [m.message_id for m in inner.handled if m.kind == "image"]
+    assert photos == [f"wamid.photo{n}" for n in range(40)]
+    assert channel.sent == []

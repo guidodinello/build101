@@ -3,19 +3,27 @@ import logging
 import time
 from collections import OrderedDict
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Protocol, runtime_checkable
 
 from sqlalchemy import delete, func
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.background import BackgroundWork
+from app.copy import messages_es
 from app.db.models import InboundDelivery
-from app.ratelimit import ALBUM_BURST, ALBUM_PER_MINUTE, MAX_TRACKED_KEYS, RateLimiter
+from app.ratelimit import (
+    ALBUM_BURST,
+    ALBUM_PER_MINUTE,
+    MAX_TRACKED_KEYS,
+    PHOTOS_BURST,
+    PHOTOS_PER_MINUTE,
+    RateLimiter,
+)
 
-from .base import ChannelError, ChannelPort, InboundMessage
+from .base import ChannelError, ChannelPort, InboundMedia, InboundMessage
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +33,9 @@ DEDUPE_RETENTION = timedelta(hours=48)
 DEDUPE_PRUNE_EVERY_S = 3600.0
 # A failed prune is tried again this soon, not a whole interval later.
 DEDUPE_PRUNE_RETRY_S = 60.0
+# The Owner hears how many photos were dropped once this long has passed without another drop:
+# the same pause that ends a photo batch.
+DROPPED_PHOTOS_DELAY_S = 5.0
 
 
 @runtime_checkable
@@ -120,7 +131,9 @@ class DbDedupeStore:
                     )
                 )
                 await db.commit()
-        except SQLAlchemyError:
+        # Any error, not only SQLAlchemy's: asyncpg can raise a bare `OSError`, and an exception
+        # left in the task would skip the retry delay below.
+        except Exception:
             logger.warning("pruning inbound_deliveries failed", exc_info=True)
             delay = min(delay, DEDUPE_PRUNE_RETRY_S)
         self._next_prune_at = self._clock() + delay
@@ -131,9 +144,15 @@ class RateLimitedHandler:
     the LLM. The Owner is told once per throttled stretch, so a flood doesn't earn a flood of
     replies.
 
-    An album announcement costs no turn (each photo arrives as a message of its own) and doesn't
-    end a throttled stretch, but it has a small bucket of its own: over it, the announcement is
-    dropped silently, so albums can't be used to flood the handler or to reset the notice.
+    A photo costs no turn and doesn't end a throttled stretch; it has a larger bucket of its own
+    (#162), since photos wait and are answered together. A photo over it is dropped, logged with
+    its id, and counted: once `dropped_photos_delay_s` pass with no other drop, the Owner is told
+    exactly how many were not received.
+
+    An album announcement costs no turn either (each photo arrives as a message of its own) and
+    doesn't end a throttled stretch, but it has a small bucket of its own: over it, the
+    announcement is dropped silently, so albums can't be used to flood the handler or to reset the
+    notice.
     """
 
     def __init__(
@@ -143,15 +162,25 @@ class RateLimitedHandler:
         notice: str,
         max_keys: int = MAX_TRACKED_KEYS,
         albums: RateLimiter | None = None,
+        photos: RateLimiter | None = None,
+        *,
+        background: BackgroundWork,
+        dropped_photos_delay_s: float = DROPPED_PHOTOS_DELAY_S,
     ) -> None:
         self._inner = inner
         self._limiter = limiter
         self._albums = (
             albums if albums is not None else RateLimiter(ALBUM_BURST, ALBUM_PER_MINUTE, max_keys)
         )
+        self._photos = (
+            photos if photos is not None else RateLimiter(PHOTOS_BURST, PHOTOS_PER_MINUTE, max_keys)
+        )
         self._notice = notice
         self._max_keys = max_keys
         self._notified: OrderedDict[str, None] = OrderedDict()
+        self._background = background
+        self._dropped_photos_delay_s = dropped_photos_delay_s
+        self._dropped_photos: dict[str, _DroppedPhotos] = {}
 
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
         if message.kind == "album":
@@ -159,6 +188,12 @@ class RateLimitedHandler:
                 await self._inner.handle(message, channel)
             else:
                 logger.debug("album limit hit by %s", mask(message.sender))
+            return
+        if message.kind == "image" and message.media:
+            if self._photos.take(message.sender):
+                await self._inner.handle(message, channel)
+            else:
+                self._drop_photo(message, message.media, channel)
             return
         if self._limiter.take(message.sender):
             self._notified.pop(message.sender, None)
@@ -176,6 +211,40 @@ class RateLimitedHandler:
             await channel.send_text(message.sender, self._notice)
         except ChannelError:
             logger.warning("rate limit notice failed for %s", mask(message.sender), exc_info=True)
+
+    def _drop_photo(
+        self, message: InboundMessage, media: InboundMedia, channel: ChannelPort
+    ) -> None:
+        sender = message.sender
+        logger.warning(
+            "photo limit hit by %s, dropping photo %s (media %s)",
+            mask(sender),
+            message.message_id,
+            media.media_id,
+        )
+        dropped = self._dropped_photos.setdefault(sender, _DroppedPhotos())
+        dropped.count += 1
+        if dropped.timer:
+            dropped.timer.cancel()
+        dropped.timer = self._background.start(
+            self._tell_dropped_photos(sender, channel),
+            f"counting dropped photos for {mask(sender)}",
+        )
+
+    async def _tell_dropped_photos(self, sender: str, channel: ChannelPort) -> None:
+        await asyncio.sleep(self._dropped_photos_delay_s)
+        # Popped right after the wait: a photo dropped from here on starts a new count.
+        count = self._dropped_photos.pop(sender).count
+        try:
+            await channel.send_text(sender, messages_es.photos_not_received(count))
+        except ChannelError:
+            logger.warning("dropped photos notice failed for %s", mask(sender), exc_info=True)
+
+
+@dataclass(slots=True)
+class _DroppedPhotos:
+    count: int = 0
+    timer: asyncio.Task[None] | None = None
 
 
 class EchoHandler:
