@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import time
 import uuid
@@ -20,7 +19,7 @@ from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
 from app.imagegen.base import ImageGenPort
 from app.knowledge.base import BusinessKnowledge, Knowledge
-from app.media.images import add_logo, to_post_image
+from app.media.images import add_logo, decode, to_post_image
 from app.media.public import PublicImages
 from app.rendering.base import RendererPort
 from app.rendering.slides import render_slides
@@ -288,7 +287,7 @@ class PostMaker:
             copy = await self._drafter.copy(
                 args.brief, references, brand, notes, previous, trend_notes
             )
-            images = [await asyncio.to_thread(to_post_image, data) for data in references]
+            images = [await decode(to_post_image, data) for data in references]
             return RenderedPost(
                 await with_logo(images, logo), post_text(copy.caption, copy.hashtags), headlines=[]
             )
@@ -387,7 +386,7 @@ def previous_post(post: Post, change: str | None) -> PreviousPost:
 async def with_logo(images: list[bytes], logo: bytes | None) -> list[bytes]:
     if logo is None:
         return images
-    return [await asyncio.to_thread(add_logo, image, logo) for image in images]
+    return [await decode(add_logo, image, logo) for image in images]
 
 
 def post_text(caption: str, hashtags: list[str]) -> str:

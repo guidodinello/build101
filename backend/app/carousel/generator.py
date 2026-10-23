@@ -101,7 +101,7 @@ class CarouselGenerator:
         generated, prompt, attempts = await self._generate(prompt, references, style_image)
         return GeneratedSlide(
             index=index,
-            image=await asyncio.to_thread(to_post_image, generated.data),
+            image=await decode(to_post_image, generated.data),
             prompt=prompt,
             provider=generated.provider,
             model=generated.model,
@@ -120,7 +120,7 @@ class CarouselGenerator:
             aspect_ratio=panorama_ratio(count),
             image_size=PANORAMA_IMAGE_SIZE,
         )
-        images = await asyncio.to_thread(slice_panorama, generated.data, count)
+        images = await decode(slice_panorama, generated.data, count)
         return [
             GeneratedSlide(
                 index=index,
