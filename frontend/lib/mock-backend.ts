@@ -62,6 +62,7 @@ function business(token: string): MockBusiness {
       assets: [],
       preferences: null,
       instagram: { status: "not_connected", handle: null },
+      instagram_allowed: true,
       completed: false,
       whatsapp_url: process.env.NEXT_PUBLIC_WHATSAPP_URL ?? "https://wa.me/",
     };

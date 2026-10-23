@@ -81,6 +81,7 @@ const OnboardingStateSchema = z.object({
   assets: z.array(AssetSchema),
   preferences: QuestionnaireSchema.nullable(),
   instagram: z.object({ status: InstagramStatusSchema, handle: z.string().nullable() }),
+  instagram_allowed: z.boolean(),
   completed: z.boolean(),
   whatsapp_url: z.string(),
 });

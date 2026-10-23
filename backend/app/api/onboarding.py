@@ -23,6 +23,7 @@ from app.config import Settings, get_settings
 from app.conversation.events import BrandGenerating, Notify
 from app.db.models import AssetProduct, BrandAsset, Business, MagicLink, Product, SocialAccount
 from app.db.session import get_session
+from app.instagram.access import instagram_allowed
 from app.jobs.queue import enqueue
 from app.onboarding import schemas
 from app.onboarding.links import hash_token
@@ -685,6 +686,7 @@ async def _state(
         ],
         preferences=schemas.Questionnaire.model_validate(preferences) if preferences else None,
         instagram=await _instagram(session, business),
+        instagram_allowed=instagram_allowed(settings, business),
         completed=await is_submitted(session, business.id),
         whatsapp_url=settings.whatsapp_url,
     )

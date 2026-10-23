@@ -53,7 +53,7 @@ export function resumeStep(state: OnboardingState): Step {
   const { business } = state;
   if (!business.name || !business.category || !business.one_liner) return "business";
   if (state.products.filter((product) => !product.archived).length === 0) {
-    return isInstagramConnected(state) ? "products" : "instagram";
+    return isInstagramConnected(state) || !state.instagram_allowed ? "products" : "instagram";
   }
   if (readyPhotos(state).length < MIN_PHOTOS) return "photos";
   if (state.brand.three_words.length === 0) return "brand";

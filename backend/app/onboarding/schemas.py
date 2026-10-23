@@ -120,6 +120,7 @@ class OnboardingState(BaseModel):
     assets: list[Asset]
     preferences: Questionnaire | None
     instagram: Instagram
+    instagram_allowed: bool
     completed: bool
     whatsapp_url: str
 

@@ -157,3 +157,34 @@ npm run typecheck && npm run lint && npm run build
 - **Frontend**: Vercel ([ADR 0004](../decisions/0004-frontend-nextjs-vercel.md)), root directory `frontend/`, env vars above, at `https://neitorai.vercel.app`. Every push to `main` deploys; settings in [frontend/README.md](../../frontend/README.md#deploy).
 - **Backend**: Railway ([ADR 0017](../decisions/0017-backend-host-railway.md)): one service with root directory `backend/`, built from `backend/Dockerfile` (no browser; `ffmpeg` is added only with the Could video work), one replica (in-process jobs and locks), Railway-generated HTTPS domain. Health check `/ready` ([api.md § Health](../architecture/api.md#health)). Trial first (1 GB RAM, account verified through GitHub so outbound calls work), Hobby if needed.
 - **After the first backend deploy**: set the webhook URL in Kapso, run `/dev/seed/demo` if needed, send "hola" from a test phone.
+
+## Instagram pilot checklist (Issue #199)
+
+Before sending an Owner their onboarding wizard link while `INSTAGRAM=meta`:
+
+- [ ] Confirm the Owner uses a professional Instagram account (Business or Creator). A personal account must switch to a professional account before connecting.
+- [ ] In the Meta app dashboard, invite the Instagram account as an Instagram tester.
+- [ ] Ask the Owner to accept the tester invitation. Do not assume an invitation was accepted just because it was sent.
+- [ ] Verify the account is eligible to connect before sharing the wizard link. Add the Business ID to `INSTAGRAM_PILOT_BUSINESSES` (comma-separated IDs; `*` allows all Businesses) and deploy the configuration change if required.
+- [ ] Confirm the Owner can open the wizard and see the Instagram connection option.
+- [ ] Explain that Instagram access is optional. The Owner can skip it and upload at least three photos instead.
+
+### Spanish guide for accepting the tester invitation
+
+1. Open Instagram using the account that was invited.
+2. Open the account settings and find the section for website permissions or app invitations. The exact labels may vary by app version.
+3. Find the pending tester invitation and accept it.
+4. If the invitation is missing, verify the invited username and resend the invitation from the Meta app dashboard.
+5. Keep a Spanish screenshot guide of the current Meta and Instagram screens with the pilot onboarding instructions. Do not include passwords, access tokens, or other secrets in screenshots.
+
+### Manual acceptance checks
+
+- [ ] On iOS, an invited professional account can connect successfully.
+- [ ] On Android, an invited professional account can connect successfully.
+- [ ] A Business not on the allowlist does not see the connection option, and its connect request is refused.
+- [ ] Declining Instagram authorization shows a readable Spanish message and allows the Owner to continue without Instagram.
+- [ ] A personal account or an account that has not accepted the tester invitation receives a useful error message.
+- [ ] A callback opened in another browser, or without its binding cookie, shows a readable Spanish page with a way back to WhatsApp.
+- [ ] Skipping Instagram still allows onboarding to continue using the Owner's photos.
+
+Record the iOS and Android results in the pull request. Do not mark these checks complete until they have actually been performed.

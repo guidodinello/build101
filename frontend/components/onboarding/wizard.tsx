@@ -33,7 +33,12 @@ export function OnboardingWizard({ token, initialState }: OnboardingWizardProps)
   const [state, setState] = useState(initialState);
   const searchParams = useSearchParams();
   const requested = searchParams.get("step");
-  const step: Step = state.completed ? "done" : isStep(requested) ? requested : resumeStep(state);
+  const requestedStep = isStep(requested) ? requested : resumeStep(state);
+  const step: Step = state.completed
+    ? "done"
+    : requestedStep === "instagram" && !state.instagram_allowed
+      ? "products"
+      : requestedStep;
 
   const upsertAsset = useCallback((asset: Asset) => {
     setState((current) => ({

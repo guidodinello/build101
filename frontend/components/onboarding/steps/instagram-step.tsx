@@ -11,14 +11,34 @@ import { useWizard } from "@/components/onboarding/wizard-context";
 import { messageOf, onboardingApi } from "@/lib/api";
 import { atHandle, isInstagramConnected } from "@/lib/onboarding";
 
+
 const CONNECT_FAILED = "No pude conectar tu Instagram. Probá de nuevo.";
+
+function callbackError(reason: string | null): string {
+  if (reason === "declined") {
+    return "No autorizaste el acceso a Instagram. Si querés, podés intentarlo de nuevo o seguir sin conectar la cuenta.";
+  }
+  if (reason === "account") {
+    return "No pudimos leer tu perfil. Revisá que sea una cuenta profesional (empresa o creador) y que hayas aceptado la invitación de tester.";
+  }
+  if (reason === "expired") {
+    return "Se venció la conexión o se abrió en otro navegador. Volvé al formulario y probá de nuevo.";
+  }
+  return CONNECT_FAILED;
+}
+
 
 export function InstagramStep() {
   const { token, state, setState, goTo } = useWizard();
   const searchParams = useSearchParams();
-  const returned = searchParams.get("connected");
-  const [connecting, setConnecting] = useState(returned === "1");
-  const [error, setError] = useState<string | null>(returned === "0" ? CONNECT_FAILED : null);
+  
+const returned = searchParams.get("connected");
+const reason = searchParams.get("reason");
+const [connecting, setConnecting] = useState(returned === "1");
+const [error, setError] = useState<string | null>(
+  returned === "0" ? callbackError(reason) : null,
+);
+
   const refreshed = useRef(false);
 
   useEffect(() => {
@@ -54,7 +74,7 @@ export function InstagramStep() {
       step="instagram"
       title="¿Tenés Instagram? Conectalo"
       subtitle="Leo tus posts y tus fotos para aprender cómo hablás. Así te pregunto menos."
-      footer={
+            footer={
         connected ? (
           <Button variant="cta" size="xl" className="w-full" onClick={() => goTo("products")}>
             Siguiente
@@ -62,14 +82,22 @@ export function InstagramStep() {
           </Button>
         ) : (
           <div className="flex flex-col gap-1.5">
-            <Button variant="cta" size="xl" className="w-full" disabled={connecting} onClick={connect}>
-              {connecting ? (
-                <Spinner data-icon="inline-start" aria-label="Conectando" />
-              ) : (
-                <InstagramGlyph className="size-5" />
-              )}
-              Conectar Instagram
-            </Button>
+            {state.instagram_allowed && (
+              <Button
+                variant="cta"
+                size="xl"
+                className="w-full"
+                disabled={connecting}
+                onClick={connect}
+              >
+                {connecting ? (
+                  <Spinner data-icon="inline-start" aria-label="Conectando" />
+                ) : (
+                  <InstagramGlyph className="size-5" />
+                )}
+                Conectar Instagram
+              </Button>
+            )}
             <Button
               variant="link"
               size="lg"
@@ -82,7 +110,7 @@ export function InstagramStep() {
           </div>
         )
       }
-    >
+    >  
       {connected ? (
         <div className="flex items-center gap-3.5 rounded-[22px] bg-card p-4 shadow-bubble">
           <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
@@ -98,17 +126,33 @@ export function InstagramStep() {
           </div>
         </div>
       ) : (
-        <ul className="flex flex-col gap-4">
-          <Reassurance icon={<MessageCircleCheckIcon className="size-5" aria-hidden />}>
-            Nunca publico nada sin que lo apruebes por WhatsApp.
-          </Reassurance>
-          <Reassurance icon={<LockIcon className="size-5" aria-hidden />}>
-            Entrás desde la página de Instagram. Nunca veo tu contraseña.
-          </Reassurance>
-          <Reassurance icon={<SparklesIcon className="size-5" aria-hidden />}>
-            Traigo tus fotos y tus textos para aprender tu estilo y lo que le gusta a tu gente.
-          </Reassurance>
-        </ul>
+        <>
+          {state.instagram_allowed && (
+            <p className="mb-4 text-sm leading-relaxed text-muted-foreground">
+              Para conectar tu cuenta, necesitás un perfil profesional de Instagram
+              (empresa o creador). Es gratis cambiarlo.{" "}
+              <a
+                href="https://help.instagram.com/"
+                target="_blank"
+                rel="noreferrer"
+                className="underline underline-offset-2"
+              >
+                Más información en la ayuda de Instagram
+              </a>
+            </p>
+          )}
+          <ul className="flex flex-col gap-4">
+            <Reassurance icon={<MessageCircleCheckIcon className="size-5" aria-hidden />}>
+              Nunca publico nada sin que lo apruebes por WhatsApp.
+            </Reassurance>
+            <Reassurance icon={<LockIcon className="size-5" aria-hidden />}>
+              Entrás desde la página de Instagram. Nunca veo tu contraseña.
+            </Reassurance>
+            <Reassurance icon={<SparklesIcon className="size-5" aria-hidden />}>
+              Traigo tus fotos y tus textos para aprender tu estilo y lo que le gusta a tu gente.
+            </Reassurance>
+          </ul>
+        </>
       )}
 
       {!connected && failed && !connecting && (
