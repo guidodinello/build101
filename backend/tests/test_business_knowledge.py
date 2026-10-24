@@ -1,5 +1,6 @@
 """What the Agency knows about a Business: one interface, a database and a local adapter."""
 
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -11,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.conversation.history import InMemoryHistory
 from app.conversation.notes import DbNotes, InMemoryNotes
-from app.db.models import BrandBrainVersion, Business, Product
+from app.db.models import AssetProduct, BrandAsset, BrandBrainVersion, Business, Product
 from app.knowledge.base import BusinessKnowledge, CatalogItem, Knowledge
 from app.knowledge.db import MAX_PRODUCTS, DbKnowledge
 from app.knowledge.local import LocalKnowledge
@@ -189,3 +190,87 @@ async def test_the_brand_is_the_latest_version(
 
     assert known.brand is not None
     assert known.brand.one_liner == "Segunda"
+
+
+def photo_asset(business: Business, n: int) -> BrandAsset:
+    return BrandAsset(
+        business_id=business.id,
+        kind="photo",
+        source="web",
+        status="ready",
+        storage_path=f"{business.id}/{n}.jpg",
+        mime_type="image/jpeg",
+    )
+
+
+@requires_db
+async def test_a_posts_products_are_those_linked_to_its_photos_each_once(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    async with sessions() as db:
+        business = Business(owner_phone=PHONE, name="Katei")
+        other = Business(owner_phone="59899000002", name="Otra")
+        db.add_all([business, other])
+        await db.flush()
+        mesa = Product(
+            business_id=business.id,
+            name="Mesa",
+            price="$U 12.000",
+            description="Enchapada en roble. " + "x" * 300,
+            position=2,
+        )
+        silla = Product(business_id=business.id, name="Silla", position=1)
+        banco = Product(
+            business_id=business.id, name="Banco", position=0, archived_at=datetime.now(UTC)
+        )
+        ajena = Product(business_id=other.id, name="Ajena", position=0)
+        lampara = Product(business_id=business.id, name="Lámpara", position=3)
+        photos = [photo_asset(business, n) for n in range(3)]
+        db.add_all([mesa, silla, banco, ajena, lampara, *photos])
+        await db.flush()
+        db.add_all(
+            [
+                AssetProduct(asset_id=photos[0].id, product_id=mesa.id, source="owner"),
+                AssetProduct(asset_id=photos[0].id, product_id=banco.id, source="owner"),
+                AssetProduct(asset_id=photos[1].id, product_id=mesa.id, source="analyst"),
+                AssetProduct(asset_id=photos[1].id, product_id=silla.id, source="analyst"),
+                AssetProduct(asset_id=photos[1].id, product_id=ajena.id, source="analyst"),
+                AssetProduct(asset_id=photos[2].id, product_id=lampara.id, source="owner"),
+            ]
+        )
+        await db.commit()
+
+    products = await DbKnowledge(sessions).products(PHONE, [photos[0].id, photos[1].id])
+
+    assert products == [
+        CatalogItem("Silla", None, ""),
+        CatalogItem("Mesa", "$U 12.000", "Enchapada en roble. " + "x" * 300),
+    ]
+
+
+@requires_db
+async def test_photos_without_links_have_no_products(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    async with sessions() as db:
+        business = Business(owner_phone=PHONE, name="Katei")
+        db.add(business)
+        await db.flush()
+        photo = photo_asset(business, 1)
+        db.add_all([photo, Product(business_id=business.id, name="Mesa")])
+        await db.commit()
+
+    knowledge = DbKnowledge(sessions)
+
+    assert await knowledge.products(PHONE, [photo.id]) == []
+    assert await knowledge.products("59800000000", [photo.id]) == []
+
+
+async def test_without_a_database_there_are_no_products() -> None:
+    assert await local_rig().knowledge.products(PHONE, [uuid.uuid4()]) == []
+
+
+async def test_a_database_failure_reads_as_no_products() -> None:
+    knowledge = DbKnowledge(BrokenSessions())  # type: ignore[arg-type]
+
+    assert await knowledge.products(PHONE, [uuid.uuid4()]) == []

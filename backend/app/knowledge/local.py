@@ -1,12 +1,13 @@
 """The adapter of `Knowledge` for runs without a database (local runs, tests)."""
 
 import logging
+import uuid
 from pathlib import Path
 from typing import Protocol
 
 from app.agents.niche_analyst import NicheReport, trend_notes
 
-from .base import BusinessKnowledge, Note
+from .base import BusinessKnowledge, CatalogItem, Note
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ class LocalKnowledge:
             summary=await self._history.summary(sender),
             trend_notes=self._trend_notes,
         )
+
+    async def products(self, sender: str, asset_ids: list[uuid.UUID]) -> list[CatalogItem]:
+        return []
 
 
 def load_trend_notes(path: Path | None) -> str | None:

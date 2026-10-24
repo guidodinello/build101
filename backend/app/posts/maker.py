@@ -19,7 +19,7 @@ from app.conversation.events import Event, Notify, PostFailed, PostSent
 from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
 from app.imagegen.base import ImageGenPort
-from app.knowledge.base import BusinessKnowledge, Knowledge
+from app.knowledge.base import BusinessKnowledge, CatalogItem, Knowledge
 from app.media.images import add_logo, to_post_image
 from app.media.public import PublicImages
 from app.rendering.base import RendererPort
@@ -224,6 +224,7 @@ class PostMaker:
                 [note.text for note in known.notes],
                 remake,
                 known.trend_notes,
+                await self._products(sender, photos),
             )
             paths = await self._send(sender, post.images, post.text, channel)
             self._keep(sender, post_id, args, photos, paths, post)
@@ -259,6 +260,14 @@ class PostMaker:
             return BusinessKnowledge()
         return await self._knowledge.of(sender)
 
+    async def _products(self, sender: str, photos: list[Photo]) -> list[CatalogItem]:
+        """The Catalog Products in the post's photos; a photo not stored as a Brand asset yet
+        has none."""
+        asset_ids = [photo.asset_id for photo in photos if photo.asset_id is not None]
+        if self._knowledge is None or not asset_ids:
+            return []
+        return await self._knowledge.products(sender, asset_ids)
+
     async def _render(
         self,
         args: CreatePostArgs,
@@ -268,6 +277,7 @@ class PostMaker:
         notes: list[str] | None = None,
         remake: Remake | None = None,
         trend_notes: str | None = None,
+        products: list[CatalogItem] | None = None,
     ) -> RenderedPost:
         """The post's images in order (one per photo, unless a design asks for a slide count).
 
@@ -277,7 +287,9 @@ class PostMaker:
         references = [photo.data for photo in photos]
         previous = remake.previous if remake else None
         if remake is not None and remake.images is not None:
-            copy = await self._drafter.recaption(references, remake.previous, brand, notes)
+            copy = await self._drafter.recaption(
+                references, remake.previous, brand, notes, products
+            )
             return RenderedPost(
                 remake.images,
                 post_text(copy.caption, copy.hashtags),
@@ -286,7 +298,7 @@ class PostMaker:
             )
         if args.style == "photos":
             copy = await self._drafter.copy(
-                args.brief, references, brand, notes, previous, trend_notes
+                args.brief, references, brand, notes, previous, trend_notes, products
             )
             images = [await asyncio.to_thread(to_post_image, data) for data in references]
             return RenderedPost(
@@ -303,6 +315,7 @@ class PostMaker:
             notes,
             previous,
             trend_notes,
+            products,
         )
         style_prompt = brief.style_prompt
         one_per_photo = len(photos) == count

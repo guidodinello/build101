@@ -1,3 +1,4 @@
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from io import BytesIO
@@ -9,7 +10,7 @@ from app.agents.schemas import BrandBrain
 from app.background import BackgroundWork
 from app.conversation.events import Event, Notify, PostFailed, PostSent
 from app.conversation.photos import LOCAL_TZ, InMemoryPhotos
-from app.knowledge.base import BusinessKnowledge, Note
+from app.knowledge.base import BusinessKnowledge, CatalogItem, Note
 from app.media.images import POST_SIZE, image_size
 from app.media.public import PublicImages
 from app.posts.drafts import SYSTEM_PROMPT, CarouselDraft, PostCopy, PostDrafter, SlideDraft
@@ -32,14 +33,22 @@ class FakeKnowledge:
 
     known: BusinessKnowledge
     asked: list[str]
+    linked: list[CatalogItem]
+    asked_products: list[list[uuid.UUID]]
 
-    def __init__(self, known: BusinessKnowledge) -> None:
+    def __init__(self, known: BusinessKnowledge, linked: list[CatalogItem] | None = None) -> None:
         self.known = known
         self.asked = []
+        self.linked = linked or []
+        self.asked_products = []
 
     async def of(self, sender: str) -> BusinessKnowledge:
         self.asked.append(sender)
         return self.known if sender == SENDER else BusinessKnowledge()
+
+    async def products(self, sender: str, asset_ids: list[uuid.UUID]) -> list[CatalogItem]:
+        self.asked_products.append(asset_ids)
+        return self.linked if sender == SENDER else []
 
 
 def carousel_draft(slides: int, family: str = "editorial") -> CarouselDraft:
@@ -801,3 +810,73 @@ async def test_the_owners_notes_reach_the_post_writer(photos: InMemoryPhotos) ->
     await background.join()
 
     assert "- Siempre mencionar el envío gratis" in model.structured_systems[0]
+
+
+TABLE = CatalogItem("Mesa Ñandubay", "$U 12.000", "Enchapada en roble, 1,80 m")
+TABLE_ASSET = uuid.uuid4()
+
+
+def products_in(request: str) -> str:
+    return request[request.index("<products>") : request.index("</products>")]
+
+
+@pytest.mark.parametrize(
+    ("arguments", "draft"),
+    [
+        ({"style": "photos"}, PostCopy(caption="Mesa", hashtags=[])),
+        ({"style": "design"}, carousel_draft(1)),
+    ],
+)
+async def test_the_products_in_the_posts_photos_reach_the_draft(
+    photos: InMemoryPhotos, arguments: dict[str, str], draft: PostCopy | CarouselDraft
+) -> None:
+    [linked, unlinked] = photos.find(SENDER, ["f1", "f2"])[0]
+    linked.asset_id = TABLE_ASSET
+    model = ScriptedModel(drafts={type(draft): draft})
+    knowledge = FakeKnowledge(BusinessKnowledge(), linked=[TABLE])
+    posts, background = maker(model, CountingImageGen(), photos, knowledge=knowledge)
+
+    posts.create_post(
+        SENDER, {"brief": "mesa", "asset_ids": ["f1", "f2"]} | arguments, FakeChannel(), drop
+    )
+    await background.join()
+
+    assert knowledge.asked_products == [[TABLE_ASSET]]
+    products = products_in(model.structured_calls[0][0]["text"])
+    assert '"name": "Mesa Ñandubay"' in products
+    assert '"description": "Enchapada en roble, 1,80 m"' in products
+    assert '"price": "$U 12.000"' in products
+    assert unlinked.asset_id is None
+
+
+async def test_a_caption_change_gets_the_products_too(photos: InMemoryPhotos) -> None:
+    store = PostLifecycle()
+    old = sent_design(store, photos)
+    old.source_photos[0].asset_id = TABLE_ASSET
+    model = photos_model()
+    knowledge = FakeKnowledge(BusinessKnowledge(), linked=[TABLE])
+    posts, background = maker(model, CountingImageGen(), photos, store=store, knowledge=knowledge)
+
+    posts.revise_post(
+        SENDER, {"post_id": "old", "change": "más corto", "part": "caption"}, FakeChannel(), drop
+    )
+    await background.join()
+
+    assert knowledge.asked_products == [[TABLE_ASSET]]
+    assert '"name": "Mesa Ñandubay"' in products_in(model.structured_calls[0][0]["text"])
+
+
+async def test_photos_not_stored_as_brand_assets_have_no_products(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(drafts={PostCopy: PostCopy(caption="Mesa", hashtags=[])})
+    knowledge = FakeKnowledge(BusinessKnowledge(), linked=[TABLE])
+    posts, background = maker(model, CountingImageGen(), photos, knowledge=knowledge)
+
+    posts.create_post(
+        SENDER, {"brief": "mesa", "asset_ids": ["f1"], "style": "photos"}, FakeChannel(), drop
+    )
+    await background.join()
+
+    assert knowledge.asked_products == []
+    assert "<products>" not in model.structured_calls[0][0]["text"]

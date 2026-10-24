@@ -11,7 +11,14 @@ from app.agents.data.niches import CURATED_WOOD_FURNITURE_UY, Niche
 from app.agents.niche_analyst import NicheReport, trend_notes
 from app.agents.schemas import BrandBrain
 from app.channels.inbound import mask
-from app.db.models import BrandBrainVersion, Business, NicheReportRow, OwnerNote, Product
+from app.db.models import (
+    AssetProduct,
+    BrandBrainVersion,
+    Business,
+    NicheReportRow,
+    OwnerNote,
+    Product,
+)
 from app.onboarding.state import awaiting, state_of
 
 from .base import BusinessFacts, BusinessKnowledge, CatalogItem, Note, short_id
@@ -87,6 +94,32 @@ class DbKnowledge:
                 "reading what the Agency knows failed for %s", mask(sender), exc_info=True
             )
             return BusinessKnowledge()
+
+    async def products(self, sender: str, asset_ids: list[uuid.UUID]) -> list[CatalogItem]:
+        if not asset_ids:
+            return []
+        try:
+            async with self._sessions() as db:
+                business = await business_of(db, sender)
+                if business is None:
+                    return []
+                rows = await db.scalars(
+                    select(Product)
+                    .where(
+                        Product.business_id == business.id,
+                        Product.archived_at.is_(None),
+                        Product.id.in_(
+                            select(AssetProduct.product_id).where(
+                                AssetProduct.asset_id.in_(asset_ids)
+                            )
+                        ),
+                    )
+                    .order_by(Product.position, Product.id)
+                )
+                return [CatalogItem(row.name, row.price, row.description) for row in rows]
+        except SQLAlchemyError:
+            logger.warning("reading the post's products failed for %s", mask(sender), exc_info=True)
+            return []
 
     async def _read(self, sender: str) -> BusinessKnowledge:
         async with self._sessions() as db:

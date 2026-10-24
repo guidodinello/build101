@@ -63,3 +63,9 @@ class Knowledge(Protocol):
         """Empty knowledge for a sender with no Business. Never raises on a database failure: a
         post or a turn goes ahead with what it has rather than not at all."""
         ...
+
+    async def products(self, sender: str, asset_ids: list[uuid.UUID]) -> list[CatalogItem]:
+        """The Catalog Products of the sender's Business linked to these Brand assets, each
+        once, in the Owner's order: by the Owner in the wizard or by the photo analysis. Never
+        raises on a database failure: the post goes ahead without them."""
+        ...
