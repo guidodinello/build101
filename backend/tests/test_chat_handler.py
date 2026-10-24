@@ -67,7 +67,7 @@ from tests.fakes import (
 
 SENDER = "59899000001"
 REPLY_TEXT = "¡Hola! ¿Qué vendés?"
-FOLLOW_UP = "¡Listo! ¿Te gusta? ¿Lo subo, o le cambio algo?"
+FOLLOW_UP = "¡Listo! ¿Lo subo así o le cambio algo?"
 EVENT_REPLY = "Mandámelo de nuevo, porfa 🙏"
 DRAFT = PostCopy(caption="Mesa de roble", hashtags=["#muebles"])
 # Long enough for photos handled one after the other to land in one batch.

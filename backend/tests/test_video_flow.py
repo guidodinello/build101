@@ -38,7 +38,7 @@ from tests.test_chat_handler import SENDER, message
 
 BASE_URL = "https://backend.test"
 STARTED = text_reply("Dale, lo armo en video ⏳")
-READY = text_reply("¡Listo el video! ¿Te gusta? ¿Lo subo, o le cambio algo?")
+READY = text_reply("¡Listo el video! ¿Lo subo así como Reel o le cambio algo?")
 FAILED = text_reply("Uy, no me salió el video. El post sigue ahí.")
 TOLD = text_reply("Listo, ya está.")
 

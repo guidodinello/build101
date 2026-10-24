@@ -324,3 +324,73 @@ def test_approval_state_is_per_sender() -> None:
     approval = lifecycle.approval_for(OTHER_SENDER, "sí", attached=False, recent_photos=[])
 
     assert approval == Approval()
+
+
+# A Post being revised (BUG-3)
+
+
+@pytest.mark.parametrize("approve_first", [False, True])
+def test_a_post_being_revised_cannot_be_approved_or_published(approve_first: bool) -> None:
+    lifecycle, [post] = lifecycle_with("p1")
+    if approve_first:
+        lifecycle.approve(SENDER, "p1")
+
+    lifecycle.begin_revision(SENDER, "p1")
+
+    assert post.status == "revising"
+    assert lifecycle.revising(SENDER, "p1")
+    assert lifecycle.pending(SENDER) == []
+    assert lifecycle.approve(SENDER, "p1") is None
+    assert lifecycle.authorize_tap(SENDER, "p1") is None
+    assert lifecycle.authorize_text(SENDER, "p1", Approval(post_id="p1")) == {
+        "error": "revision_in_progress"
+    }
+    assert lifecycle.approvable_post(SENDER, "p1") == {"error": "revision_in_progress"}
+
+
+def test_subilo_and_a_yes_wait_for_the_new_version() -> None:
+    lifecycle, _ = lifecycle_with("p1")
+    lifecycle.note_reply(SENDER, "¿Lo subo así o le cambio algo?")
+    lifecycle.begin_revision(SENDER, "p1")
+
+    for words in ("subilo", "sí", "dale subilo"):
+        approval = lifecycle.approval_for(SENDER, words, attached=False, recent_photos=[])
+        assert approval == Approval(reason="revision_in_progress")
+
+
+@pytest.mark.parametrize(
+    ("approve_first", "status"), [(False, "pending_approval"), (True, "approved")]
+)
+def test_a_failed_revision_gives_the_post_back_as_it_was(approve_first: bool, status: str) -> None:
+    lifecycle, [post] = lifecycle_with("p1")
+    if approve_first:
+        lifecycle.approve(SENDER, "p1")
+    lifecycle.begin_revision(SENDER, "p1")
+
+    assert lifecycle.cancel_revision(SENDER, "p1")
+
+    assert post.status == status
+    assert not lifecycle.revising(SENDER, "p1")
+    assert lifecycle.pending(SENDER) == [post]
+
+
+def test_the_revised_post_is_retired_when_its_new_version_arrives() -> None:
+    lifecycle, [post] = lifecycle_with("p1")
+    lifecycle.begin_revision(SENDER, "p1")
+
+    assert lifecycle.retire(SENDER, "p1")
+
+    assert post.status == "replaced"
+    assert not lifecycle.cancel_revision(SENDER, "p1")
+    assert post.status == "replaced"
+
+
+def test_only_a_pending_post_can_be_locked_for_a_revision() -> None:
+    lifecycle, [post] = lifecycle_with("p1")
+    approve_and_publish(lifecycle, post)
+
+    lifecycle.begin_revision(SENDER, "p1")
+    lifecycle.begin_revision(SENDER, "nope")
+
+    assert post.status == "publishing"
+    assert not lifecycle.cancel_revision(SENDER, "p1")

@@ -16,6 +16,7 @@ PostStatus = Literal[
     "published",
     "failed",  # definite failure only; [Reintentar] publishes again with a new key
     "replaced",  # a newer revision was sent; no longer approvable
+    "revising",  # its new version is being made: nothing approves or publishes it (BUG-3)
 ]
 # Statuses a post keeps while a publish may still be running or resolving.
 BUSY: frozenset[PostStatus] = frozenset({"publishing", "publish_pending"})

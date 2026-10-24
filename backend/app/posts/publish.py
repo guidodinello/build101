@@ -95,6 +95,8 @@ class PostPublisher:
     ) -> dict[str, Any]:
         """[Publicar ahora]: the tap is the Owner's explicit approval (ADR 0007)."""
         approved = self._posts.authorize_tap(sender, post_id)
+        if approved is None and self._posts.revising(sender, post_id):
+            return {"error": "revision_in_progress"}
         if approved is None:
             return {"error": "post_not_approved"}
         return self._start(approved, channel, notify)

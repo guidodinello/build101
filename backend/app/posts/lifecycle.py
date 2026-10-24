@@ -6,6 +6,8 @@ Allowed moves (ADR 0007 keeps the publisher behind the Owner's explicit approval
     pending_approval | approved -> publishing    (the Owner's words: a plain "subilo")
     publishing -> published | failed | publish_pending
     pending_approval | approved -> discarded | replaced
+    pending_approval | approved -> revising -> replaced   (a change was asked; the new one arrived)
+    revising -> pending_approval | approved              (the new version failed: back as it was)
     failed -> publishing   ([Reintentar])
 
 Nothing else assigns `Post.status`, and the publisher takes only an `ApprovedPost`, which only
@@ -19,7 +21,7 @@ from typing import Any
 from app.conversation.approval import Approval, asks_to_publish, decide
 from app.conversation.photos import Photo
 
-from .store import APPROVABLE, InMemoryPosts, Post
+from .store import APPROVABLE, InMemoryPosts, Post, PostStatus
 
 _MINT = object()
 
@@ -53,6 +55,8 @@ class PostLifecycle:
         self._listed: dict[str, list[str]] = {}
         # The post the assistant's last message asked to publish, which a bare "sí" approves.
         self._offered: dict[str, str] = {}
+        # The status a post being revised had, which it gets back if the revision fails.
+        self._before_revision: dict[tuple[str, str], PostStatus] = {}
 
     # Reading
 
@@ -73,6 +77,11 @@ class PostLifecycle:
         """The posts "subilo" can publish, oldest first: the numbering the Owner sees."""
         return [post for post in self._store.all(sender) if post.status in APPROVABLE]
 
+    def revising(self, sender: str, post_id: str) -> bool:
+        """Whether the post's new version is being made, so nothing may approve it."""
+        post = self.get(sender, post_id)
+        return post is not None and post.status == "revising"
+
     def awaiting_approval(self, post: Post) -> bool:
         """Still as the Owner first saw it: not approved, discarded, replaced or published."""
         return post.status == "pending_approval"
@@ -82,6 +91,8 @@ class PostLifecycle:
         post = self.get(sender, post_id)
         if post is None:
             return {"error": "unknown_post"}
+        if post.status == "revising":
+            return {"error": "revision_in_progress"}
         if post.status not in APPROVABLE:
             return {"error": "post_not_pending", "status": post.status}
         return post
@@ -117,11 +128,29 @@ class PostLifecycle:
         post.status = "replaced"
 
     def retire(self, sender: str, post_id: str) -> bool:
-        """`replace` for the post a remake replaces, if it is still pending."""
-        post = self.pending_post(sender, post_id)
-        if post is None:
+        """`replace` for the post a remake replaces, if it is still pending or being revised."""
+        self._before_revision.pop((sender, post_id), None)
+        post = self.get(sender, post_id)
+        if post is None or post.status not in APPROVABLE | {"revising"}:
             return False
         self.replace(post)
+        return True
+
+    def begin_revision(self, sender: str, post_id: str) -> None:
+        """Lock a pending post while its new version is made: no path may approve it (BUG-3)."""
+        post = self.pending_post(sender, post_id)
+        if post is None:
+            return
+        self._before_revision[(sender, post_id)] = post.status
+        post.status = "revising"
+
+    def cancel_revision(self, sender: str, post_id: str) -> bool:
+        """The new version failed: the post gets back its status. False if it wasn't locked."""
+        before = self._before_revision.pop((sender, post_id), None)
+        post = self.get(sender, post_id)
+        if before is None or post is None or post.status != "revising":
+            return False
+        post.status = before
         return True
 
     # Publishing: the publisher takes an ApprovedPost and reports how it ended
@@ -133,6 +162,8 @@ class PostLifecycle:
         post = self.get(sender, post_id)
         if post is None:
             return {"error": "unknown_post"}
+        if post.status == "revising":
+            return {"error": "revision_in_progress"}
         if post.status not in APPROVABLE:
             return {"error": "post_not_pending", "status": post.status}
         if approval.post_id != post.id:
@@ -193,6 +224,9 @@ class PostLifecycle:
             self._listed.get(sender),
             has_photos=attached or bool(photos_after(recent_photos, pending)),
             offered=self._offered.get(sender),
+            revising=frozenset(
+                post.id for post in self._store.all(sender) if post.status == "revising"
+            ),
         )
         if listed:
             self._listed[sender] = listed
