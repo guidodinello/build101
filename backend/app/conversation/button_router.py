@@ -36,6 +36,7 @@ from .events import (
     PostStarted,
     PublishNotConnected,
     PublishStarted,
+    RevisionInProgress,
     StaleButton,
 )
 
@@ -119,6 +120,8 @@ class ButtonRouter:
         self, sender: str, entity: str, channel: ChannelPort, notify: Notify
     ) -> Event:
         post = self._posts.approve(sender, entity)
+        if post is None and self._posts.revising(sender, entity):
+            return RevisionInProgress(entity)
         return StaleButton() if post is None else PostApproved(post.id)
 
     async def _post_change(
@@ -181,5 +184,7 @@ def publishing(post_id: str, result: dict[str, Any]) -> Event:
             return PublishStarted(post_id)
         case "need_ig":
             return PublishNotConnected(post_id)
+        case "revision_in_progress":
+            return RevisionInProgress(post_id)
         case _:
             return StaleButton()

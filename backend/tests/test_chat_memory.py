@@ -12,6 +12,8 @@ from app.conversation.history import Compactor, ConversationSummary, InMemoryHis
 from app.conversation.notes import InMemoryNotes
 from app.conversation.photo_keeper import PhotoKeeper
 from app.conversation.photos import LOCAL_TZ
+from app.copy import messages_es
+from app.llm.client import Step
 from app.posts.store import Post, PostImage
 from tests.conftest import make_image
 from tests.fakes import FakeChannel, ScriptedModel, call_reply, text_reply
@@ -271,3 +273,98 @@ async def test_a_photo_is_described_for_the_next_turns() -> None:
     context = model.calls[-1][-1]["content"][1]["text"]
     assert "- f1 sent" in context
     assert ": Mesa ratona de roble, vista de frente" in context
+
+
+# A model step that fails after an action started (AIQ-1)
+
+
+def step_types(steps: list[Step]) -> list[str]:
+    return [step["type"] for step in steps]
+
+
+async def test_a_failure_after_a_post_started_says_it_is_being_made_and_keeps_the_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = ScriptedModel(replies=[CREATE], fail_after=1)
+    chat, background, channel, gate = await start_gated_post(model, monkeypatch)
+
+    assert channel.sent == [(SENDER, messages_es.POST_GENERATING)]
+    history = await chat.history.get(SENDER)
+    assert step_types(history) == ["user_input", "function_call", "function_result", "user_input"]
+    assert step_text(history[0]) == "[foto f1] armame un post"
+    assert json.loads(history[2]["result"])["post_id"] == POST_ID
+    assert step_text(history[3]).startswith("[turn interrupted]")
+    assert messages_es.POST_GENERATING in step_text(history[3])
+
+    gate.set()
+    await background.join()
+    texts = [step_text(step) for step in await chat.history.get(SENDER)]
+    assert texts[4].startswith(f"[post {POST_ID} sent to the Owner]")
+
+
+async def test_running_out_of_steps_after_a_post_started_behaves_the_same(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = ScriptedModel(replies=[CREATE, call_reply("unknown_tool")])
+    chat, _, channel, _ = await start_gated_post(model, monkeypatch)
+
+    assert channel.sent == [(SENDER, messages_es.POST_GENERATING)]
+    history = await chat.history.get(SENDER)
+    assert step_types(history)[:3] == ["user_input", "function_call", "function_result"]
+    assert step_text(history[-1]).startswith("[turn interrupted]")
+
+
+async def test_a_failure_after_a_publish_started_says_it_is_being_published() -> None:
+    approve = call_reply("approve_post", post_id=POST_ID, next="publish_now")
+    model = ScriptedModel(replies=[approve], fail_after=1)
+    chat, background = build(model)
+    add_pending_post(chat)
+    channel = FakeChannel()
+
+    await chat.handler.handle(message("text", text="subilo"), channel)
+
+    assert channel.sent[0] == (SENDER, messages_es.PUBLISHING)
+    history = await chat.history.get(SENDER)
+    assert step_types(history) == ["user_input", "function_call", "function_result", "user_input"]
+    await background.join()
+
+
+async def test_a_failure_after_a_note_was_saved_confirms_it() -> None:
+    remember = call_reply("remember", note="No poner precios en los posts")
+    model = ScriptedModel(replies=[remember], fail_after=1)
+    chat, _ = build(model, notes=InMemoryNotes())
+    channel = FakeChannel()
+
+    await chat.handler.handle(message("text", text="nunca pongas precios"), channel)
+
+    assert channel.sent == [(SENDER, messages_es.NOTED)]
+    history = await chat.history.get(SENDER)
+    assert step_types(history) == ["user_input", "function_call", "function_result", "user_input"]
+
+
+async def test_a_publish_matters_more_than_a_note_when_both_started() -> None:
+    remember = call_reply("remember", note="Prefiere carruseles")
+    approve = call_reply("approve_post", "call_2", post_id=POST_ID, next="publish_now")
+    model = ScriptedModel(replies=[remember, approve], fail_after=2)
+    chat, background = build(model, notes=InMemoryNotes())
+    add_pending_post(chat)
+    channel = FakeChannel()
+
+    await chat.handler.handle(
+        message("text", text="subilo, y anotá que me gustan los carruseles"), channel
+    )
+
+    assert channel.sent[0] == (SENDER, messages_es.PUBLISHING)
+    await background.join()
+
+
+async def test_a_failure_after_only_failed_actions_stores_nothing() -> None:
+    unknown = call_reply("create_post", brief="mesa", asset_ids=["f9"], style="photos")
+    model = ScriptedModel(replies=[unknown], fail_after=1)
+    chat, _ = build(model)
+    channel = FakeChannel()
+
+    await chat.handler.handle(message("text", text="armame un post con la f9"), channel)
+
+    assert channel.sent == [(SENDER, messages_es.REPLY_FAILED)]
+    assert await chat.history.get(SENDER) == []

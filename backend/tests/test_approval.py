@@ -174,7 +174,24 @@ def test_a_listed_post_that_is_gone_is_never_replaced_by_a_neighbour() -> None:
 
 @pytest.mark.parametrize(
     "text",
-    ["sí", "Si", "dale!", "ok, de una", "👍", "sí, ahora", "listo, andá nomás", "buenísimo, dale"],
+    [
+        "sí",
+        "Si",
+        "dale!",
+        "ok",
+        "ok, de una",
+        "de una",
+        "mandale",
+        "metele",
+        "bueno",
+        "joya",
+        "👍",
+        "✅",
+        "sí, ahora",
+        "listo, andá nomás",
+        "buenísimo, dale",
+        "genial 👍",
+    ],
 )
 def test_a_bare_yes_is_a_yes(text: str) -> None:
     assert is_yes(text)
@@ -189,9 +206,30 @@ def test_a_yes_with_anything_else_is_not(text: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "text",
+    [
+        "genial",
+        "buenísimo",
+        "perfecto",
+        "excelente",
+        "bárbaro",
+        "bien",
+        "está muy bien",
+        "genial!!",
+    ],
+)
+def test_praise_alone_is_not_a_yes(text: str) -> None:
+    assert not is_yes(text)
+
+
+@pytest.mark.parametrize(
     ("text", "asks"),
     [
-        ("¡Listo! ¿Te gusta? ¿Lo subo, o le cambio algo?", True),
+        ("¡Listo! ¿Te gusta? ¿Lo subo, o le cambio algo?", False),
+        ("¿Te gusta? 😍 ¿Lo subo?", False),
+        ("¿Te gusta?\n¿Lo subo?", False),
+        ("¡Listo! ¿Lo subo así o le cambio algo?", True),
+        ("¿Viste? Quedó lindo. ¿Lo subo así o le cambio algo?", True),
         ("¿Lo publico ya?", True),
         ("Quedó lindo. ¿Querés subirlo ahora?", True),
         ("¡Dale, lo subo! ⏳", False),
@@ -228,6 +266,7 @@ def test_asks_to_publish_spots_the_publish_question(text: str, asks: bool) -> No
 )
 def test_the_publish_questions_we_write_still_arm_a_bare_yes(text: str) -> None:
     assert asks_to_publish(text)
+    assert text.count("?") == 1
 
 
 def test_a_yes_to_the_publish_question_approves_the_offered_post() -> None:
@@ -248,3 +287,29 @@ def test_a_yes_to_a_post_no_longer_pending_is_refused() -> None:
     approval, _ = decide("sí", [pending_post("p1")], None, has_photos=False, offered="gone")
 
     assert approval.reason == "post_not_pending"
+
+
+def test_a_post_being_revised_is_not_approved_by_subilo() -> None:
+    approval, _ = decide("subilo", [], None, False, revising=frozenset({"p1"}))
+
+    assert approval == Approval(reason="revision_in_progress")
+
+
+def test_subilo_waits_for_a_revision_even_with_another_post_pending() -> None:
+    approval, _ = decide("subilo", [pending_post("p2")], None, False, revising=frozenset({"p1"}))
+
+    assert approval == Approval(reason="revision_in_progress")
+
+
+def test_a_yes_to_a_post_being_revised_waits_for_the_new_version() -> None:
+    approval, _ = decide("sí", [], None, has_photos=False, offered="p1", revising=frozenset({"p1"}))
+
+    assert approval == Approval(reason="revision_in_progress")
+
+
+def test_a_number_naming_a_post_being_revised_waits_for_the_new_version() -> None:
+    approval, _ = decide(
+        "la segunda", [pending_post("p1")], ["p1", "p2"], False, revising=frozenset({"p2"})
+    )
+
+    assert approval == Approval(reason="revision_in_progress")

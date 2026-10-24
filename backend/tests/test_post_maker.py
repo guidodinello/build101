@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from io import BytesIO
@@ -7,8 +8,9 @@ from PIL import Image
 
 from app.agents.schemas import BrandBrain
 from app.background import BackgroundWork
-from app.conversation.events import Event, Notify, PostFailed, PostSent
+from app.conversation.events import Event, Notify, PostFailed, PostSent, fallback
 from app.conversation.photos import LOCAL_TZ, InMemoryPhotos
+from app.copy import messages_es
 from app.knowledge.base import BusinessKnowledge, Note
 from app.media.images import POST_SIZE, image_size
 from app.media.public import PublicImages
@@ -532,7 +534,7 @@ async def test_the_remade_post_replaces_the_old_one_only_once_it_is_sent(
         FakeChannel(),
         drop,
     )
-    assert old.status == "pending_approval"  # still generating
+    assert old.status == "revising"  # locked while its new version is made
     await background.join()
 
     assert old.status == "replaced"
@@ -801,3 +803,107 @@ async def test_the_owners_notes_reach_the_post_writer(photos: InMemoryPhotos) ->
     await background.join()
 
     assert "- Siempre mencionar el envío gratis" in model.structured_systems[0]
+
+
+# A Post being revised (BUG-3)
+
+
+async def test_a_revision_locks_the_old_post_until_the_new_one_replaces_it(
+    photos: InMemoryPhotos,
+) -> None:
+    store = PostLifecycle()
+    old = sent_design(store, photos)
+    store.approve(SENDER, "old")
+    posts, background = maker(photos_model(), CountingImageGen(), photos, store=store)
+
+    result = posts.revise_post(
+        SENDER, {"post_id": "old", "change": "más corto", "part": "caption"}, FakeChannel(), drop
+    )
+
+    assert old.status == "revising"  # before anything is generated
+    assert store.pending(SENDER) == []
+    await background.join()
+    assert old.status == "replaced"
+    assert [post.id for post in store.pending(SENDER)] == [result["post_id"]]
+
+
+@pytest.mark.parametrize("approve_first", [False, True])
+async def test_a_failed_revision_gives_the_old_post_back_and_says_the_change_failed(
+    photos: InMemoryPhotos, approve_first: bool
+) -> None:
+    store, events = PostLifecycle(), []
+    old = sent_design(store, photos)
+    if approve_first:
+        store.approve(SENDER, "old")
+    before = old.status
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(2)})
+    posts, background = maker(model, CountingImageGen(fail=True), photos, store=store)
+
+    result = posts.revise_post(
+        SENDER,
+        {"post_id": "old", "change": "fondo verde", "part": "images"},
+        FakeChannel(),
+        recorder(events),
+    )
+    await background.join()
+
+    assert old.status == before
+    assert store.pending(SENDER) == [old]
+    [failed] = events
+    assert isinstance(failed, PostFailed) and failed.post_id == result["post_id"]
+    assert failed.replaces == "old"
+    assert "post old is back as it was" in failed.note()
+    assert fallback(failed) == messages_es.REVISION_FAILED
+
+
+async def test_a_failed_new_post_that_replaces_nothing_is_a_plain_failure(
+    photos: InMemoryPhotos,
+) -> None:
+    events: list[Event] = []
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(1)})
+    posts, background = maker(model, CountingImageGen(fail=True), photos)
+
+    posts.create_post(
+        SENDER,
+        {"brief": "mesa", "asset_ids": ["f1"], "style": "design"},
+        FakeChannel(),
+        recorder(events),
+    )
+    await background.join()
+
+    [failed] = events
+    assert isinstance(failed, PostFailed) and failed.replaces is None
+    assert fallback(failed) == messages_es.JOB_FAILED
+
+
+async def test_a_revision_that_cannot_start_leaves_the_old_post_as_it_was(
+    photos: InMemoryPhotos,
+) -> None:
+    store, gate = PostLifecycle(), asyncio.Event()
+    old = sent_design(store, photos)
+    store.approve(SENDER, "old")
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(1)})
+    posts, background = maker(model, CountingImageGen(gate=gate), photos, store=store)
+    busy = posts.create_post(
+        SENDER, {"brief": "otra", "asset_ids": ["f3"], "style": "design"}, FakeChannel(), drop
+    )
+    change = {"post_id": "old", "change": "fondo verde", "part": "images"}
+
+    result = posts.revise_post(SENDER, change, FakeChannel(), drop)
+
+    assert busy["status"] == "generating"
+    assert result == {"error": "generation_in_progress"}
+    assert old.status == "approved"
+    gate.set()
+    await background.join()
+
+    limited, _ = maker(model, CountingImageGen(), photos, store=store, max_posts_per_day=0)
+    assert limited.revise_post(SENDER, change, FakeChannel(), drop) == {"error": "daily_limit"}
+    assert limited.create_post(
+        SENDER,
+        {"brief": "otra", "asset_ids": ["f3"], "style": "design", "replaces": "old"},
+        FakeChannel(),
+        drop,
+    ) == {"error": "daily_limit"}
+    assert old.status == "approved"
+    assert store.pending(SENDER)[0] is old

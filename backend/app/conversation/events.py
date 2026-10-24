@@ -41,13 +41,20 @@ class PostFailed:
     style: Literal["photos", "design"]
     photo_ids: tuple[str, ...]
     brief: str
+    replaces: str | None = None  # the post this was the new version of, now back as it was
 
     def note(self) -> str:
-        return (
+        note = (
             f"[post {self.post_id} failed] A {self.style} post from photos "
             f'{" ".join(self.photo_ids)} (brief "{self.brief}") could not be made. '
             "Nothing reached the Owner."
         )
+        if self.replaces:
+            note += (
+                f" It was the change the Owner asked for: the change didn't work, and post "
+                f"{self.replaces} is back as it was, ready to approve or change."
+            )
+        return note
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,6 +265,18 @@ class PublishStarted:
 
 
 @dataclass(frozen=True, slots=True)
+class RevisionInProgress:
+    post_id: str
+
+    def note(self) -> str:
+        return (
+            f"[post {self.post_id} revision in progress] The Owner tapped a button to approve or "
+            "publish it, but its new version, with the change they asked for, is still being "
+            "made. Nothing was approved or published; the new version arrives in a few minutes."
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class BrandSummaryReady:
     """The Brand Brain's summary, as the Brand Strategist wrote it, for the Owner to confirm."""
 
@@ -323,6 +342,7 @@ Event = (
     | PostStarted
     | PostNotStarted
     | PublishStarted
+    | RevisionInProgress
     | BrandSummaryReady
     | JobFailed
     | BrandGenerating
@@ -361,6 +381,8 @@ def fallback(event: Event) -> str | None:
     match event:
         case PostSent():
             return messages_es.post_actions()
+        case PostFailed(replaces=str()):
+            return messages_es.REVISION_FAILED
         case PostFailed():
             return messages_es.JOB_FAILED
         case VideoSent():
@@ -409,6 +431,8 @@ def fallback(event: Event) -> str | None:
             return POST_NOT_STARTED.get(reason, messages_es.REPLY_FAILED)
         case PublishStarted():
             return messages_es.PUBLISHING
+        case RevisionInProgress():
+            return messages_es.REVISION_IN_PROGRESS
         case ActionFailed():
             return messages_es.REPLY_FAILED
         case BrandSummaryReady(business_name=name, summary=summary):

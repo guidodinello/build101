@@ -41,10 +41,12 @@ ORDINALS = {
 LAST_WORDS = frozenset({"ultimo", "ultima"})
 # A whole reply made of these answers yes to the publish question the Owner was just asked.
 YES_WORDS = frozenset(
-    {"si", "dale", "ok", "okay", "oka", "okey", "va", "joya", "perfecto", "listo", "genial"}
-    | {"buenisimo", "barbaro", "excelente", "mandale", "metele", "adelante", "claro", "obvio"}
-    | {"bueno", "bien", "seguro", "sale", "anda", "andale"}
+    {"si", "dale", "ok", "okay", "oka", "okey", "va", "joya", "listo", "mandale", "metele"}
+    | {"adelante", "claro", "obvio", "bueno", "seguro", "sale", "anda", "andale"}
 )
+YES_PHRASES = (("de", "una"),)
+# Praise answers "¿te gusta?", not "¿lo subo?": only next to a yes ("buenísimo, dale").
+PRAISE_WORDS = frozenset({"genial", "buenisimo", "barbaro", "excelente", "perfecto", "bien"})
 YES_FILLER = frozenset(
     {"de", "una", "nomas", "ya", "ahora", "porfa", "por", "favor", "gracias", "para", "che"}
     | {"esta", "asi", "todo", "que", "lo", "la", "re", "mil", "muy"}
@@ -89,29 +91,40 @@ def classify(text: str) -> Intent:
 
 
 def is_yes(text: str) -> bool:
-    """A reply that is only a yes: "sí", "dale!", "ok, de una", "👍"."""
+    """A reply that is only a yes: "sí", "dale!", "ok, de una", "👍", "buenísimo, dale".
+
+    Praise alone ("genial", "está muy bien") is not a yes.
+    """
     if "?" in text:
         return False
     words = normalize(text)
-    if not words:
-        return any(emoji in text for emoji in YES_EMOJI)
-    return bool(YES_WORDS.intersection(words)) and all(
-        word in YES_WORDS or word in YES_FILLER for word in words
+    says_yes = (
+        bool(YES_WORDS.intersection(words))
+        or any(tuple(words[n : n + 2]) in YES_PHRASES for n in range(len(words)))
+        or any(emoji in text for emoji in YES_EMOJI)
+    )
+    return says_yes and all(
+        word in YES_WORDS or word in YES_FILLER or word in PRAISE_WORDS for word in words
     )
 
 
 def asks_to_publish(text: str) -> bool:
     """Whether the assistant's message ends by asking the Owner if it should publish a post.
 
-    Only the last sentence counts: a publish question in the middle of a reply (or followed by
-    another question) must not turn the Owner's next "bien" into an approval.
+    The publish question must be the last sentence and the only question at the end: one in the
+    middle of a reply, or right after another question ("¿Te gusta? ¿Lo subo?"), must not turn
+    the Owner's next "sí" into an approval.
     """
     body = plain(KEYCAP.sub("", text))
     ending = TRAILING_NOISE.search(body)
     if ending is None or "?" not in ending.group():  # "¿Lo subo? 🙌" still ends on its question
         return False
-    last_sentence = SENTENCE_END.split(body[: ending.start()])[-1]
-    return PUBLISH_QUESTION.search(last_sentence) is not None
+    head = body[: ending.start()]
+    start = max((match.end() for match in SENTENCE_END.finditer(head)), default=0)
+    if PUBLISH_QUESTION.search(head[start:]) is None:
+        return False
+    before = TRAILING_NOISE.search(head[:start])
+    return before is None or "?" not in before.group()
 
 
 def ordinal(text: str, count: int) -> int | None:
@@ -142,6 +155,7 @@ def decide(
     listed: list[str] | None,
     has_photos: bool,
     offered: str | None = None,
+    revising: frozenset[str] = frozenset(),
 ) -> tuple[Approval, list[str] | None]:
     """The Approval for one turn and the post ids the next turn may name by number.
 
@@ -154,14 +168,21 @@ def decide(
 
     `offered`: the post the assistant's last message asked to publish ("¿Lo subo?"), so a bare
     "sí" or "dale" is an explicit answer to that question.
+
+    `revising`: the posts whose new version is being made. None of them can be approved, and
+    while one is, "subilo" waits for it rather than guess another post was meant.
     """
     if has_photos:
         return Approval(), None
     if listed and (number := ordinal(text, len(listed))):
-        return approve_if_pending(listed[number - 1], pending), None
+        return approve_if_pending(listed[number - 1], pending, revising), None
     if offered and is_yes(text):
-        return approve_if_pending(offered, pending), None
+        return approve_if_pending(offered, pending, revising), None
+    if revising and is_yes(text):
+        return Approval(reason="revision_in_progress"), None
     match classify(text):
+        case "approve" if revising:
+            return Approval(reason="revision_in_progress"), None
         case "approve" if len(pending) == 1:
             return Approval(post_id=pending[0].id), None
         case "approve" if pending:
@@ -177,7 +198,11 @@ def decide(
             return Approval(), None
 
 
-def approve_if_pending(post_id: str, pending: list[Post]) -> Approval:
+def approve_if_pending(
+    post_id: str, pending: list[Post], revising: frozenset[str] = frozenset()
+) -> Approval:
+    if post_id in revising:
+        return Approval(reason="revision_in_progress")
     if any(post.id == post_id for post in pending):
         return Approval(post_id=post_id)
     return Approval(reason="post_not_pending")

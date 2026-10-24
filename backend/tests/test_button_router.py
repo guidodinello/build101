@@ -10,6 +10,7 @@ from app.conversation.events import (
     PostStarted,
     PublishNotConnected,
     PublishStarted,
+    RevisionInProgress,
     StaleButton,
     fallback,
 )
@@ -201,6 +202,30 @@ async def test_photo_post_makes_a_post_from_the_photos_as_they_are(rig: Rig) -> 
 
 async def test_photo_post_with_photos_that_expired(rig: Rig) -> None:
     assert await rig.tap("photo_post:f9") == PostNotStarted("unknown_asset")
+
+
+@pytest.mark.parametrize(
+    ("status", "button_id"),
+    [
+        ("pending_approval", "post_approve:p1"),
+        ("approved", "post_publish:p1"),
+        ("approved", "post_approve:p1"),
+    ],
+)
+async def test_the_old_buttons_of_a_post_being_revised_publish_nothing(
+    rig: Rig, status: PostStatus, button_id: str
+) -> None:
+    post = rig.add_post("p1", status)
+    rig.store.begin_revision(SENDER, "p1")
+
+    event = await rig.tap(button_id)
+    await rig.finish()
+
+    assert event == RevisionInProgress("p1")
+    assert fallback(event) == messages_es.REVISION_IN_PROGRESS
+    assert buttons(event) == []
+    assert post.status == "revising"
+    assert rig.publisher.keys == []
 
 
 async def test_subilo_can_still_publish_an_approved_post(rig: Rig) -> None:

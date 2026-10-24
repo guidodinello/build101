@@ -190,6 +190,8 @@ class PostMaker:
             return {"error": "daily_limit"}
 
         self._generating.add(sender)
+        if args.replaces:
+            self._posts.begin_revision(sender, args.replaces)
         if generates:
             self._designs_today[sender] = (today, designs_today + 1)
         for photo in photos:
@@ -246,7 +248,14 @@ class PostMaker:
         except Exception:
             # The task's boundary: nobody awaits it, so log and tell the Owner.
             logger.exception("post %s failed for %s", post_id, mask(sender))
-            event = PostFailed(post_id, args.style, tuple(photo.id for photo in photos), args.brief)
+            restored = bool(args.replaces) and self._posts.cancel_revision(sender, args.replaces)
+            event = PostFailed(
+                post_id,
+                args.style,
+                tuple(photo.id for photo in photos),
+                args.brief,
+                args.replaces if restored else None,
+            )
         finally:
             self._generating.discard(sender)
         # After the guard is released, and outside the try: a failing notify must not report a

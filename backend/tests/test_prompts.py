@@ -61,3 +61,11 @@ def test_video_events_and_tool_reach_the_prompt_only_with_the_flag() -> None:
     assert "invalid_arguments" in on
     assert "{" not in on
     assert "}" not in on
+
+
+def test_a_post_or_reel_that_arrives_gets_one_final_publish_question() -> None:
+    prompt = system_prompt("Vera", with_video=True)
+
+    assert "¿Te gusta?" not in prompt
+    assert "¿Lo subo así o le cambio algo?" in prompt
+    assert "¿Lo subo así como Reel o le cambio algo?" in prompt

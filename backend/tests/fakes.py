@@ -101,6 +101,7 @@ class ScriptedModel:
     structured_calls: list[list[Content]] = field(default_factory=list)
     structured_systems: list[str] = field(default_factory=list)
     fail: bool = False
+    fail_after: int | None = None  # this many replies, then every call raises LLMError
     delay_s: float = 0.0
 
     async def reply(
@@ -116,7 +117,7 @@ class ScriptedModel:
         self.thinking.append(thinking_level)
         self.tools_seen.append(tools)
         await asyncio.sleep(self.delay_s)
-        if self.fail:
+        if self.fail or (self.fail_after is not None and len(self.calls) > self.fail_after):
             raise LLMError("boom")
         return self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
 

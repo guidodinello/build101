@@ -4,8 +4,10 @@ The orchestrator writes what the Owner reads (ADR 0026): code emits an event
 (`app/conversation/events.py`) and the model answers it with the conversation in view. So this
 module holds only:
 
-- fallbacks for when the LLM is unavailable: `REPLY_FAILED`, `STILL_WORKING`, `LOOKING_AT_PHOTOS`
-  and the text of each event (`events.fallback`), sent only if that event's turn fails;
+- fallbacks for when the LLM is unavailable: `REPLY_FAILED`, `STILL_WORKING`, `LOOKING_AT_PHOTOS`,
+  the text of each event (`events.fallback`), sent only if that event's turn fails, and the
+  message for an action that started before the Owner's turn failed (`POST_GENERATING`,
+  `PUBLISHING`, `NOTED`);
 - verbatim events, sent as written without a model turn (`events.verbatim`): `brand_summary`,
   `JOB_FAILED` for a failed job and `BRAND_GENERATING`;
 - text sent directly, outside the chat: Flow 1 before the web form (`welcome`, `name_ack_link`,
@@ -39,7 +41,12 @@ BRAND_FIX_PROMPT = "Contame qué cambio, con tus palabras."
 READY_OPEN_CHAT = "¡Listo, ya conozco tu marca! ¿En qué te puedo ayudar hoy?"
 RETRYING = "Dale, lo intento de nuevo ⏳"
 POST_GENERATING = "¡Dale! Lo armo ⏳"
+REVISION_IN_PROGRESS = (
+    "Estoy terminando la versión nueva de ese post ⏳ Apenas te llegue, la aprobás."
+)
+REVISION_FAILED = "Uy, no me salió el cambio 🙈 El post sigue como estaba. ¿Probamos de nuevo?"
 PUBLISHING = "¡Dale, lo subo! ⏳"
+NOTED = "Anotado ✍️"
 POST_CHANGE_PROMPT = (
     '¿Qué le cambio? Por ejemplo: "más corto", "otra foto", "mencioná el envío gratis".'
 )
@@ -49,7 +56,7 @@ PUBLISH_NOW_ASK = "¡Aprobado! ¿Lo publico ya?"
 GENERATION_BUSY = "Estoy terminando otro post 🙌 Apenas te lo mande, armamos este."
 DAILY_LIMIT = "Por hoy ya armamos todos los diseños que puedo hacer 🙈 Mañana seguimos."
 PHOTOS_GONE = "Ya no tengo esas fotos 🙈 ¿Me las mandás de nuevo?"
-VIDEO_ACTIONS = "👆 ¿Te gusta el video? ¿Lo subo o le cambio algo?"
+VIDEO_ACTIONS = "👆 ¿Lo subo así como Reel o le cambio algo?"
 VIDEO_FAILED = (
     "Uy, no me salió el video 🙈 El post sigue como estaba. ¿Probamos de nuevo más tarde?"
 )
@@ -114,4 +121,4 @@ def brand_summary(business_name: str, summary: str) -> str:
 
 def post_actions() -> str:
     """The post's buttons message when the model's own follow-up (#31) is not available."""
-    return "👆 ¿Te gusta? ¿Lo subo o le cambio algo?"
+    return "👆 ¿Lo subo así o le cambio algo?"

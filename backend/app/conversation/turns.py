@@ -6,6 +6,7 @@ answers what code reports (`notify`, ADR 0026). They share one pipeline (`_run`)
 """
 
 import asyncio
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -64,6 +65,13 @@ KEEP_ALIVE_S = 20.0
 OWNER_THINKING: ThinkingLevel = "medium"
 EVENT_THINKING: ThinkingLevel = "low"
 LOGGED_REPLY_CHARS = 300
+# What the Owner is told when the turn fails after one of these tools started its action, the one
+# that matters most to them first (AIQ-1).
+STARTED_ACTIONS = (
+    (frozenset({"approve_post"}), messages_es.PUBLISHING),
+    (frozenset({"create_post", "revise_post", "create_video"}), messages_es.POST_GENERATING),
+    (frozenset({"remember", "forget", "update_brand"}), messages_es.NOTED),
+)
 WEEKDAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 
 
@@ -135,17 +143,23 @@ class Turns:
         attached: bool,
     ) -> str:
         """The reply to send. `text` is what the model reads; `words`, the Owner's own text,
-        decides approval. A failed turn is `REPLY_FAILED` and leaves no trace in the history."""
+        decides approval.
+
+        A turn that fails after an action started (a post, a publish, a note) answers with that
+        action's short message and keeps the request and the actions in the history, closed by a
+        note. One that fails before is `REPLY_FAILED` and leaves no trace in the history.
+        """
         approval = self._lifecycle.approval_for(
             sender, words, attached=attached, recent_photos=self._photos.recent(sender)
         )
         turn = _Turn(user_step(text), text, approval, True, True, OWNER_THINKING, message_id)
         past = await self._history.get(sender)
-        answer = await self._run(sender, past, turn, channel)
-        if answer is None:
-            return messages_es.REPLY_FAILED
-        reply, steps = answer
-        # Only a completed turn enters the history, so a failure leaves no dangling user step.
+        reply, steps = await self._run(sender, past, turn, channel)
+        if not reply:
+            reply = started_action_message(steps)
+            if reply is None:
+                return messages_es.REPLY_FAILED
+            steps.append(user_step(interrupted_note(reply)))
         await self._remember(sender, past, [turn.stored, *steps], reply, offered=None)
         return reply
 
@@ -203,11 +217,10 @@ class Turns:
             OWNER_THINKING if with_photos else EVENT_THINKING,
             message_id,
         )
-        answer = await self._run(sender, past, turn, channel)
-        if answer is None:
+        text, steps = await self._run(sender, past, turn, channel)
+        if not text:
             await self._send_fallback(sender, past, event, step, channel)
             return
-        text, steps = answer
         if isinstance(event, Published) and event.permalink and event.permalink not in text:
             # The link is data, not copy: it reaches the Owner exactly, whatever the model wrote.
             text = f"{text}\n{event.permalink}"
@@ -216,8 +229,9 @@ class Turns:
 
     async def _run(
         self, sender: str, past: list[Step], turn: _Turn, channel: ChannelPort
-    ) -> tuple[str, list[Step]] | None:
-        """The model's reply text and the steps of the turn, or None when it couldn't answer.
+    ) -> tuple[str, list[Step]]:
+        """The model's reply text and the steps of the turn. The text is "" when it couldn't
+        answer; the steps then hold the tool calls it made before failing.
 
         Marks the photos it showed the model as seen, only for a completed turn.
         """
@@ -241,17 +255,18 @@ class Turns:
                 self._keep_owner_posted(sender, turn.message_id, bool(unseen), channel),
                 f"keep-alive for {mask(sender)}",
             )
+        steps: list[Step] = []
         try:
-            text, steps = await self._converse(sender, past, current, turn, channel)
+            text = await self._converse(sender, past, current, turn, channel, steps)
         except LLMError:
             logger.warning("%s failed for %s", AGENT, mask(sender), exc_info=True)
-            return None
+            return "", steps
         finally:
             if keep_alive:
                 keep_alive.cancel()
         if not text:
             logger.warning("%s still calling tools after %d steps", AGENT, MAX_STEPS)
-            return None
+            return "", steps
         for photo in unseen:
             photo.seen = True
         return text, steps
@@ -272,12 +287,18 @@ class Turns:
         await send(channel, sender, text, event)
 
     async def _converse(
-        self, sender: str, past: list[Step], current: Step, turn: _Turn, channel: ChannelPort
-    ) -> tuple[str, list[Step]]:
-        """Run the model and tool steps on `current`: the reply text ("" if it kept calling tools
-        until MAX_STEPS) and the steps of the turn. Raises LLMError."""
+        self,
+        sender: str,
+        past: list[Step],
+        current: Step,
+        turn: _Turn,
+        channel: ChannelPort,
+        steps: list[Step],
+    ) -> str:
+        """Run the model and tool steps on `current`, adding them to `steps`: the reply text (""
+        if it kept calling tools until MAX_STEPS). Raises LLMError, `steps` keeping the tool
+        calls made until then."""
         system = await self._system_for(sender)
-        steps: list[Step] = []
         for _ in range(MAX_STEPS):
             reply = await self._model.reply(
                 AGENT,
@@ -288,13 +309,13 @@ class Turns:
             )
             steps.extend(reply.steps)
             if not reply.function_calls:
-                return reply.text, steps
+                return reply.text
             for call in reply.function_calls:
                 result = await self._toolbox.run(
                     call, sender, channel, self.notify, turn.approval, turn.owner_request
                 )
                 steps.append(function_result_step(call, result))
-        return "", steps
+        return ""
 
     async def _system_for(self, sender: str) -> str:
         """The instructions, then what the model knows about this Business (ADR 0030)."""
@@ -353,6 +374,27 @@ class Turns:
 def log_reply(sender: str, text: str) -> None:
     logger.info("%s replied to %s (%d chars)", AGENT, mask(sender), len(text))
     logger.debug("%s reply: %s", AGENT, text[:LOGGED_REPLY_CHARS])
+
+
+def started_action_message(steps: list[Step]) -> str | None:
+    """The short message for the action that matters most among those the tool calls in `steps`
+    started; None if none did (a call that returned an error started nothing)."""
+    started: set[str] = set()
+    for step in steps:
+        match step:
+            case {"type": "function_result", "name": str() as name, "result": str() as result}:
+                if "error" not in json.loads(result):
+                    started.add(name)
+            case _:
+                pass
+    return next((text for names, text in STARTED_ACTIONS if started & names), None)
+
+
+def interrupted_note(told: str) -> str:
+    return (
+        "[turn interrupted] Your reply to the Owner's message above failed after the actions "
+        f'above started; they are under way. The Owner was told: "{told}"'
+    )
 
 
 def offered_post(event: Event) -> str | None:
