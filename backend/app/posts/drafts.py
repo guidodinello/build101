@@ -14,6 +14,7 @@ from app.carousel.schemas import (
     SlideScene,
     TemplateFamily,
 )
+from app.knowledge.base import CatalogItem
 from app.llm.client import ChatModel, Content, image_content, text_content
 from app.prompts import tagged
 
@@ -77,11 +78,12 @@ class PostDrafter:
         notes: list[str] | None = None,
         previous: PreviousPost | None = None,
         trend_notes: str | None = None,
+        products: list[CatalogItem] | None = None,
     ) -> PostCopy:
         request = (
             f"Write the caption for a post of {len(photos)} photo(s), posted as they are, "
             f"without a design.\n\nBrief: {brief}{revision_section(previous)}"
-            f"{trend_section(trend_notes)}"
+            f"{products_section(products)}{trend_section(trend_notes)}"
         )
         return await self._model.structured(
             AGENT,
@@ -97,11 +99,13 @@ class PostDrafter:
         previous: PreviousPost,
         brand: BrandBrain | None = None,
         notes: list[str] | None = None,
+        products: list[CatalogItem] | None = None,
     ) -> PostCopy:
         """New caption and hashtags for a post whose images stay exactly as they are."""
         request = (
             "Rewrite only the caption and the hashtags of this post: its images stay exactly as "
             f"they are.\n\nBrief: {previous.brief}{revision_section(previous)}"
+            f"{products_section(products)}"
         )
         return await self._model.structured(
             AGENT,
@@ -121,6 +125,7 @@ class PostDrafter:
         notes: list[str] | None = None,
         previous: PreviousPost | None = None,
         trend_notes: str | None = None,
+        products: list[CatalogItem] | None = None,
     ) -> tuple[CarouselCopy, CarouselBrief]:
         one_per_photo = (
             " Each slide is built from its own photo, in order."
@@ -129,7 +134,8 @@ class PostDrafter:
         )
         request = (
             f"A design of exactly {slide_count} slide(s) (4:5).{one_per_photo}\n\n"
-            f"Brief: {brief}{revision_section(previous)}{trend_section(trend_notes)}"
+            f"Brief: {brief}{revision_section(previous)}{products_section(products)}"
+            f"{trend_section(trend_notes)}"
         )
         draft = await self._model.structured(
             AGENT,
@@ -184,6 +190,17 @@ def system_prompt(brand: BrandBrain | None, notes: list[str] | None = None) -> s
         listed = "\n".join(f"- {note}" for note in notes)
         prompt += f"\n<owner_notes>\n{listed}\n</owner_notes>\n"
     return prompt
+
+
+def products_section(products: list[CatalogItem] | None) -> str:
+    """The Catalog Products in the post's photos, escaped: the Owner typed them in the wizard."""
+    if not products:
+        return ""
+    items = [
+        {"name": item.name, "description": item.description, "price": item.price}
+        for item in products
+    ]
+    return f"\n\n{tagged('products', items)}"
 
 
 def trend_section(trend_notes: str | None) -> str:

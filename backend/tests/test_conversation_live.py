@@ -42,6 +42,9 @@ class FixedKnowledge:
     async def of(self, sender: str) -> BusinessKnowledge:
         return BusinessKnowledge(brand=self.brand, catalog=self.catalog)
 
+    async def products(self, sender: str, asset_ids: list[uuid.UUID]) -> list[CatalogItem]:
+        return []
+
 
 @dataclass
 class Rig:

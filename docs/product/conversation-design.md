@@ -130,15 +130,17 @@ Bot:   ¡Qué linda! 😍 Ya guardé las fotos. ¿La mostramos como novedad o ti
 Owner: novedad, y que se luzca la madera
 Bot:   Dale, lo armo con la foto del detalle de la veta ⏳
        ...40 s...
-Bot:   [image] 📝 Novedad — "Mesa ratona Roble"
-       Llegó la nueva mesa ratona 🌳 Roble macizo, con la veta a la vista y terminación
-       en aceite natural. Ideal para tu living. Escribinos y te contamos más.
-       #mueblesuruguay #hechoamano
+Bot:   [image] 📝 Novedad — "Mesa ratona nueva"
+       Llegó la nueva mesa ratona 🌳 Madera con la veta a la vista, para que se luzca en
+       tu living. Escribinos y te contamos más.
+       #mueblesuruguay #mesaratona
        [Aprobar] [Cambiar] [Descartar]
 Owner: subila
 Bot:   arriba ✅
 Bot:   ¡Publicado! 🎉 https://www.instagram.com/p/...
 ```
+
+The caption claims no wood type, finish or "hecho a mano": the photo shows none of that and no Product says it. When the photo is linked to a Catalog Product, the drafter may use its description ("enchapada en roble") ([agents.md § Copywriter](../architecture/agents.md#copywriter)).
 
 With a time instead ("me encanta!! subilo mañana a la tarde") the bot schedules it and answers "¡Genial! Sale mañana jueves a las 18:00 ✅" (Should).
 
