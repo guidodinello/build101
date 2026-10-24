@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 MIN_SLIDES = 2
 WHATSAPP_CAPTION_MAX = 1024
+INSTAGRAM_CAPTION_LIMIT = 2200
 
 
 class CreatePostArgs(BaseModel):
@@ -391,4 +392,18 @@ async def with_logo(images: list[bytes], logo: bytes | None) -> list[bytes]:
 
 
 def post_text(caption: str, hashtags: list[str]) -> str:
-    return f"{caption}\n\n{' '.join(hashtags)}" if hashtags else caption
+    text = f"{caption}\n\n{' '.join(hashtags)}" if hashtags else caption
+    return fit_instagram_caption(text)
+
+
+def fit_instagram_caption(text: str) -> str:
+    """Instagram rejects a caption over 2,200 characters, hashtags included (error 2207010)."""
+    if len(text) <= INSTAGRAM_CAPTION_LIMIT:
+        return text
+    logger.warning("post text is %d chars, trimmed to Instagram's caption limit", len(text))
+    room = INSTAGRAM_CAPTION_LIMIT - 1
+    cut = text[:room]
+    boundary = max(cut.rfind(". "), cut.rfind("\n"), cut.rfind(" "))
+    if boundary > room // 2:
+        cut = cut[:boundary]
+    return cut.rstrip() + "…"
