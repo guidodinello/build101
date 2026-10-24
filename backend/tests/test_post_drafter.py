@@ -113,3 +113,13 @@ async def test_a_panorama_with_one_photo_per_slide_becomes_editorial() -> None:
     _, brief = await PostDrafter(model).design("living", [b"a", b"b"], ["f1", "f2"], 2)
 
     assert brief.family == "editorial"
+
+
+def test_hashtags_are_cleaned_deduplicated_and_capped():
+    many = [f"#t{i}" for i in range(20)]
+    messy = ["#Roble", "roble", "# mesa ratona", "#2026", "#", "nórdico!", *many]
+
+    cleaned = PostCopy(caption="x", hashtags=messy).hashtags
+
+    assert cleaned[:4] == ["#Roble", "#mesaratona", "#nórdico", "#t0"]
+    assert len(cleaned) == 10
