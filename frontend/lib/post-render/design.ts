@@ -13,7 +13,7 @@ const GRID_WIDTH = 72;
 const GRID_HEIGHT = 90;
 const BODY_CONTRAST = 4.5;
 const LARGE_CONTRAST = 3;
-const BUSY_DEVIATION = 0.1;
+const BUSY_DEVIATION = 0.12;
 const MAX_SCRIM = 0.9;
 
 export type Rect = { x: number; y: number; width: number; height: number };
@@ -194,6 +194,31 @@ async function analyzeScene(src: string, focus: Focus, renderer: Renderer): Prom
   return { luminance: lum, lightness: light };
 }
 
+const PATCH = 6;
+
+function patchDeviation(scene: Scene, x0: number, x1: number, y0: number, y1: number): number {
+  let busiest = 0;
+  for (let py = y0; py < y1; py += PATCH) {
+    for (let px = x0; px < x1; px += PATCH) {
+      let sum = 0;
+      let squares = 0;
+      let n = 0;
+      for (let y = py; y < Math.min(y1, py + PATCH); y += 1) {
+        for (let x = px; x < Math.min(x1, px + PATCH); x += 1) {
+          const value = scene.lightness[y * GRID_WIDTH + x] ?? 0;
+          sum += value;
+          squares += value * value;
+          n += 1;
+        }
+      }
+      if (n < 4) continue;
+      const mean = sum / n;
+      busiest = Math.max(busiest, Math.sqrt(Math.max(0, squares / n - mean * mean)));
+    }
+  }
+  return busiest;
+}
+
 export function region(scene: Scene, rect: Rect): Region {
   const x0 = Math.max(0, Math.floor((rect.x / WIDTH) * GRID_WIDTH));
   const x1 = Math.min(GRID_WIDTH, Math.ceil(((rect.x + rect.width) / WIDTH) * GRID_WIDTH));
@@ -201,28 +226,21 @@ export function region(scene: Scene, rect: Rect): Region {
   const y1 = Math.min(GRID_HEIGHT, Math.ceil(((rect.y + rect.height) / HEIGHT) * GRID_HEIGHT));
   const values: number[] = [];
   let sum = 0;
-  let lightSum = 0;
-  let lightSquares = 0;
   for (let y = y0; y < y1; y += 1) {
     for (let x = x0; x < x1; x += 1) {
-      const index = y * GRID_WIDTH + x;
-      const value = scene.luminance[index] ?? 0;
-      const lightness = scene.lightness[index] ?? 0;
+      const value = scene.luminance[y * GRID_WIDTH + x] ?? 0;
       values.push(value);
       sum += value;
-      lightSum += lightness;
-      lightSquares += lightness * lightness;
     }
   }
   if (!values.length) return { bright: 0, dark: 0, mean: 0, deviation: 0 };
   values.sort((a, b) => a - b);
   const n = values.length;
-  const lightMean = lightSum / n;
   return {
     bright: values[Math.min(n - 1, Math.floor(n * 0.92))] ?? 0,
     dark: values[Math.floor(n * 0.08)] ?? 0,
     mean: sum / n,
-    deviation: Math.sqrt(Math.max(0, lightSquares / n - lightMean * lightMean)),
+    deviation: patchDeviation(scene, x0, x1, y0, y1),
   };
 }
 

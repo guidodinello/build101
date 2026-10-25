@@ -39,6 +39,14 @@ export async function Panorama(design: Design) {
     dark: colors.ink,
     minimum: 0.12,
   });
+  if (body) {
+    const bodyTop = blockTop + headline.height + 24;
+    const under = legible(design, "body", { x: MARGIN, y: bodyTop, width: 820, height: body.height }, {
+      prefer: text.ink === colors.ink ? "dark" : "light",
+      dark: colors.ink,
+    });
+    text.alpha = Math.max(text.alpha, under.alpha);
+  }
   const foot = legible(design, "footer", { x: MARGIN, y: HEIGHT - 150, width: TEXT_WIDTH, height: 90 }, {
     large: true,
     dark: colors.ink,
