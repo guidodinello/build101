@@ -1,37 +1,63 @@
-import { BrandMark, Counter, HEIGHT, Kicker, MARGIN, SavePill, SwipeCue, WIDTH, sizeFor } from "../chrome";
-import { INK, PAPER, alpha } from "../color";
-import { SANS, SERIF } from "../fonts";
+import { BrandMark, Counter, Label, Photo, SavePill, Shade, SwipeCue } from "../chrome";
+import { alpha } from "../color";
+import { type Design, HEIGHT, MARGIN, WIDTH, displayStyle, fit, legible, steps, textStyle } from "../design";
 import type { SlideSpec } from "../spec";
 
-const LINE_Y = 300;
-const DOT = 60;
-const COVER_SIZES: [number, number][] = [[16, 136], [30, 116], [48, 96]];
-const SLIDE_SIZES: [number, number][] = [[18, 104], [32, 90], [48, 76]];
+const TEXT_WIDTH = WIDTH - MARGIN * 2;
+const LINE_Y = 250;
+const DOT = 64;
 
-export function Panorama({ spec }: { spec: SlideSpec }) {
+export function panoramaLayout(spec: SlideSpec): string {
+  return spec.role === "cover" ? "cover" : spec.role === "cta" ? "cta" : "slice";
+}
+
+export async function Panorama(design: Design) {
+  const { spec, type, colors } = design;
   const cover = spec.role === "cover";
+  const headline = await fit(design, {
+    slot: "headline",
+    text: spec.headline,
+    style: (size) => displayStyle(type.display, size),
+    width: TEXT_WIDTH,
+    maxLines: cover ? 3 : 2,
+    sizes: steps(cover ? 148 : 112, 64),
+  });
+  const body = spec.body
+    ? await fit(design, {
+        slot: "body",
+        text: spec.body,
+        style: (size) => textStyle(type, size),
+        width: 820,
+        maxLines: 2,
+        sizes: steps(38, 32, 2),
+      })
+    : null;
+  const blockTop = LINE_Y + 72;
+  const blockHeight = headline.height + (body ? body.height + 24 : 0) + (spec.role === "cta" ? 120 : 0);
+  const text = legible(design, "headline", { x: MARGIN, y: LINE_Y - 100, width: TEXT_WIDTH, height: blockTop + blockHeight - LINE_Y + 100 }, {
+    large: !body,
+    dark: colors.ink,
+    minimum: 0.12,
+  });
+  const foot = legible(design, "footer", { x: MARGIN, y: HEIGHT - 150, width: TEXT_WIDTH, height: 90 }, {
+    large: true,
+    dark: colors.ink,
+  });
   const dotCenter = MARGIN + DOT / 2;
-  const lineLeft = spec.index === 1 ? dotCenter : 0;
-  const lineRight = spec.index === spec.count ? WIDTH - dotCenter : 0;
   return (
-    <div style={{ position: "relative", display: "flex", width: WIDTH, height: HEIGHT, backgroundColor: INK }}>
-      <img src={spec.image} alt="" style={{ position: "absolute", inset: 0, width: WIDTH, height: HEIGHT, objectFit: "cover" }} />
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          backgroundImage: `linear-gradient(to bottom, ${alpha(INK, 0.62)} 0%, ${alpha(INK, 0.38)} 36%, ${alpha(INK, 0)} 62%, ${alpha(INK, 0)} 80%, ${alpha(INK, 0.55)} 100%)`,
-        }}
-      />
+    <div style={{ position: "relative", display: "flex", width: WIDTH, height: HEIGHT, backgroundColor: colors.ink }}>
+      <Photo src={spec.image} width={WIDTH} height={HEIGHT} focus="center" style={{ position: "absolute", inset: 0 }} />
+      <Shade color={text.scrim} strength={text.alpha} from={0} to={Math.min(HEIGHT, blockTop + blockHeight + 220)} edge="top" />
+      <Shade color={foot.scrim} strength={foot.alpha} from={HEIGHT - 300} to={HEIGHT} edge="bottom" />
       {spec.count > 1 ? (
         <div
           style={{
             position: "absolute",
             top: LINE_Y - 1,
-            left: lineLeft,
-            right: lineRight,
-            height: 2,
-            backgroundColor: alpha(PAPER, 0.8),
+            left: spec.index === 1 ? dotCenter : 0,
+            right: spec.index === spec.count ? WIDTH - dotCenter : 0,
+            height: 3,
+            backgroundColor: alpha(text.ink, 0.85),
           }}
         />
       ) : null}
@@ -46,50 +72,25 @@ export function Panorama({ spec }: { spec: SlideSpec }) {
           width: DOT,
           height: DOT,
           borderRadius: DOT,
-          backgroundColor: PAPER,
-          fontFamily: SANS,
-          fontWeight: 700,
-          fontSize: 24,
-          color: INK,
+          backgroundColor: colors.accent,
+          ...textStyle(type, 26, type.textBold),
+          lineHeight: 1,
+          color: colors.paper,
         }}
       >
         {spec.index}
       </div>
-      <div style={{ position: "absolute", top: LINE_Y - 88, left: MARGIN, display: "flex" }}>
-        {spec.kicker ? <Kicker text={spec.kicker} color={PAPER} /> : null}
-      </div>
-      <div
-        style={{
-          position: "absolute",
-          top: LINE_Y + 64,
-          left: MARGIN,
-          right: MARGIN,
-          display: "flex",
-          flexDirection: "column",
-          gap: 24,
-        }}
-      >
-        <div
-          style={{
-            fontFamily: SERIF,
-            fontSize: sizeFor(spec.headline, cover ? COVER_SIZES : SLIDE_SIZES, 68),
-            lineHeight: 1.03,
-            letterSpacing: -0.5,
-            color: PAPER,
-            textWrap: "balance",
-            textShadow: `0 2px 24px ${alpha(INK, 0.35)}`,
-          }}
-        >
-          {spec.headline}
+      {spec.kicker ? (
+        <div style={{ position: "absolute", top: LINE_Y - 96, left: MARGIN, display: "flex" }}>
+          <Label design={design} text={spec.kicker} color={text.ink} />
         </div>
-        {spec.body ? (
-          <div style={{ fontFamily: SANS, fontSize: 32, lineHeight: 1.4, color: alpha(PAPER, 0.92), maxWidth: 800, lineClamp: 3 }}>
-            {spec.body}
-          </div>
-        ) : null}
+      ) : null}
+      <div style={{ position: "absolute", top: blockTop, left: MARGIN, right: MARGIN, display: "flex", flexDirection: "column", gap: 24 }}>
+        <div style={{ ...displayStyle(type.display, headline.size), color: text.ink, textWrap: "balance" }}>{spec.headline}</div>
+        {body ? <div style={{ ...textStyle(type, body.size), color: alpha(text.ink, 0.92), maxWidth: 820 }}>{spec.body}</div> : null}
         {spec.role === "cta" ? (
-          <div style={{ display: "flex", marginTop: 8 }}>
-            <SavePill color={INK} background={PAPER} />
+          <div style={{ display: "flex", marginTop: 16 }}>
+            <SavePill design={design} color={text.ink === colors.ink ? colors.paper : colors.ink} background={text.ink} />
           </div>
         ) : null}
       </div>
@@ -104,8 +105,8 @@ export function Panorama({ spec }: { spec: SlideSpec }) {
           alignItems: "center",
         }}
       >
-        <BrandMark brand={spec.brand} logo={spec.logo} surface={INK} height={48} />
-        {cover ? <SwipeCue color={PAPER} /> : <Counter index={spec.index} count={spec.count} color={alpha(PAPER, 0.8)} />}
+        <BrandMark design={design} surface={foot.ink === colors.ink ? colors.paper : colors.ink} height={48} />
+        {cover ? <SwipeCue design={design} color={foot.ink} /> : <Counter design={design} color={alpha(foot.ink, 0.85)} />}
       </div>
     </div>
   );

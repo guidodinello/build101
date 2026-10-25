@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { RENDER_REPORT_HEADER, reportHeader } from "@/lib/post-render/design";
 import { renderSlide } from "@/lib/post-render/render";
 import { ImageRejectedError, SpecError, parseSlideSpec } from "@/lib/post-render/spec";
 
@@ -52,9 +53,13 @@ export async function POST(request: Request) {
   }
 
   try {
-    const image = await renderSlide(parseSlideSpec(body));
-    return new Response(new Uint8Array(image), {
-      headers: { "content-type": "image/jpeg", "cache-control": "no-store" },
+    const slide = await renderSlide(parseSlideSpec(body));
+    return new Response(new Uint8Array(slide.image), {
+      headers: {
+        "content-type": "image/jpeg",
+        "cache-control": "no-store",
+        [RENDER_REPORT_HEADER]: reportHeader(slide.report),
+      },
     });
   } catch (error) {
     if (error instanceof ImageRejectedError) {
