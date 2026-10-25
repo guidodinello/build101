@@ -5,7 +5,7 @@ from typing import Any, Self
 
 import anthropic
 from anthropic.types.beta import BetaMessageParam
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .client import STRUCTURED_TIMEOUT_S, Content, LLMError, ThinkingLevel
 
@@ -72,6 +72,10 @@ class ClaudeStructured:
             raise LLMError(f"{agent}: no answer within {STRUCTURED_TIMEOUT_S * 2:.0f} s") from exc
         except anthropic.APIError as exc:
             raise LLMError(f"{agent}: {exc}") from exc
+        except ValidationError as exc:
+            # The SDK parses the output itself, so a cut or refused answer fails here, before
+            # `stop_reason` can be read
+            raise LLMError(f"{agent}: output doesn't match {schema.__name__}: {exc}") from exc
         usage = response.usage
         logger.info(
             "llm agent=%s model=%s stop=%s in=%s out=%s cache_read=%s latency_ms=%d",

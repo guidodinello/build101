@@ -99,10 +99,12 @@ def revise(brief: CarouselBrief, review: DesignReview) -> Revision:
     """The brief with the critic's fixes; values the family doesn't have are ignored."""
     scenes = {scene.index: scene for scene in brief.slides}
     new_scenes: list[int] = []
+    seen: set[int] = set()
     for fix in review.fixes:
         scene = scenes.get(fix.index)
-        if scene is None:
+        if scene is None or fix.index in seen:
             continue
+        seen.add(fix.index)
         changes = knob_changes(brief, fix)
         if fix.new_scene and brief.family != "panorama" and len(new_scenes) < MAX_NEW_SCENES:
             new_scenes.append(fix.index)

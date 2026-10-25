@@ -109,3 +109,16 @@ async def test_the_critic_sees_each_slide_at_half_size_with_what_the_renderer_me
 
 def test_a_review_copy_is_half_the_slide() -> None:
     assert image_size(review_copy(SLIDE)) == REVIEW_SIZE
+
+
+def test_a_second_fix_for_the_same_slide_is_ignored(
+    carousel_spec: tuple[CarouselCopy, CarouselBrief],
+) -> None:
+    _, brief = carousel_spec
+    twice = [review(2, new_scene=True, scene_note="no text"), review(2, new_scene=True)]
+    fixes = DesignReview(slides=[*twice, review(3, new_scene=True)])
+
+    revision = revise(brief, fixes)
+
+    assert revision.new_scenes == [2, 3]
+    assert revision.brief.slides[1].scene_prompt.count("Fix:") == 1

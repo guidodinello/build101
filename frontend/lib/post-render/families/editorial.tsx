@@ -55,8 +55,8 @@ async function overlayCover(design: Design) {
   return (
     <div style={{ position: "relative", display: "flex", width: WIDTH, height: HEIGHT, backgroundColor: design.colors.ink }}>
       <Photo src={spec.image} width={WIDTH} height={HEIGHT} focus={spec.focus} style={{ position: "absolute", inset: 0 }} />
-      <Shade color={mast.scrim} strength={mast.alpha} from={0} to={260} edge="top" />
-      <Shade color={ink.scrim} strength={ink.alpha} from={Math.max(0, top - 300)} to={HEIGHT} edge="bottom" />
+      <Shade color={mast.scrim} strength={mast.alpha} edge="top" solid={150} fade={120} />
+      <Shade color={ink.scrim} strength={ink.alpha} edge="bottom" solid={top} fade={300} />
       <div
         style={{
           position: "absolute",

@@ -80,6 +80,18 @@ async def test_a_refusal_or_a_cut_answer_is_an_llm_error(stop_reason: str) -> No
         )
 
 
+class CutMessages(FakeMessages):
+    """The SDK parses the output itself: a cut answer raises before stop_reason is read."""
+
+    async def parse(self, **request: Any) -> Verdict:
+        return Verdict.model_validate_json('{"ok": tr')
+
+
+async def test_an_answer_the_sdk_cannot_parse_is_an_llm_error() -> None:
+    with pytest.raises(LLMError, match="doesn't match Verdict"):
+        await claude("claude-opus-5-5", CutMessages()).structured("a", "s", [], Verdict, "medium")
+
+
 def test_an_unset_model_is_the_chat_model_and_claude_needs_its_key() -> None:
     chat = ScriptedModel()
     settings = Settings(_env_file=None, gemini_api_key="g")

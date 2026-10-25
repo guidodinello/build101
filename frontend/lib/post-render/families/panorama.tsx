@@ -55,8 +55,8 @@ export async function Panorama(design: Design) {
   return (
     <div style={{ position: "relative", display: "flex", width: WIDTH, height: HEIGHT, backgroundColor: colors.ink }}>
       <Photo src={spec.image} width={WIDTH} height={HEIGHT} focus="center" style={{ position: "absolute", inset: 0 }} />
-      <Shade color={text.scrim} strength={text.alpha} from={0} to={Math.min(HEIGHT, blockTop + blockHeight + 220)} edge="top" />
-      <Shade color={foot.scrim} strength={foot.alpha} from={HEIGHT - 300} to={HEIGHT} edge="bottom" />
+      <Shade color={text.scrim} strength={text.alpha} edge="top" solid={blockTop + blockHeight} fade={220} />
+      <Shade color={foot.scrim} strength={foot.alpha} edge="bottom" solid={HEIGHT - 150} fade={150} />
       {spec.count > 1 ? (
         <div
           style={{

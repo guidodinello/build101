@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from io import BytesIO
+from typing import Any
 
 import pytest
 from PIL import Image
@@ -9,6 +10,7 @@ from app.agents.schemas import BrandBrain
 from app.background import BackgroundWork
 from app.conversation.events import Event, Notify, PostFailed, PostSent
 from app.conversation.photos import LOCAL_TZ, InMemoryPhotos
+from app.imagegen.base import GeneratedImage, ImageGenBlocked
 from app.knowledge.base import BusinessKnowledge, Note
 from app.media.images import POST_SIZE, image_size
 from app.media.public import PublicImages
@@ -892,3 +894,36 @@ async def test_a_failed_review_sends_the_post_as_rendered(photos: InMemoryPhotos
 
     assert len(renderer.slides) == 3
     assert len(channel.images) == 3
+
+
+@dataclass
+class FailingRedo(CountingImageGen):
+    """Generates the first carousel, then fails: the redo the critic asked for is blocked."""
+
+    allowed: int = 3
+
+    async def generate(
+        self, prompt: str, reference_images: list[bytes], *args: Any, **kwargs: Any
+    ) -> GeneratedImage:
+        if len(self.calls) >= self.allowed:
+            self.calls.append(prompt)
+            raise ImageGenBlocked("SAFETY")
+        return await super().generate(prompt, reference_images, *args, **kwargs)
+
+
+async def test_a_failed_redo_sends_the_post_as_first_rendered(photos: InMemoryPhotos) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(3)})
+    critic = SequenceModel([DesignReview(slides=[slide_fix(2, new_scene=True)])])
+    channel, events = FakeChannel(), []
+    posts, background = maker(model, FailingRedo(), photos, critic=DesignCritic(critic))
+
+    posts.create_post(
+        SENDER,
+        {"brief": "muebles", "asset_ids": ["f1", "f2", "f3"], "style": "design"},
+        channel,
+        recorder(events),
+    )
+    await background.join()
+
+    assert len(channel.images) == 3
+    assert isinstance(events[0], PostSent)

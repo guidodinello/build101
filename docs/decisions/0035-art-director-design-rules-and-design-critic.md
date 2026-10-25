@@ -28,6 +28,7 @@ Alternatives considered:
 ## Consequences
 
 - A designed post costs one more vision call, up to two more images and a second render. It also takes longer: the review itself plus up to a minute when a scene is regenerated. Posts already run in the background behind a holding message.
+- **Deploy the frontend first.** The renderer before this ADR answers 400 to the new families, so a newer backend in front of it fails every post that picks `minimal`, `notes` or `scrapbook`. The new fields are optional, so the new renderer works with the old backend.
 - The family and layout lists are duplicated in Python and TypeScript, each pointing at the other. `resolved_layout` in `app/carousel/prompts.py` mirrors the frontend's layout choice to frame the scenes, so a new layout must be added in both.
 - The renderer bundles about 350 KB more of fonts. A pair is a code change: font files, `TYPEFACES`, the `FontPair` literal and the Brand Strategist's prompt.
 - `anthropic` is a new backend dependency, used only when a role is set to a Claude model, which also needs `ANTHROPIC_API_KEY`. The orchestrator stays on Gemini: its history is stored in Gemini's step format.

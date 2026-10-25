@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { ArrowRight, Bookmark } from "lucide";
 import { INK, PAPER, alpha, isDark, readableOn } from "./color";
-import { type Design, displayStyle, labelStyle, objectPosition, textStyle } from "./design";
+import { type Design, HEIGHT, displayStyle, labelStyle, objectPosition, textStyle } from "./design";
 import { Icon } from "./icon";
 import type { Focus } from "./spec";
 
@@ -131,30 +131,25 @@ export function Photo({
 export function Shade({
   color,
   strength,
-  from,
-  to,
   edge,
+  solid,
+  fade,
 }: {
   color: string;
   strength: number;
-  from: number;
-  to: number;
   edge: "top" | "bottom";
+  solid: number;
+  fade: number;
 }) {
   if (strength <= 0) return null;
-  const solid = alpha(color, strength);
+  const full = alpha(color, strength);
   const clear = alpha(color, 0);
-  const fade = edge === "bottom" ? `${clear} 0%, ${solid} 38%, ${solid} 100%` : `${solid} 0%, ${solid} 62%, ${clear} 100%`;
+  const top = edge === "bottom" ? Math.max(0, solid - fade) : 0;
+  const bottom = edge === "bottom" ? HEIGHT : Math.min(HEIGHT, solid + fade);
+  const height = bottom - top;
+  const stop = Math.round(((edge === "bottom" ? solid - top : solid) / height) * 100);
+  const stops = edge === "bottom" ? `${clear} 0%, ${full} ${stop}%, ${full} 100%` : `${full} 0%, ${full} ${stop}%, ${clear} 100%`;
   return (
-    <div
-      style={{
-        position: "absolute",
-        left: 0,
-        right: 0,
-        top: from,
-        height: to - from,
-        backgroundImage: `linear-gradient(to bottom, ${fade})`,
-      }}
-    />
+    <div style={{ position: "absolute", left: 0, right: 0, top, height, backgroundImage: `linear-gradient(to bottom, ${stops})` }} />
   );
 }

@@ -8,6 +8,7 @@ from app.posts.drafts import (
     PreviousPost,
     SlideDraft,
     clip_slots,
+    js_length,
 )
 from tests.fakes import ScriptedModel
 
@@ -167,3 +168,15 @@ async def test_the_designer_model_answers_the_design_and_the_chat_model_the_capt
     assert len(designer.structured_calls) == 1
     assert len(chat.structured_calls) == 1
     assert "<design_rules>" in designer.structured_systems[0]
+
+
+def test_slots_are_cut_by_the_length_the_renderer_counts_without_splitting_an_emoji() -> None:
+    item = "a" * (ITEM_LIMIT - 1) + "🚚"
+
+    [clipped] = clip_slots(slide_draft(items=[item])).items
+
+    assert js_length(item) == ITEM_LIMIT + 1
+    assert clipped == "a" * (ITEM_LIMIT - 1)
+    assert (
+        js_length(clip_slots(slide_draft(headline="🚚" * 70)).headline) <= SLOT_LIMITS["headline"]
+    )

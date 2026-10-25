@@ -18,12 +18,12 @@ from app.channels.inbound import mask
 from app.conversation.events import Event, Notify, PostFailed, PostSent
 from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
-from app.imagegen.base import ImageGenPort
+from app.imagegen.base import ImageGenError, ImageGenPort
 from app.knowledge.base import BusinessKnowledge, Knowledge
 from app.llm.client import LLMError
 from app.media.images import add_logo, to_post_image
 from app.media.public import PublicImages
-from app.rendering.base import RenderedSlide, RendererPort
+from app.rendering.base import RenderedSlide, RendererError, RendererPort
 from app.rendering.slides import render_slides
 
 from .critic import DesignCritic, Revision, changed, revise
@@ -316,15 +316,25 @@ class PostMaker:
         generator = CarouselGenerator(self._image_gen)
         scenes = await generator.generate(copy, brief, references, slide_references)
         rendered = await render_slides(self._renderer, copy, brief, scenes, brand, logo)
-        if self._critic is not None:
-            revision = await reviewed(self._critic, copy, brief, rendered)
-            if revision is not None:
-                brief = revision.brief
+        revision = await reviewed(self._critic, copy, brief, rendered) if self._critic else None
+        if revision is not None:
+            try:
                 if revision.new_scenes:
                     scenes = await generator.redo(
-                        copy, brief, references, scenes, revision.new_scenes, slide_references
+                        copy,
+                        revision.brief,
+                        references,
+                        scenes,
+                        revision.new_scenes,
+                        slide_references,
                     )
-                rendered = await render_slides(self._renderer, copy, brief, scenes, brand, logo)
+                rendered = await render_slides(
+                    self._renderer, copy, revision.brief, scenes, brand, logo
+                )
+            except (ImageGenError, RendererError):
+                logger.exception(
+                    "applying the design review failed, the post goes out as first rendered"
+                )
         return RenderedPost(
             [slide.image for slide in rendered],
             post_text(copy.caption, copy.hashtags),

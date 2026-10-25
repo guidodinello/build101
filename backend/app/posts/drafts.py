@@ -252,14 +252,26 @@ def fit_slides(slides: list[SlideDraft], count: int) -> list[SlideDraft]:
     return fitted
 
 
+def js_length(text: str) -> int:
+    """The length the renderer measures: JavaScript counts UTF-16 code units (an emoji is 2)."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def clip(text: str, limit: int) -> str:
+    """At most `limit` UTF-16 code units, never half an emoji."""
+    if js_length(text) <= limit:
+        return text
+    return text.encode("utf-16-le")[: limit * 2].decode("utf-16-le", errors="ignore").rstrip()
+
+
 def clip_slots(slide: SlideDraft) -> SlideDraft:
     """Cut a slot the renderer would reject, rather than lose the whole post."""
     clipped: dict[str, object] = {
-        field: getattr(slide, field)[:limit].rstrip()
+        field: clip(getattr(slide, field), limit)
         for field, limit in SLOT_LIMITS.items()
-        if len(getattr(slide, field)) > limit
+        if js_length(getattr(slide, field)) > limit
     }
-    items = [item[:ITEM_LIMIT].rstrip() for item in slide.items if item.strip()][:MAX_ITEMS]
+    items = [clip(item, ITEM_LIMIT) for item in slide.items if item.strip()][:MAX_ITEMS]
     if items != slide.items:
         clipped["items"] = items
     if clipped:
