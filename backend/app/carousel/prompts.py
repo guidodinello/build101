@@ -1,4 +1,4 @@
-from .schemas import CarouselBrief, CarouselCopy, SlideRole, TemplateFamily
+from .schemas import CarouselBrief, CarouselCopy, Layout, SlideRole, SlideScene, TemplateFamily
 
 FIXED_RULES = """Rules:
 - Show the real product from the product reference images exactly as it is: keep its shape, \
@@ -7,30 +7,76 @@ color, material and proportions. Change only the scene, light and styling around
 prices, logos or watermarks. The design's text is added afterwards.
 - A photograph, not a graphic design: no frames, borders, collages or overlays."""
 
-# Where each template puts the scene, and so what the scene must leave calm (ADR 0029)
-FRAMING: dict[tuple[TemplateFamily, SlideRole], str] = {
-    ("editorial", "cover"): (
+CALM_BACKGROUND = "one clear subject, centered, on a simple, uncluttered background"
+
+# Where each layout shows the scene, and so what the 4:5 photo must leave calm or keep away from
+# the crop (ADR 0029, ADR 0035). Keys are the layouts each family resolves to, as in
+# frontend/lib/post-render/families/*.tsx.
+FRAMING: dict[tuple[TemplateFamily, str], str] = {
+    ("editorial", "overlay"): (
         "Full-bleed vertical 4:5 photo. The headline is set over the lower 40% of the frame, "
         "so keep that area calm and uncluttered (floor, wall, tabletop, soft shadow) and place "
         "the product in the upper-middle part."
     ),
-    ("editorial", "content"): (
-        "Shown in a nearly square frame above the text: the product centered, with some room "
-        "around it."
+    ("editorial", "frame"): (
+        "Shown in a wide frame cropped from the middle of the photo (about 4:3): keep the "
+        "product in the vertical middle, nothing important near the top or bottom edge."
     ),
-    ("editorial", "cta"): (
-        "Shown small inside an arch-shaped frame: one clear subject, centered, on a simple "
-        "background."
+    ("editorial", "photo-top"): (
+        "Cropped to a wide band (about 3:2) from the middle of the photo: keep the product in the "
+        "horizontal middle band, with some room around it."
     ),
-    ("numbers", "cover"): (
+    ("editorial", "full-bleed"): (
+        "Full-bleed vertical 4:5 photo with a text card over the lower 45%: keep the product in "
+        "the upper half of the frame."
+    ),
+    ("editorial", "quote"): f"Shown small, in a portrait thumbnail: {CALM_BACKGROUND}.",
+    ("editorial", "card"): f"Shown inside an arch-shaped portrait frame: {CALM_BACKGROUND}.",
+    ("numbers", "poster"): (
         "Shown inside a tall arch-shaped frame: the product centered, filling the lower two "
         "thirds of the frame."
     ),
-    ("numbers", "content"): (
-        "Cropped to a wide band at the top of the slide (about 16:9): keep the subject in the "
+    ("numbers", "band"): (
+        "Cropped to a wide band at the top of the slide (about 16:10): keep the subject in the "
         "horizontal middle of the frame, nothing important near the top or bottom edge."
     ),
-    ("numbers", "cta"): "Shown inside a circle: one centered subject, simple background.",
+    ("numbers", "split"): (
+        "Cropped to a tall, narrow column (about 1:2.8) from the center of the photo: a vertical "
+        "composition with the product in the middle third, left to right."
+    ),
+    ("numbers", "circle"): f"Shown inside a circle: {CALM_BACKGROUND}.",
+    ("minimal", "window"): (
+        "Shown in a clean portrait window (about 6:7): the product centered with generous "
+        "breathing room and a quiet, single-color background."
+    ),
+    ("minimal", "type"): f"Shown small, inside a circle: {CALM_BACKGROUND}.",
+    ("minimal", "window-content"): (
+        "Cropped to a square from the middle of the photo: the product centered with breathing "
+        "room, quiet background."
+    ),
+    ("minimal", "side"): (
+        "Cropped to a tall half-width column (about 1:2.7): a vertical composition with the "
+        "product in the middle third, left to right."
+    ),
+    ("minimal", "cta"): f"Shown inside a circle: {CALM_BACKGROUND}.",
+    ("notes", "card"): (
+        "Shown blurred behind a text card, and on the cover as a wide strip (about 2.3:1) cut "
+        "from the middle: soft light and pleasant color, the product in the horizontal middle "
+        "band."
+    ),
+    ("notes", "checklist"): (
+        "Shown only blurred behind a text card: soft light, pleasant color, no busy detail."
+    ),
+    ("notes", "cta"): "Shown only blurred behind a text card: soft light, pleasant color.",
+    ("scrapbook", "polaroid"): (
+        "Shown as a nearly square instant photo: the product centered, candid and natural, "
+        "like a real snapshot."
+    ),
+    ("scrapbook", "taped"): (
+        "Cropped to a wide print (about 3:2) from the middle of the photo: the product in the "
+        "horizontal middle band, candid and natural."
+    ),
+    ("scrapbook", "cta"): "Shown as a nearly square instant photo: the product centered.",
 }
 
 ANCHOR_INSTRUCTION = (
@@ -60,11 +106,12 @@ def build_slide_prompt(
     brief: CarouselBrief, copy: CarouselCopy, index: int, *, anchored: bool
 ) -> str:
     slide = copy.slides[index - 1]
+    layout = resolved_layout(brief.family, slide.role, scene(brief, index).layout, slide.items)
     sections = [
         f"Photo {index} of {len(copy.slides)} for an Instagram carousel ({slide.role} slide).",
         f"Photographic style shared by every photo: {brief.style_prompt}",
         f"This photo shows: {scene_prompt(brief, index)}",
-        f"Framing: {framing(brief.family, slide.role)}",
+        f"Framing: {framing(brief.family, layout)}",
     ]
     if anchored:
         sections.append(ANCHOR_INSTRUCTION)
@@ -87,17 +134,54 @@ def build_panorama_prompt(brief: CarouselBrief, copy: CarouselCopy) -> str:
     return "\n\n".join(sections)
 
 
-def framing(family: TemplateFamily, role: SlideRole) -> str:
-    """A one-slide panorama has nothing to span, so it is framed like an editorial slide."""
-    return FRAMING.get((family, role)) or FRAMING[("editorial", role)]
+def resolved_layout(
+    family: TemplateFamily, role: SlideRole, layout: Layout, items: list[str]
+) -> str:
+    """The layout the renderer draws (frontend/lib/post-render/families/*.tsx resolve the same)."""
+    match family, role:
+        case "panorama", _:
+            return role
+        case _, "cta":
+            return {"editorial": "card", "numbers": "circle"}.get(family, "cta")
+        case "editorial", "cover":
+            return "frame" if layout == "frame" else "overlay"
+        case "editorial", _:
+            return layout if layout in ("full-bleed", "quote") else "photo-top"
+        case "numbers", "cover":
+            return "poster"
+        case "numbers", _:
+            return "split" if layout == "split" else "band"
+        case "minimal", "cover":
+            return "type" if layout == "type" else "window"
+        case "minimal", _:
+            return "side" if layout == "side" else "window-content"
+        case "notes", "content" if layout == "checklist" or (layout == "auto" and items):
+            return "checklist"
+        case "notes", _:
+            return "card"
+        case "scrapbook", "content" if layout == "taped":
+            return "taped"
+        case _:
+            return "polaroid"
+
+
+def framing(family: TemplateFamily, layout: str) -> str:
+    """A one-slide panorama has nothing to span, so it is framed like an editorial cover."""
+    if family == "panorama":
+        return FRAMING[("editorial", "overlay")]
+    return FRAMING.get((family, layout)) or FRAMING[("editorial", "overlay")]
 
 
 def panorama_ratio(count: int) -> str:
     return PANORAMA_RATIOS.get(count, WIDEST_RATIO)
 
 
-def scene_prompt(brief: CarouselBrief, index: int) -> str:
-    for scene in brief.slides:
-        if scene.index == index:
-            return scene.scene_prompt
+def scene(brief: CarouselBrief, index: int) -> SlideScene:
+    for slide in brief.slides:
+        if slide.index == index:
+            return slide
     raise ValueError(f"carousel brief has no scene for slide {index}")
+
+
+def scene_prompt(brief: CarouselBrief, index: int) -> str:
+    return scene(brief, index).scene_prompt

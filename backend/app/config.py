@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     # Replies to the Owner (ADR 0023). INBOUND_HANDLER = chat (Gemini) | echo (no LLM)
     inbound_handler: Literal["chat", "echo"] = "chat"
     gemini_chat_model: str = "gemini-3.8-flash"
+    # The Art Director and the Design Critic (ADR 0035). Unset, they use GEMINI_CHAT_MODEL; a
+    # "claude-*" model needs ANTHROPIC_API_KEY. The critic reviews only RENDERER=takumi slides
+    art_director_model: str | None = None
+    design_critic: bool = True
+    design_critic_model: str | None = None
+    anthropic_api_key: str | None = None
     assistant_name: str = "Neitor"
     # Post images are served from here until Supabase Storage (T17); in local dev, the tunnel URL
     public_backend_url: str | None = None

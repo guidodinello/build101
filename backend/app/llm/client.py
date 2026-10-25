@@ -74,15 +74,8 @@ class Grounded[T: BaseModel]:
 
 
 @runtime_checkable
-class ChatModel(Protocol):
-    async def reply(
-        self,
-        agent: str,
-        system: str,
-        history: list[Step],
-        thinking_level: ThinkingLevel,
-        tools: list[Tool] | None = None,
-    ) -> Reply: ...
+class StructuredModel(Protocol):
+    """One call that answers in a schema: what the specialists need, on any provider."""
 
     async def structured[T: BaseModel](
         self,
@@ -92,6 +85,18 @@ class ChatModel(Protocol):
         schema: type[T],
         thinking_level: ThinkingLevel,
     ) -> T: ...
+
+
+@runtime_checkable
+class ChatModel(StructuredModel, Protocol):
+    async def reply(
+        self,
+        agent: str,
+        system: str,
+        history: list[Step],
+        thinking_level: ThinkingLevel,
+        tools: list[Tool] | None = None,
+    ) -> Reply: ...
 
 
 class GroundedModel(Protocol):
