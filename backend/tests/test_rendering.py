@@ -17,7 +17,7 @@ from app.rendering.base import (
 )
 from app.rendering.factory import build_renderer
 from app.rendering.mock import MockRenderer
-from app.rendering.slides import render_slides
+from app.rendering.slides import PartialSlideRenderError, render_slides
 from app.rendering.takumi import TakumiRenderer
 from tests.conftest import make_image
 from tests.fakes import brand_brain
@@ -175,3 +175,23 @@ def test_takumi_switch() -> None:
     )
 
     assert isinstance(build_renderer(settings), TakumiRenderer)
+
+async def test_render_slides_keeps_successful_slides_when_one_fails(
+    carousel_spec: tuple[CarouselCopy, CarouselBrief],
+) -> None:
+    copy, brief = carousel_spec
+
+    class FailSecondRenderer(MockRenderer):
+        async def render(self, request: SlideRender) -> bytes:
+            if request.index == 2:
+                raise RendererError("slide 2 failed")
+            return await super().render(request)
+
+    with pytest.raises(PartialSlideRenderError) as caught:
+        await render_slides(
+            FailSecondRenderer(), copy, brief, scenes(4), None, None
+        )
+
+    assert caught.value.indices == [1, 3, 4]
+    assert caught.value.images == [JPEG, JPEG, JPEG]
+    assert len(caught.value.errors) == 1

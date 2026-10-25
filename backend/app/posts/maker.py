@@ -23,7 +23,7 @@ from app.knowledge.base import BusinessKnowledge, Knowledge
 from app.media.images import add_logo, to_post_image
 from app.media.public import PublicImages
 from app.rendering.base import RendererPort
-from app.rendering.slides import render_slides
+from app.rendering.slides import PartialSlideRenderError, render_slides
 
 from .drafts import PostDrafter, PreviousPost
 from .lifecycle import PostLifecycle
@@ -52,6 +52,13 @@ class RevisePostArgs(BaseModel):
     post_id: str = Field(min_length=1)
     change: str = Field(min_length=1)
     part: Literal["caption", "images"]
+class PartialSendError(RuntimeError):
+    """A send failed after some images were delivered."""
+
+    def __init__(self, sent_count: int, paths: list[str]) -> None:
+        super().__init__(f"Sending failed after {sent_count} image(s).")
+        self.sent_count = sent_count
+        self.paths = paths
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,10 +250,29 @@ class PostMaker:
                 mask(sender),
                 time.monotonic() - started,
             )
-        except Exception:
+        except Exception as exc:
             # The task's boundary: nobody awaits it, so log and tell the Owner.
             logger.exception("post %s failed for %s", post_id, mask(sender))
-            event = PostFailed(post_id, args.style, tuple(photo.id for photo in photos), args.brief)
+            sent_count = exc.sent_count if isinstance(exc, PartialSendError) else 0
+
+            if isinstance(exc, PartialSendError) and sent_count:
+                partial_post = RenderedPost(
+                    images=post.images[:sent_count],
+                    text=post.text,
+                    headlines=post.headlines[:sent_count],
+                    style_prompt=post.style_prompt,
+                )
+                self._keep(
+                    sender, post_id, args, photos, exc.paths, partial_post
+                )
+
+            event = PostFailed(
+                post_id,
+                args.style,
+                tuple(photo.id for photo in photos),
+                args.brief,
+                sent_count=sent_count,
+            )
         finally:
             self._generating.discard(sender)
         # After the guard is released, and outside the try: a failing notify must not report a
@@ -314,12 +340,28 @@ class PostMaker:
             if one_per_photo
             else None,
         )
+        try:
+            images = await render_slides(
+                self._renderer, copy, brief, scenes, brand, logo
+            )
+            headlines = [slide.headline for slide in copy.slides]
+        except PartialSlideRenderError as exc:
+            logger.warning("Some slides failed to render: %s", exc)
+            images = exc.images
+            headlines = [
+                copy.slides[index - 1].headline for index in exc.indices
+            ]
+
+        if not images:
+            raise RuntimeError("No slides could be rendered.")
+
         return RenderedPost(
-            await render_slides(self._renderer, copy, brief, scenes, brand, logo),
+            images,
             post_text(copy.caption, copy.hashtags),
-            headlines=[slide.headline for slide in copy.slides],
+            headlines=headlines,
             style_prompt=style_prompt,
         )
+
 
     def _keep(
         self,
@@ -353,30 +395,39 @@ class PostMaker:
             logger.info(
                 "post %s replaces %s, which is not pending: ignored", post_id, args.replaces
             )
-
     async def _send(
         self, sender: str, images: list[bytes], caption: str, channel: ChannelPort
     ) -> list[str]:
-        """Numbered images with the post text on the first, so nothing arrives out of order.
-
-        Returns the public path of each image, in order.
-        """
+        """Send images in order and report how many succeeded if sending fails."""
         count = len(images)
         numbers = [
-            messages_es.carousel_slide(n, count) if count > 1 else "" for n in range(1, count + 1)
+            messages_es.carousel_slide(n, count) if count > 1 else ""
+            for n in range(1, count + 1)
         ]
         first = f"{numbers[0]}\n\n{caption}".strip()
         text_fits = len(first) <= WHATSAPP_CAPTION_MAX
         captions = [first if text_fits else numbers[0], *numbers[1:]]
         paths: list[str] = []
-        for image, image_caption in zip(images, captions, strict=True):
-            paths.append(self._images.add(image))
-            await channel.send_image(
-                sender, self._public_base_url + paths[-1], caption=image_caption or None
-            )
-        if not text_fits:
-            logger.warning("post text is %d chars, over the image caption limit", len(caption))
-            await channel.send_text(sender, caption)
+        sent_count = 0
+
+        try:
+            for image, image_caption in zip(images, captions, strict=True):
+                path = self._images.add(image)
+                await channel.send_image(
+                    sender, self._public_base_url + path, caption=image_caption or None
+                )
+                paths.append(path)
+                sent_count += 1
+
+            if not text_fits:
+                logger.warning(
+                    "post text is %d chars, over the image caption limit", len(caption)
+                )
+                await channel.send_text(sender, caption)
+
+        except Exception as exc:
+            raise PartialSendError(sent_count, paths) from exc
+
         return paths
 
 

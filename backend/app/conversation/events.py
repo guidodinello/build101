@@ -41,13 +41,16 @@ class PostFailed:
     style: Literal["photos", "design"]
     photo_ids: tuple[str, ...]
     brief: str
+    sent_count: int = 0
 
     def note(self) -> str:
-        return (
+        message = (
             f"[post {self.post_id} failed] A {self.style} post from photos "
             f'{" ".join(self.photo_ids)} (brief "{self.brief}") could not be made. '
-            "Nothing reached the Owner."
         )
+        if self.sent_count:
+            return message + f"{self.sent_count} slide(s) reached the Owner before sending failed."
+        return message + "Nothing reached the Owner."
 
 
 @dataclass(frozen=True, slots=True)
