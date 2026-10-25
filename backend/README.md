@@ -30,6 +30,17 @@ uv run python -m app.carousel.cli --spec tests/fixtures/carousel_spec.json \
 
 With `RENDERER=takumi` and the frontend running (`RENDERER_URL=http://localhost:3000`, `RENDERER_SECRET` = its `RENDER_SECRET`), it writes the designed `slide-N.jpg` next to each `scene-N.jpg`; with `RENDERER=mock` both are the bare scene. It also writes each slide's prompt and a `report.json` with latency, raw size and token usage per call. Live tests run with `uv run pytest -m live` (skipped without `GEMINI_API_KEY`).
 
+Compare Art Director and Design Critic models on fixed briefs, end to end, with a blind A/B page ([research/post-design/designer-agent.md](../docs/research/post-design/designer-agent.md)):
+
+```bash
+uv run python -m app.posts.design_eval run --label flash --out ../.design-eval
+uv run python -m app.posts.design_eval run --label opus --art-director claude-opus-5-5 \
+  --critic claude-opus-5-5 --out ../.design-eval
+uv run python -m app.posts.design_eval compare ../.design-eval/flash ../.design-eval/opus
+```
+
+It needs `IMAGE_GEN=gemini`, `RENDERER=takumi` with the frontend running, and `ANTHROPIC_API_KEY` for a Claude model.
+
 With the database, the job runner writes each niche's weekly Niche Report to `niche_reports` on its own ([ADR 0025](../docs/decisions/0025-weekly-niche-report.md), `app/jobs/niche.py`): it checks at start and every 15 minutes. Without the database, write this week's report of a niche to a file by hand; set `NICHE_REPORT_PATH=out/niche-report.json` and post generation gets its insights as trend notes:
 
 ```bash

@@ -13,11 +13,12 @@ The "agency" is one **orchestrator** (the account manager the owner talks to) pl
 | **Brand Strategist** | Single call, structured | `generate_brand` job | Onboarding data + Catalog + asset descriptions + the Owner's Instagram, when connected (+ correction) → Brand Brain | `high` |
 | **Content Strategist** | Single call, structured | `generate_plan` job; `suggest_ideas` tool | Brand Brain + Catalog + active Offers + assets + recent posts + date + notes + trend notes → weekly plan (images and Reels), or 3 ideas | `medium` |
 | **Copywriter** | Single call, structured | `generate_post` job | Brand Brain + brief + the Owner's own words + trend notes (+ feedback, previous version) → copy; for a carousel: + slide count → caption + the text of each slide | `medium` |
-| **Art Director** | Single call, vision, structured | `generate_post` job | Brand Brain + brief + copy + candidate photos (the ones the Owner sent with the request, if any) + trend notes → image brief (reference photos + image prompt); for a Reel: candidate videos (keyframes) → video + cover frame; for a carousel: → reference photos + shared style + one scene per slide | `medium` |
+| **Art Director** | Single call, vision, structured | `generate_post` job | Brand Brain + brief + copy + candidate photos (the ones the Owner sent with the request, if any) + trend notes → image brief (reference photos + image prompt); for a Reel: candidate videos (keyframes) → video + cover frame; for a carousel: → reference photos + shared style + family + one scene and layout knobs per slide | `medium` |
+| **Design Critic** | Single call, vision, structured | `PostMaker`, after a carousel is rendered ([ADR 0035](../decisions/0035-art-director-design-rules-and-design-critic.md)) | The rendered slides at half size + what each should show + the renderer's report → per slide `ok`, a layout-knob fix, or a new scene (at most two) | `medium` |
 | **Niche Analyst** | Single call, URL context + Google Search, structured | `generate_niche_report` job; `niche_report` tool | The niche's description, location, reference websites and search themes → the niche's Niche Report with source links, shared by its Businesses ([ADR 0025](../decisions/0025-weekly-niche-report.md)) | `medium` |
 | **Feedback Classifier** | Single call, structured | `revise_post` job | Feedback text → `copy` / `image` / `both` (Reel: `copy` / `cover` / `video`) + normalized instruction | `low` |
 
-Not agents (deterministic services): **Image generator** (`ImageGenPort`: image brief → variations from the third-party image service, resized to 1080×1350 JPEG, [ADR 0018](../decisions/0018-ai-image-generation-service.md); not used for Reels), **Carousel generator** (`app/carousel/generator.py`: `CarouselCopy` + `CarouselBrief` → text-free scenes through the same port, one wide scene sliced for a panorama, [ADR 0022](../decisions/0022-carousels-in-mvp.md), [ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)), **Slide renderer** (`RendererPort`, `app/rendering/`: a slide's copy + scene + brand colors + logo → the designed 1080×1350 JPEG from the frontend's Takumi templates, [ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)), **Frame Extractor** (Could; ffmpeg/ffprobe in the backend: video → metadata + keyframes JPEGs), **Publisher** (approved post → provider API, image, carousel or Reel), **Scheduler** (delegated to the provider).
+Not agents (deterministic services): **Image generator** (`ImageGenPort`: image brief → variations from the third-party image service, resized to 1080×1350 JPEG, [ADR 0018](../decisions/0018-ai-image-generation-service.md); not used for Reels), **Carousel generator** (`app/carousel/generator.py`: `CarouselCopy` + `CarouselBrief` → text-free scenes through the same port, one wide scene sliced for a panorama, [ADR 0022](../decisions/0022-carousels-in-mvp.md), [ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)), **Slide renderer** (`RendererPort`, `app/rendering/`: a slide's copy + scene + knobs + brand colors and font pair + logo → the designed 1080×1350 JPEG from the frontend's Takumi templates, with a render report of fitted sizes and text contrast, [ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md), [ADR 0035](../decisions/0035-art-director-design-rules-and-design-critic.md)), **Frame Extractor** (Could; ffmpeg/ffprobe in the backend: video → metadata + keyframes JPEGs), **Publisher** (approved post → provider API, image, carousel or Reel), **Scheduler** (delegated to the provider).
 
 ## LLM client conventions
 
@@ -267,15 +268,19 @@ A prompt can be composed from several files: a line that is only `{{include <pat
   - Trend notes may change the scene or styling, never the facts.
 - **Post-validation (code):** reference ids belong to the business and are not archived; when the Owner sent photos, they are among the references (interim default: only those photos, until the open question on the library is settled); 1–10 references; the fixed rules are present. On violation, retry once with the error list appended; if it fails again, fall back to the candidate photos with a plain prompt built from the brief and `photo_style`.
 - The generated variations are not checked by an LLM before the Owner sees them: the Owner picks one and approves it ([ADR 0007](../decisions/0007-approve-every-post.md)), and nothing is published without that Approval.
-- **Carousel mode (Must, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)):** input adds the `CarouselCopy`. The Art Director picks the template family and writes the photographic style and the scene of each slide, never its text or layout ([ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md)). Output `CarouselBrief` (`app/carousel/schemas.py`):
+- **Carousel mode (Must, F4.9, [ADR 0022](../decisions/0022-carousels-in-mvp.md)):** input adds the `CarouselCopy`. The Art Director picks the template family, writes the photographic style and the scene of each slide, and sets each slide's layout knobs, following the design rules in `app/posts/prompts/design.md`. It never sets text size, position or fonts: the templates do ([ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md), [ADR 0035](../decisions/0035-art-director-design-rules-and-design-critic.md)). Output `CarouselBrief` (`app/carousel/schemas.py`):
 
   ```python
   class SlideScene(BaseModel):
       index: int               # 1-based
       scene_prompt: str        # English: what this slide shows (scene, composition); no text
+      layout: Layout           # one of the family's layouts, or "auto" (the family picks per role)
+      emphasis: Emphasis       # standard | statement (a short hook set bigger)
+      focus: Focus             # where the product sits in the photo, for the template's crop
+      surface: Surface         # auto | paper | brand | dark: the background of the text area
   class CarouselBrief(BaseModel):         # Art Director, carousel mode
       reference_asset_ids: list[str]   # 1–10
-      family: TemplateFamily           # editorial | numbers | panorama: the renderer's template family (ADR 0029)
+      family: TemplateFamily           # editorial | numbers | panorama | minimal | notes | scrapbook (ADR 0035)
       style_prompt: str                # English: shared photographic style (light, palette hex, props); no typography
       slides: list[SlideScene]         # one per CarouselCopy slide, same order
       style_notes: str                 # short Spanish summary for the Owner
@@ -291,6 +296,15 @@ A prompt can be composed from several files: a line that is only `{{include <pat
   ```
 
   Post-validation (code): the video belongs to the business, is not archived, is `reel_suitable`, and `0 ≤ cover_offset_ms ≤ duration_ms`. On violation, retry once; then fall back to the first suggested video and its analyzed cover.
+
+### Design Critic
+
+**Purpose:** catch what a professional would not send before the Owner sees a designed carousel ([ADR 0035](../decisions/0035-art-director-design-rules-and-design-critic.md)).
+
+- Input: each rendered slide at 540 × 675, and per slide its family, role, the layout the template drew, its knobs, its words, the family's layouts and the renderer's `x-render-report` (fitted sizes, clamped slots, text contrast, shade, busy photo).
+- Output (`DesignReview`, `app/posts/critic.py`): per slide `ok` or `fix`, with the problems seen and the fix as plain strings (`keep` or a value): `layout`, `focus`, `emphasis`, `surface`, or `new_scene` with a `scene_note`. Code accepts only values the family has, at most two new scenes, and never a new scene for a panorama.
+- One round: the fixes are applied, broken scenes are generated again from their own photos, and the carousel is rendered once more without a second review. An `LLMError` sends the post as rendered.
+- Runs only with `RENDERER=takumi` (the mock draws no text) and `DESIGN_CRITIC=true`. Its model is `DESIGN_CRITIC_MODEL` (default `GEMINI_CHAT_MODEL`, or a Claude model through `ClaudeStructured`). The Art Director's design calls take `ART_DIRECTOR_MODEL` the same way.
 
 ### Niche Analyst
 
