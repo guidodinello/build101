@@ -19,7 +19,7 @@ from app.llm.client import ChatModel, GeminiChat
 from app.media.public import PublicImages, PublicVideos
 from app.posts.drafts import PostDrafter
 from app.posts.lifecycle import PostLifecycle
-from app.posts.maker import PostMaker
+from app.posts.maker import POST_DEADLINE_S, PostMaker
 from app.posts.publish import PostPublisher, Sleep
 from app.posts.shared_account import SharedAccountGuard
 from app.posts.store import InMemoryPosts
@@ -76,6 +76,7 @@ class ChatParts:
     max_photo_mb: int
     max_posts_per_day: int
     max_videos_per_day: int
+    post_deadline_s: float = POST_DEADLINE_S
     history: History = field(default_factory=InMemoryHistory)
     notes: OwnerNotes = field(default_factory=InMemoryNotes)
     # None: the Business knowledge of the history and notes alone, no Brand Brain or Catalog.
@@ -134,6 +135,7 @@ def build_chat(parts: ChatParts) -> Chat:
         knowledge=knowledge,
         now=parts.now,
         background=background,
+        deadline_s=parts.post_deadline_s,
     )
     public_videos = parts.videos or PublicVideos()
     public_videos.serve_from(store.video)
@@ -261,6 +263,7 @@ def build_conversation(
                     assistant_name=settings.assistant_name,
                     max_photo_mb=settings.max_photo_mb,
                     max_posts_per_day=settings.max_posts_per_day,
+                    post_deadline_s=settings.post_deadline_s,
                     max_videos_per_day=settings.max_videos_per_day,
                     history=history,
                     notes=notes,

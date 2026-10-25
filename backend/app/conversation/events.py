@@ -35,19 +35,27 @@ class PostSent:
         return "\n".join(lines)
 
 
+PostFailure = Literal["deadline", "image_service", "renderer", "failed"]
+
+
 @dataclass(frozen=True, slots=True)
 class PostFailed:
     post_id: str
     style: Literal["photos", "design"]
     photo_ids: tuple[str, ...]
     brief: str
+    reason: PostFailure = "failed"
 
     def note(self) -> str:
-        return (
+        made = "took too long and was stopped" if self.reason == "deadline" else "could not be made"
+        note = (
             f"[post {self.post_id} failed] A {self.style} post from photos "
-            f'{" ".join(self.photo_ids)} (brief "{self.brief}") could not be made. '
+            f'{" ".join(self.photo_ids)} (brief "{self.brief}") {made}. '
             "Nothing reached the Owner."
         )
+        if self.reason == "deadline":
+            note += " Tell them plainly it took too long and offer to try again."
+        return note
 
 
 @dataclass(frozen=True, slots=True)
@@ -361,6 +369,8 @@ def fallback(event: Event) -> str | None:
     match event:
         case PostSent():
             return messages_es.post_actions()
+        case PostFailed(reason="deadline"):
+            return messages_es.POST_TIMED_OUT
         case PostFailed():
             return messages_es.JOB_FAILED
         case VideoSent():

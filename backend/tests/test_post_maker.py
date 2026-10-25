@@ -1,14 +1,18 @@
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from io import BytesIO
 
+import httpx
 import pytest
 from PIL import Image
 
 from app.agents.schemas import BrandBrain
 from app.background import BackgroundWork
-from app.conversation.events import Event, Notify, PostFailed, PostSent
+from app.conversation.events import Event, Notify, PostFailed, PostSent, fallback
 from app.conversation.photos import LOCAL_TZ, InMemoryPhotos
+from app.copy import messages_es
+from app.imagegen.base import GeneratedImage, ImageGenPort
 from app.knowledge.base import BusinessKnowledge, Note
 from app.media.images import POST_SIZE, image_size
 from app.media.public import PublicImages
@@ -16,7 +20,9 @@ from app.posts.drafts import SYSTEM_PROMPT, CarouselDraft, PostCopy, PostDrafter
 from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import WHATSAPP_CAPTION_MAX, PostMaker
 from app.posts.store import InMemoryPosts, Post, PostImage
+from app.rendering.base import RendererPort
 from app.rendering.mock import MockRenderer
+from app.rendering.takumi import TakumiRenderer
 from tests.conftest import make_image
 from tests.fakes import CountingImageGen, FakeChannel, ScriptedModel, brand_brain
 
@@ -24,6 +30,8 @@ SENDER = "59899000001"
 NOON = datetime(2026, 10, 17, 12, 0, tzinfo=LOCAL_TZ)
 POST_TEXT = "Mesa de roble a medida\n\n#muebles #roble"
 PHOTO_SIZES = [(100, 100), (120, 100), (140, 100)]
+JPEG = make_image((1080, 1350))
+JPEG_HEADERS = {"content-type": "image/jpeg"}
 
 
 @dataclass
@@ -75,16 +83,17 @@ def recorder(events: list[Event]) -> Notify:
 
 def maker(
     model: ScriptedModel,
-    image_gen: CountingImageGen,
+    image_gen: ImageGenPort,
     photos: InMemoryPhotos,
     images: PublicImages | None = None,
     max_posts_per_day: int = 5,
     store: PostLifecycle | None = None,
     brand: BrandBrain | None = None,
-    renderer: MockRenderer | None = None,
+    renderer: RendererPort | None = None,
     notes: list[str] | None = None,
     trend_notes: str | None = None,
     knowledge: FakeKnowledge | None = None,
+    deadline_s: float = 240,
 ) -> tuple[PostMaker, BackgroundWork]:
     """A maker and the background work to join."""
     background = BackgroundWork()
@@ -107,6 +116,7 @@ def maker(
         ),
         now=lambda: NOON,
         background=background,
+        deadline_s=deadline_s,
     )
     return posts, background
 
@@ -801,3 +811,148 @@ async def test_the_owners_notes_reach_the_post_writer(photos: InMemoryPhotos) ->
     await background.join()
 
     assert "- Siempre mencionar el envío gratis" in model.structured_systems[0]
+
+
+@dataclass
+class HangingImageGen:
+    """An image service that never answers; counts the calls still waiting."""
+
+    calls: int = 0
+    waiting: int = 0
+
+    async def generate(
+        self,
+        prompt: str,
+        reference_images: list[bytes],
+        style_image: bytes | None = None,
+        *,
+        aspect_ratio: str | None = None,
+        image_size: str | None = None,
+    ) -> GeneratedImage:
+        self.calls += 1
+        self.waiting += 1
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.waiting -= 1
+        raise AssertionError("unreachable")
+
+
+async def test_a_post_past_its_deadline_fails_and_frees_the_guard(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(3)})
+    image_gen, channel, events = HangingImageGen(), FakeChannel(), []
+    posts, background = maker(model, image_gen, photos, deadline_s=0.05)
+    request = {"brief": "mesa", "asset_ids": ["f1"], "style": "design", "slide_count": 3}
+
+    result = posts.create_post(SENDER, request, channel, recorder(events))
+    await background.join()
+    await asyncio.sleep(0.05)
+
+    assert events == [PostFailed(result["post_id"], "design", ("f1",), "mesa", "deadline")]
+    assert "too long" in events[0].note()
+    assert (image_gen.calls, image_gen.waiting) == (1, 0)  # the cover, cancelled; no slide after
+    assert channel.images == []
+    assert posts.create_post(SENDER, request, channel, recorder(events))["status"] == "generating"
+    await background.join()
+
+
+async def test_a_render_that_fails_once_keeps_the_scenes(photos: InMemoryPhotos) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(3)})
+    image_gen, channel, events = CountingImageGen(), FakeChannel(), []
+    answers = iter([httpx.Response(503)])
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return next(answers, httpx.Response(200, content=JPEG, headers=JPEG_HEADERS))
+
+    renderer = TakumiRenderer.from_settings(
+        "https://front.test", "s", transport=httpx.MockTransport(handle), retry_pause=(0, 0)
+    )
+    posts, background = maker(model, image_gen, photos, renderer=renderer)
+
+    posts.create_post(
+        SENDER,
+        {"brief": "mesa", "asset_ids": ["f1"], "style": "design", "slide_count": 3},
+        channel,
+        recorder(events),
+    )
+    await background.join()
+
+    assert [type(event) for event in events] == [PostSent]
+    assert len(channel.images) == 3
+    assert len(image_gen.calls) == 3  # each scene once
+
+
+@pytest.mark.parametrize(
+    ("answers", "renders"),
+    [([httpx.Response(503), httpx.Response(502)], 2), ([httpx.Response(400)], 1)],
+)
+async def test_a_render_that_keeps_failing_fails_the_post(
+    photos: InMemoryPhotos, answers: list[httpx.Response], renders: int
+) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(1)})
+    events: list[Event] = []
+    calls: list[httpx.Request] = []
+    pending = iter(answers)
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return next(pending)
+
+    renderer = TakumiRenderer.from_settings(
+        "https://front.test", "s", transport=httpx.MockTransport(handle), retry_pause=(0, 0)
+    )
+    posts, background = maker(model, CountingImageGen(), photos, renderer=renderer)
+
+    result = posts.create_post(
+        SENDER,
+        {"brief": "mesa", "asset_ids": ["f1"], "style": "design"},
+        FakeChannel(),
+        recorder(events),
+    )
+    await background.join()
+
+    assert events == [PostFailed(result["post_id"], "design", ("f1",), "mesa", "renderer")]
+    assert fallback(events[0]) == messages_es.JOB_FAILED
+    assert len(calls) == renders
+
+
+async def test_a_design_that_fails_before_reaching_the_owner_gives_back_the_daily_design(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(1)})
+    image_gen = CountingImageGen(fail=True)
+    posts, background = maker(model, image_gen, photos, max_posts_per_day=1)
+    design = {"brief": "m", "asset_ids": ["f1"], "style": "design"}
+
+    failed = posts.create_post(SENDER, design, FakeChannel(), drop)
+    await background.join()
+    image_gen.fail = False
+    sent = posts.create_post(SENDER, design, FakeChannel(), drop)
+    await background.join()
+
+    assert failed["status"] == sent["status"] == "generating"
+    assert posts.create_post(SENDER, design, FakeChannel(), drop) == {"error": "daily_limit"}
+
+
+class FailingSecondImage(FakeChannel):
+    async def send_image(self, to: str, image_url: str, caption: str | None = None) -> str:
+        if self.images:
+            raise RuntimeError("whatsapp refused it")
+        return await super().send_image(to, image_url, caption)
+
+
+async def test_a_design_that_reached_the_owner_in_part_still_counts(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(2)})
+    events: list[Event] = []
+    posts, background = maker(model, CountingImageGen(), photos, max_posts_per_day=1)
+    design = {"brief": "m", "asset_ids": ["f1"], "style": "design", "slide_count": 2}
+
+    posts.create_post(SENDER, design, FailingSecondImage(), recorder(events))
+    await background.join()
+
+    assert [type(event) for event in events] == [PostFailed]
+    assert posts.create_post(SENDER, design, FakeChannel(), drop) == {"error": "daily_limit"}

@@ -24,6 +24,7 @@ STILL_WORKING = "Un segundo, ya te respondo ⏳"
 RATE_LIMITED = "Me llegaron muchos mensajes juntos 🙈 Dame un minuto y seguimos."
 LOOKING_AT_PHOTOS = "Estoy mirando las fotos, ya te digo 👀"
 JOB_FAILED = "Uy, se me trabó algo armando esto. ¿Lo intento de nuevo?"
+POST_TIMED_OUT = "Uy, el post estaba tardando demasiado y lo frené 🙈 ¿Lo intento de nuevo?"
 # `photo_saved` without its buttons (T18) and without "la guardo para próximos posts": until
 # T02 a photo is only kept for 30 minutes.
 PHOTO_KEPT = "¡Buenísima! 📸 ¿Armo un post con esta foto?"

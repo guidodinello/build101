@@ -939,6 +939,7 @@ async def test_a_published_event_without_a_link_adds_nothing() -> None:
 
 FALLBACKS = [
     (PostFailed(POST_ID, "design", ("f1",), "mesa"), messages_es.JOB_FAILED),
+    (PostFailed(POST_ID, "design", ("f1",), "mesa", "deadline"), messages_es.POST_TIMED_OUT),
     (Published(POST_ID, PERMALINK), messages_es.published(PERMALINK)),
     (PublishPending(POST_ID), messages_es.PUBLISH_PENDING),
     (PublishFailed(POST_ID), messages_es.PUBLISH_FAILED),

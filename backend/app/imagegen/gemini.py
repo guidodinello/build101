@@ -16,8 +16,9 @@ ASPECT_RATIO = "4:5"
 REQUEST_TIMEOUT_MS = 120_000
 
 # google-genai does not retry unless retry_options is set; with it set, it retries
-# 408, 429 and 5xx with exponential backoff.
-RETRY_OPTIONS = types.HttpRetryOptions(attempts=4, initial_delay=2.0, max_delay=30.0)
+# 408, 429 and 5xx with exponential backoff. Two attempts at most, so one slow scene can't use up
+# a Post's whole deadline.
+RETRY_OPTIONS = types.HttpRetryOptions(attempts=2, initial_delay=2.0, max_delay=30.0)
 
 BLOCKING_REASONS = frozenset(
     {

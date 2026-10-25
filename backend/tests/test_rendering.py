@@ -43,7 +43,9 @@ def slide_render(**changes: object) -> SlideRender:
 
 
 def renderer(handler: httpx.MockTransport) -> TakumiRenderer:
-    return TakumiRenderer.from_settings("https://front.test/", SECRET, transport=handler)
+    return TakumiRenderer.from_settings(
+        "https://front.test/", SECRET, transport=handler, retry_pause=(0, 0)
+    )
 
 
 async def test_takumi_posts_the_slide_with_the_secret_and_returns_the_jpeg() -> None:
@@ -74,6 +76,52 @@ async def test_takumi_posts_the_slide_with_the_secret_and_returns_the_jpeg() -> 
 async def test_takumi_fails_on_anything_but_a_jpeg(response: httpx.Response) -> None:
     with pytest.raises(RendererError):
         await renderer(httpx.MockTransport(lambda request: response)).render(slide_render())
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [httpx.Response(503, text="cold start"), httpx.ReadTimeout("slow")],
+    ids=["5xx", "timeout"],
+)
+async def test_takumi_retries_a_5xx_or_a_timeout_once(
+    failure: httpx.Response | httpx.TimeoutException,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            if isinstance(failure, Exception):
+                raise failure
+            return failure
+        return httpx.Response(200, content=JPEG, headers={"content-type": "image/jpeg"})
+
+    assert await renderer(httpx.MockTransport(handle)).render(slide_render()) == JPEG
+    assert len(requests) == 2
+
+
+async def test_takumi_gives_up_after_a_second_5xx() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(500)
+
+    with pytest.raises(RendererError, match="500"):
+        await renderer(httpx.MockTransport(handle)).render(slide_render())
+    assert len(requests) == 2
+
+
+async def test_takumi_doesnt_retry_a_4xx() -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(401)
+
+    with pytest.raises(RendererError, match="401"):
+        await renderer(httpx.MockTransport(handle)).render(slide_render())
+    assert len(requests) == 1
 
 
 async def test_takumi_fails_when_the_frontend_is_unreachable() -> None:

@@ -27,6 +27,7 @@
 | `GEMINI_CHAT_MODEL` | `gemini-3.8-flash` | Text model; uses `GEMINI_API_KEY` |
 | `ASSISTANT_NAME` | `Neitor` | The assistant introduces itself by this name in the welcome (product: Neitor AI) |
 | `MAX_POSTS_PER_DAY` | `5` | Designs (posts with AI-generated images: image Posts and carousels) a Business can start per day; posts of the Owner's photos as they are don't count. `create_post` answers `daily_limit` past it ([agents.md](../architecture/agents.md#when-image-generation-runs)) |
+| `POST_DEADLINE_S` | `240` | Seconds a Post may take to get its images ready (knowledge, copy, scenes, render, waiting for an image slot). Past it the Post fails, the Owner is told it took too long and can ask again at once, and a design that reached nothing gives back its daily design. Sending is never cut off halfway |
 | `WHATSAPP_CHANNEL` | `kapso` \| `simulator` | Default `kapso`. `simulator` arrives with T21 |
 | `KAPSO_API_KEY` | `...` | WhatsApp through Kapso ([ADR 0020](../decisions/0020-whatsapp-via-kapso.md)). Sent as the `X-API-Key` header ([API introduction](https://docs.kapso.ai/api/introduction.md)) |
 | `KAPSO_WEBHOOK_SECRET` | random | Webhook signing secret: `X-Webhook-Signature` is the hex HMAC-SHA256 of the raw body ([security](https://docs.kapso.ai/docs/platform/webhooks/security.md)). Without it every webhook gets `401` |

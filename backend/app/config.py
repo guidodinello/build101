@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     # Post images are served from here until Supabase Storage (T17); in local dev, the tunnel URL
     public_backend_url: str | None = None
     max_posts_per_day: int = 5
+    # How long a Post may take to get its images ready before it fails and the Owner can ask again
+    post_deadline_s: float = 240.0
     # Videos are billed per second (ADR 0033), so they have their own cap, apart from designs
     max_videos_per_day: int = 2
     max_photo_mb: int = 10
