@@ -6,12 +6,13 @@ from datetime import datetime
 import pytest
 
 from app.background import BackgroundWork
+from app.channels.base import Button
 from app.config import Settings
 from app.conversation.factory import ChatParts, Conversation, build_chat, build_conversation
 from app.conversation.history import InMemoryHistory
 from app.copy import messages_es
 from app.media.public import PublicImages
-from app.posts.publish import MAX_RETRY_AFTER_S
+from app.posts.publish import FOLLOW_UP_WAITS_S, MAX_RETRY_AFTER_S
 from app.posts.shared_account import SharedAccountGuard
 from app.posts.store import Post, PostImage, PostVideo
 from app.publishing.base import (
@@ -41,6 +42,8 @@ LIVE = text_reply("¡Ya está en tu Instagram! 🎉")
 PROCESSING = text_reply("Instagram lo está procesando, en un ratito aparece ⏳")
 REJECTED = text_reply("Uy, Instagram no lo aceptó. ¿Armamos otro?")
 ASK = text_reply("¿Lo subo?")
+UNCONFIRMED = text_reply("Instagram no me confirmó nada 🙈 Fijate en tu cuenta")
+STILL_PENDING = PublishResult(status="pending", external_post_id="ext-1", error="publishing")
 
 
 def approve(post_id: str) -> object:
@@ -333,19 +336,19 @@ async def test_without_an_instagram_account_nothing_is_published() -> None:
 
 
 async def test_pending_is_not_reported_as_a_failure_and_is_not_published_again() -> None:
-    pending = PublishResult(status="pending", external_post_id="ext-1", error="still publishing")
     rig = Rig(
-        ScriptedModel(replies=[approve("p1"), STARTED, PROCESSING]),
-        FakePublisher(results=[pending]),
+        ScriptedModel(replies=[approve("p1"), STARTED, PROCESSING, UNCONFIRMED]),
+        FakePublisher(results=[STILL_PENDING], statuses=[STILL_PENDING]),
     )
     rig.add_post("p1")
 
     await rig.say("subilo")
     await rig.finish()
 
-    assert rig.said == [STARTED.text, PROCESSING.text]
-    assert status(rig, "p1") == "publish_pending"
+    assert rig.said == [STARTED.text, PROCESSING.text, UNCONFIRMED.text]
+    assert status(rig, "p1") == "publish_unconfirmed"
     assert len(rig.publisher.calls) == 1
+    assert rig.publisher.checked == ["ext-1"] * len(FOLLOW_UP_WAITS_S)
 
 
 @pytest.mark.parametrize(
@@ -383,7 +386,7 @@ async def test_a_timeout_is_retried_once_with_the_same_key() -> None:
 
 async def test_a_timeout_that_repeats_is_unknown_not_failed() -> None:
     rig = Rig(
-        ScriptedModel(replies=[approve("p1"), STARTED, PROCESSING]),
+        ScriptedModel(replies=[approve("p1"), STARTED, PROCESSING, UNCONFIRMED]),
         FakePublisher(results=[PublishRetryable("timeout")]),
     )
     rig.add_post("p1")
@@ -391,9 +394,10 @@ async def test_a_timeout_that_repeats_is_unknown_not_failed() -> None:
     await rig.say("subilo")
     await rig.finish()
 
-    assert len(rig.publisher.calls) == 2
-    assert rig.said[-1] == PROCESSING.text
-    assert status(rig, "p1") == "publish_pending"
+    assert rig.said == [STARTED.text, PROCESSING.text, UNCONFIRMED.text]
+    # The publish tried twice, then each follow-up asked again with the same key: never twice.
+    assert [call["key"] for call in rig.publisher.calls] == ["p1"] * (2 + len(FOLLOW_UP_WAITS_S))
+    assert status(rig, "p1") == "publish_unconfirmed"
 
 
 @pytest.mark.parametrize(
@@ -507,13 +511,13 @@ async def test_when_the_model_is_down_the_owner_still_hears_how_it_ended(
     gate.set()
     await rig.finish()
 
-    assert rig.said == [STARTED.text, fallback]
+    assert rig.said[:2] == [STARTED.text, fallback]
     texts = [
         step["content"][0]["text"]
         for step in await rig.history.get(SENDER)
         if step["type"] == "user_input"
     ]
-    assert f'The Owner was told: "{fallback}"' in texts[-1]
+    assert any(f'The Owner was told: "{fallback}"' in text for text in texts)
 
 
 OTHER_OWNER = "59899000009"
@@ -593,3 +597,151 @@ def test_the_chat_publishes_behind_the_guard_from_the_settings(
     assert guard(unnamed) == SharedAccountGuard(None, open_when_unset=False)
     assert guard(local) == SharedAccountGuard(None, open_when_unset=True)
     assert "without ZERNIO_OWNER_PHONE: nobody can publish" in caplog.text
+
+
+FAILED_AGAIN = text_reply("Uy, Instagram no lo aceptó. ¿Lo intento de nuevo?")
+LIVE_NOW = PublishResult(status="published", external_post_id="ext-1", permalink=PERMALINK)
+
+
+def processing_rig(statuses: list[PublishResult | Exception], *replies: object) -> Rig:
+    return Rig(
+        ScriptedModel(replies=[approve("p1"), STARTED, PROCESSING, *replies]),
+        FakePublisher(results=[STILL_PENDING], statuses=statuses),
+    )
+
+
+async def test_a_post_still_processing_that_goes_live_sends_the_link_once() -> None:
+    rig = processing_rig([LIVE_NOW], LIVE)
+    post = rig.add_post("p1")
+
+    await rig.say("subilo")
+    await rig.finish()
+
+    assert rig.said == [STARTED.text, PROCESSING.text, f"{LIVE.text}\n{PERMALINK}"]
+    assert (post.status, post.permalink) == ("published", PERMALINK)
+    assert rig.publisher.checked == ["ext-1"]
+    assert len(rig.publisher.calls) == 1
+
+
+async def test_a_post_still_processing_that_fails_offers_reintentar_and_it_publishes_again() -> (
+    None
+):
+    rig = processing_rig(
+        [PublishResult(status="failed", external_post_id="ext-1", error="media fetch")],
+        FAILED_AGAIN,
+        STARTED,
+        LIVE,
+    )
+    rig.publisher.results = [STILL_PENDING, LIVE_NOW]
+    rig.add_post("p1")
+
+    await rig.say("subilo")
+    await rig.finish()
+
+    assert status(rig, "p1") == "failed"
+    assert rig.said[-1] == FAILED_AGAIN.text
+    assert rig.channel.buttons[-1][2] == ["post_retry:p1"]
+
+    tap = message("interactive").model_copy(
+        update={"button": Button(id="post_retry:p1", title=messages_es.BUTTON_RETRY)}
+    )
+    await rig.chat.handler.handle(tap, rig.channel)
+    await rig.finish()
+
+    assert status(rig, "p1") == "published"
+    assert [call["key"] for call in rig.publisher.calls] == ["p1", "p1-r2"]
+
+
+async def test_follow_up_checks_grow_apart_and_stop_at_the_first_final_outcome() -> None:
+    rig = processing_rig([STILL_PENDING, STILL_PENDING, LIVE_NOW], LIVE)
+    rig.add_post("p1")
+
+    await rig.say("subilo")
+    await rig.finish()
+
+    assert rig.sleeps == list(FOLLOW_UP_WAITS_S[:3])
+    assert tuple(sorted(FOLLOW_UP_WAITS_S)) == FOLLOW_UP_WAITS_S
+    assert len(rig.publisher.checked) == 3
+    assert status(rig, "p1") == "published"
+
+
+@pytest.mark.parametrize(
+    "error", [PublishRetryable("zernio down"), PublisherError("zernio 404: gone")]
+)
+async def test_a_check_that_errors_is_tried_at_the_next_interval_and_reports_nothing(
+    error: Exception,
+) -> None:
+    rig = processing_rig([error, LIVE_NOW], LIVE)
+    rig.add_post("p1")
+
+    await rig.say("subilo")
+    await rig.finish()
+
+    assert rig.said == [STARTED.text, PROCESSING.text, f"{LIVE.text}\n{PERMALINK}"]
+    assert rig.sleeps == list(FOLLOW_UP_WAITS_S[:2])
+    assert status(rig, "p1") == "published"
+
+
+async def test_a_post_with_no_provider_id_is_asked_for_with_its_own_key() -> None:
+    no_id = PublishRetryable("accepted, but no post id")
+    results: list[PublishResult | Exception] = [no_id, no_id, STILL_PENDING]
+    rig = Rig(
+        ScriptedModel(replies=[approve("p1"), STARTED, PROCESSING, LIVE]),
+        FakePublisher(results=results, statuses=[LIVE_NOW]),
+    )
+    rig.add_post("p1")
+
+    await rig.say("subilo")
+    await rig.finish()
+
+    # The follow-up's replay gave the post's id, so the next check reads it instead.
+    assert [call["key"] for call in rig.publisher.calls] == ["p1", "p1", "p1"]
+    assert rig.publisher.checked == ["ext-1"]
+    assert status(rig, "p1") == "published"
+
+
+@pytest.mark.parametrize("kind", ["image", "carousel", "reel"])
+async def test_every_format_is_followed_up(kind: str) -> None:
+    rig = processing_rig([LIVE_NOW], LIVE)
+    post = rig.add_post("p1", slides=3 if kind == "carousel" else 1)
+    if kind == "reel":
+        post.video = PostVideo("/media/v1.mp4", b"mp4")
+
+    await rig.say("subilo")
+    await rig.finish()
+
+    assert rig.publisher.calls[0]["media"].format == kind
+    assert post.status == "published"
+
+
+class TwoPostsPublisher(FakePublisher):
+    """Each post's checks answer on their own: p1's goes live, p2's fails."""
+
+    async def status(self, external_post_id: str) -> PublishResult:
+        self.checked.append(external_post_id)
+        if external_post_id == "ext-p1":
+            return PublishResult(status="published", external_post_id="ext-p1", permalink=PERMALINK)
+        return PublishResult(status="failed", external_post_id="ext-p2", error="rejected")
+
+
+async def test_two_posts_still_processing_are_followed_independently() -> None:
+    publisher = TwoPostsPublisher(
+        results=[
+            PublishResult(status="pending", external_post_id="ext-p1"),
+            PublishResult(status="pending", external_post_id="ext-p2"),
+        ]
+    )
+    rig = Rig(ScriptedModel(replies=[text_reply("ok")]), publisher)
+    p1, p2 = rig.add_post("p1"), rig.add_post("p2")
+
+    assert rig.chat.lifecycle.approve(SENDER, "p1") and rig.chat.lifecycle.approve(SENDER, "p2")
+    rig.publishing.publish_approved(SENDER, "p1", rig.channel, drop_event)
+    rig.publishing.publish_approved(SENDER, "p2", rig.channel, drop_event)
+    await rig.finish()
+
+    assert sorted(publisher.checked) == ["ext-p1", "ext-p2"]
+    assert (p1.status, p2.status) == ("published", "failed")
+
+
+async def drop_event(sender: str, event: object, channel: object) -> None:
+    """A notify for tests that don't look at the messages."""

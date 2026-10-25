@@ -58,3 +58,13 @@ async def test_ensure_profile_is_deterministic() -> None:
 
 def test_satisfies_the_port() -> None:
     assert isinstance(MockPublisher(), PublisherPort)
+
+
+async def test_status_of_a_published_post_is_published_with_its_link() -> None:
+    publisher = MockPublisher(delay_s=0)
+    published = await publisher.publish("acc", "hola", IMAGE)
+    assert published.external_post_id is not None
+
+    result = await publisher.status(published.external_post_id)
+
+    assert result == published

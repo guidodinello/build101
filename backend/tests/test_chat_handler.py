@@ -39,6 +39,7 @@ from app.conversation.events import (
     PublishNotConnected,
     PublishPending,
     PublishStarted,
+    PublishUnconfirmed,
     StaleButton,
     UnsupportedMedia,
 )
@@ -785,6 +786,7 @@ EVENTS: list[Event] = [
     Published(POST_ID, PERMALINK),
     PublishPending(POST_ID),
     PublishFailed(POST_ID),
+    PublishUnconfirmed(POST_ID),
     PhotosReceived(("f1",)),
     AudioUnclear(),
     UnsupportedMedia(),
@@ -942,6 +944,7 @@ FALLBACKS = [
     (Published(POST_ID, PERMALINK), messages_es.published(PERMALINK)),
     (PublishPending(POST_ID), messages_es.PUBLISH_PENDING),
     (PublishFailed(POST_ID), messages_es.PUBLISH_FAILED),
+    (PublishUnconfirmed(POST_ID), messages_es.PUBLISH_UNCONFIRMED),
     (PhotosReceived(("f1",)), messages_es.PHOTO_KEPT),
     (PhotosReceived(("f1", "f2")), messages_es.PHOTOS_KEPT),
     (AudioUnclear(), messages_es.AUDIO_UNCLEAR),

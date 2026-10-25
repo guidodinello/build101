@@ -210,6 +210,14 @@ class ZernioPublisher:
         )
         return result
 
+    async def status(self, external_post_id: str) -> PublishResult:
+        """GET /posts/{id} once: the follow-up check of a post still processing (BUG-10)."""
+        response = await self._request(
+            "GET", f"/posts/{external_post_id}", timeout=POLL_REQUEST_TIMEOUT_S
+        )
+        result = _post_result(_parse(response, _PostBody, "post"))
+        return result.model_copy(update={"external_post_id": external_post_id})
+
     async def _wait_for_outcome(self, post_id: str, pending: PublishResult) -> PublishResult:
         """Poll the post until Zernio reports a final outcome. Never re-POSTs, never raises.
 

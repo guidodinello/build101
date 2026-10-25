@@ -111,6 +111,18 @@ class PublishFailed:
 
 
 @dataclass(frozen=True, slots=True)
+class PublishUnconfirmed:
+    post_id: str
+
+    def note(self) -> str:
+        return (
+            f"[post {self.post_id} publish unconfirmed] Instagram never confirmed whether it "
+            "went live, after checking for about 2 hours. Tell the Owner once to check their "
+            "Instagram account. It will not be published again."
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class PublishNotConnected:
     post_id: str
 
@@ -306,6 +318,7 @@ Event = (
     | Published
     | PublishPending
     | PublishFailed
+    | PublishUnconfirmed
     | PublishNotConnected
     | PhotosReceived
     | AudioUnclear
@@ -375,6 +388,8 @@ def fallback(event: Event) -> str | None:
             return messages_es.PUBLISH_PENDING
         case PublishFailed():
             return messages_es.PUBLISH_FAILED
+        case PublishUnconfirmed():
+            return messages_es.PUBLISH_UNCONFIRMED
         case PublishNotConnected():
             return messages_es.NEED_IG
         case PhotosReceived(photo_ids=ids):

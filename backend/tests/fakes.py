@@ -176,6 +176,13 @@ class FakePublisher:
     )
     calls: list[dict[str, Any]] = field(default_factory=list)
     gate: asyncio.Event | None = None  # when set, publishing waits for it
+    # The follow-up checks' answers, in order (the last repeats), raising the exceptions.
+    statuses: list[PublishResult | Exception] = field(
+        default_factory=lambda: [
+            PublishResult(status="published", external_post_id="ext-1", permalink=PERMALINK)
+        ]
+    )
+    checked: list[str] = field(default_factory=list)
 
     async def ensure_profile(self, name: str, external_id: str) -> str:
         return "profile"
@@ -197,6 +204,13 @@ class FakePublisher:
         if self.gate is not None:
             await self.gate.wait()
         item = self.results.pop(0) if len(self.results) > 1 else self.results[0]
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    async def status(self, external_post_id: str) -> PublishResult:
+        self.checked.append(external_post_id)
+        item = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
         if isinstance(item, Exception):
             raise item
         return item

@@ -42,6 +42,10 @@ class PublisherPort(Protocol):
         idempotency_key: str | None = None,
     ) -> PublishResult: ...
 
+    async def status(self, external_post_id: str) -> PublishResult:
+        """Where a post the provider already has stands now. Never publishes."""
+        ...
+
 
 class PublisherError(Exception):
     """The provider could not be reached, or answered something we cannot use."""
