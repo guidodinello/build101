@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.agents.schemas import BrandBrain
 from app.background import BackgroundWork
 from app.carousel.generator import CarouselGenerator
-from app.carousel.schemas import MAX_SLIDES
+from app.carousel.schemas import MAX_SLIDES, CarouselBrief, CarouselCopy
 from app.channels.base import ChannelPort
 from app.channels.inbound import mask
 from app.conversation.events import Event, Notify, PostFailed, PostSent
@@ -20,11 +20,13 @@ from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
 from app.imagegen.base import ImageGenPort
 from app.knowledge.base import BusinessKnowledge, Knowledge
+from app.llm.client import LLMError
 from app.media.images import add_logo, to_post_image
 from app.media.public import PublicImages
-from app.rendering.base import RendererPort
+from app.rendering.base import RenderedSlide, RendererPort
 from app.rendering.slides import render_slides
 
+from .critic import DesignCritic, Revision, changed, revise
 from .drafts import PostDrafter, PreviousPost
 from .lifecycle import PostLifecycle
 from .store import Post, PostImage
@@ -91,6 +93,7 @@ class PostMaker:
         max_posts_per_day: int,
         knowledge: Knowledge | None = None,
         now: Callable[[], datetime] = local_now,
+        critic: DesignCritic | None = None,
         *,
         background: BackgroundWork,
     ) -> None:
@@ -104,6 +107,7 @@ class PostMaker:
         self._max_posts_per_day = max_posts_per_day
         self._knowledge = knowledge
         self._now = now
+        self._critic = critic
         self._generating: set[str] = set()
         self._designs_today: dict[str, tuple[date, int]] = {}
         self._background = background
@@ -306,16 +310,23 @@ class PostMaker:
         )
         style_prompt = brief.style_prompt
         one_per_photo = len(photos) == count
-        scenes = await CarouselGenerator(self._image_gen).generate(
-            copy,
-            brief,
-            references,
-            slide_references={n: [data] for n, data in enumerate(references, start=1)}
-            if one_per_photo
-            else None,
+        slide_references = (
+            {n: [data] for n, data in enumerate(references, start=1)} if one_per_photo else None
         )
+        generator = CarouselGenerator(self._image_gen)
+        scenes = await generator.generate(copy, brief, references, slide_references)
+        rendered = await render_slides(self._renderer, copy, brief, scenes, brand, logo)
+        if self._critic is not None:
+            revision = await reviewed(self._critic, copy, brief, rendered)
+            if revision is not None:
+                brief = revision.brief
+                if revision.new_scenes:
+                    scenes = await generator.redo(
+                        copy, brief, references, scenes, revision.new_scenes, slide_references
+                    )
+                rendered = await render_slides(self._renderer, copy, brief, scenes, brand, logo)
         return RenderedPost(
-            await render_slides(self._renderer, copy, brief, scenes, brand, logo),
+            [slide.image for slide in rendered],
             post_text(copy.caption, copy.hashtags),
             headlines=[slide.headline for slide in copy.slides],
             style_prompt=style_prompt,
@@ -378,6 +389,26 @@ class PostMaker:
             logger.warning("post text is %d chars, over the image caption limit", len(caption))
             await channel.send_text(sender, caption)
         return paths
+
+
+async def reviewed(
+    critic: DesignCritic, copy: CarouselCopy, brief: CarouselBrief, rendered: list[RenderedSlide]
+) -> Revision | None:
+    """The critic's fixes, or None when it asks for none; a failed review keeps the post."""
+    try:
+        review = await critic.review(copy, brief, rendered)
+    except LLMError:
+        logger.exception("design review failed, the post goes out as rendered")
+        return None
+    revision = revise(brief, review)
+    logger.info(
+        "design review: %d of %d slides to fix, %d new scenes: %s",
+        len(review.fixes),
+        len(rendered),
+        len(revision.new_scenes),
+        [(fix.index, fix.problems) for fix in review.fixes],
+    )
+    return revision if changed(brief, revision) else None
 
 
 def previous_post(post: Post, change: str | None) -> PreviousPost:

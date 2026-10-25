@@ -32,6 +32,7 @@ DARK_BACKING = (31, 31, 31)
 OPAQUE_ALPHA = 128
 MID_LUMINANCE = 128
 RENDER_LOGO_MAX_SIDE = 600
+REVIEW_SIZE = (540, 675)  # a designed slide at half size: enough for a model to judge the design
 POST_RATIO = POST_SIZE[0] / POST_SIZE[1]
 
 Tone = Literal["light", "dark"]
@@ -91,6 +92,13 @@ def to_post_image(data: bytes) -> bytes:
         image = ImageOps.exif_transpose(source).convert("RGB")
     fitted = ImageOps.fit(image, POST_SIZE, method=Image.Resampling.LANCZOS)
     return _to_jpeg(fitted)
+
+
+def review_copy(data: bytes) -> bytes:
+    """A designed slide at half size, for the Design Critic (fewer image tokens)."""
+    with Image.open(BytesIO(data)) as source:
+        image = source.convert("RGB")
+    return _to_jpeg(ImageOps.fit(image, REVIEW_SIZE, method=Image.Resampling.LANCZOS))
 
 
 def slice_panorama(data: bytes, count: int) -> list[bytes]:

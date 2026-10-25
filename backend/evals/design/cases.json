@@ -1,0 +1,29 @@
+[
+  {
+    "id": "guia-mesa",
+    "brief": "Un carrusel educativo: 3 medidas que hay que saber antes de comprar una mesa de comedor (90 cm alrededor, 60 cm por persona, redonda para livings chicos). Cerrar invitando a escribir.",
+    "photos": ["../../../frontend/components/landing/photos/oak-table.jpg"],
+    "slide_count": 5
+  },
+  {
+    "id": "taller-proceso",
+    "brief": "Mostrar el taller y el proceso: de la tabla de roble a la mesa terminada, hecha a mano.",
+    "photos": [
+      "../../../frontend/components/landing/photos/workshop.jpg",
+      "../../../frontend/components/landing/photos/workshop-hands.jpg",
+      "../../../frontend/components/landing/photos/oak-table.jpg"
+    ]
+  },
+  {
+    "id": "cuidado-madera",
+    "brief": "Tips de cuidado: cómo cuidar una mesa de roble macizo (aceite vegetal cada seis meses, nada de productos con silicona, posavasos para lo caliente).",
+    "photos": ["../../../frontend/components/landing/photos/oak-table.jpg"],
+    "slide_count": 4
+  },
+  {
+    "id": "lanzamiento-mesa",
+    "brief": "Presentar la mesa redonda de roble como pieza destacada de la semana, elegante y sin precio.",
+    "photos": ["../../../frontend/components/landing/photos/oak-table.jpg"],
+    "slide_count": 3
+  }
+]

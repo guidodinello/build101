@@ -12,13 +12,14 @@ from app.conversation.photos import LOCAL_TZ, InMemoryPhotos
 from app.knowledge.base import BusinessKnowledge, Note
 from app.media.images import POST_SIZE, image_size
 from app.media.public import PublicImages
+from app.posts.critic import DesignCritic, DesignReview, SlideReview
 from app.posts.drafts import SYSTEM_PROMPT, CarouselDraft, PostCopy, PostDrafter, SlideDraft
 from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import WHATSAPP_CAPTION_MAX, PostMaker
 from app.posts.store import InMemoryPosts, Post, PostImage
 from app.rendering.mock import MockRenderer
 from tests.conftest import make_image
-from tests.fakes import CountingImageGen, FakeChannel, ScriptedModel, brand_brain
+from tests.fakes import CountingImageGen, FakeChannel, ScriptedModel, SequenceModel, brand_brain
 
 SENDER = "59899000001"
 NOON = datetime(2026, 10, 17, 12, 0, tzinfo=LOCAL_TZ)
@@ -85,6 +86,7 @@ def maker(
     notes: list[str] | None = None,
     trend_notes: str | None = None,
     knowledge: FakeKnowledge | None = None,
+    critic: DesignCritic | None = None,
 ) -> tuple[PostMaker, BackgroundWork]:
     """A maker and the background work to join."""
     background = BackgroundWork()
@@ -106,6 +108,7 @@ def maker(
             )
         ),
         now=lambda: NOON,
+        critic=critic,
         background=background,
     )
     return posts, background
@@ -801,3 +804,91 @@ async def test_the_owners_notes_reach_the_post_writer(photos: InMemoryPhotos) ->
     await background.join()
 
     assert "- Siempre mencionar el envío gratis" in model.structured_systems[0]
+
+
+def slide_fix(index: int, **changes: object) -> SlideReview:
+    fields = {
+        "index": index,
+        "verdict": "fix",
+        "problems": ["headline over the product"],
+        "layout": "keep",
+        "focus": "keep",
+        "emphasis": "keep",
+        "surface": "keep",
+        "new_scene": False,
+        "scene_note": "",
+    }
+    return SlideReview.model_validate(fields | changes)
+
+
+async def design(posts: PostMaker, background: BackgroundWork, channel: FakeChannel) -> None:
+    posts.create_post(
+        SENDER,
+        {"brief": "muebles", "asset_ids": ["f1", "f2", "f3"], "style": "design"},
+        channel,
+        drop,
+    )
+    await background.join()
+
+
+async def test_the_critics_layout_fix_is_rendered_before_the_owner_sees_the_post(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(3)})
+    critic = SequenceModel([DesignReview(slides=[slide_fix(2, layout="quote", focus="top")])])
+    image_gen, channel, renderer = CountingImageGen(), FakeChannel(), MockRenderer()
+    posts, background = maker(
+        model, image_gen, photos, renderer=renderer, critic=DesignCritic(critic)
+    )
+
+    await design(posts, background, channel)
+
+    assert len(renderer.slides) == 6
+    second = renderer.slides[4]
+    assert (second.index, second.layout, second.focus) == (2, "quote", "top")
+    assert len(image_gen.calls) == 3
+    assert len(channel.images) == 3
+
+
+async def test_a_broken_scene_is_generated_again_from_its_own_photo(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(3)})
+    fixes = [slide_fix(3, new_scene=True, scene_note="no letters on the wall")]
+    critic = SequenceModel([DesignReview(slides=fixes)])
+    image_gen, channel = CountingImageGen(), FakeChannel()
+    posts, background = maker(model, image_gen, photos, critic=DesignCritic(critic))
+
+    await design(posts, background, channel)
+
+    assert len(image_gen.calls) == 4
+    assert image_gen.calls[-1].count("Fix: no letters on the wall") == 1
+    assert [image_size(ref) for ref in image_gen.references[-1]] == [PHOTO_SIZES[2]]
+    assert len(channel.images) == 3
+
+
+async def test_a_carousel_the_critic_approves_is_rendered_once(photos: InMemoryPhotos) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(3)})
+    critic = SequenceModel([DesignReview(slides=[])])
+    renderer = MockRenderer()
+    posts, background = maker(
+        model, CountingImageGen(), photos, renderer=renderer, critic=DesignCritic(critic)
+    )
+
+    await design(posts, background, FakeChannel())
+
+    assert len(renderer.slides) == 3
+
+
+async def test_a_failed_review_sends_the_post_as_rendered(photos: InMemoryPhotos) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(3)})
+    failing = ScriptedModel()  # no DesignReview scripted: the review raises LLMError
+    channel, renderer = FakeChannel(), MockRenderer()
+    posts, background = maker(
+        model, CountingImageGen(), photos, renderer=renderer, critic=DesignCritic(failing)
+    )
+
+    await design(posts, background, channel)
+
+    assert len(renderer.slides) == 3
+    assert len(channel.images) == 3
