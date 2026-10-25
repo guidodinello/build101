@@ -661,3 +661,35 @@ async def test_a_non_string_post_id_is_treated_as_missing() -> None:
 
     with pytest.raises(PublishRetryable, match="no post id"):
         await publisher.publish(ACCOUNT_ID, "x", IMAGE)
+
+
+@pytest.mark.parametrize(
+    ("body", "status", "permalink"),
+    [
+        (post_body("published", platformPostUrl=PERMALINK), "published", PERMALINK),
+        (post_body("failed", errorMessage="media fetch failed"), "failed", None),
+        (post_body("publishing"), "pending", None),
+    ],
+)
+async def test_status_reads_the_post_once_and_never_publishes(
+    body: dict, status: str, permalink: str | None
+) -> None:
+    publisher, requests = publisher_with(respond(200, body))
+
+    result = await publisher.status("post-1")
+
+    [request] = requests
+    assert (request.method, str(request.url)) == ("GET", f"{BASE_URL}/posts/post-1")
+    assert request.extensions["timeout"]["read"] == POLL_REQUEST_TIMEOUT_S
+    assert (result.status, result.permalink, result.external_post_id) == (
+        status,
+        permalink,
+        "post-1",
+    )
+
+
+async def test_status_raises_when_zernio_is_down() -> None:
+    publisher, _ = publisher_with(respond(503, {"error": "down"}))
+
+    with pytest.raises(PublishRetryable):
+        await publisher.status("post-1")

@@ -40,3 +40,11 @@ class MockPublisher:
             external_post_id=f"mock-{post_id}",
             permalink=f"{PERMALINK_PREFIX}{post_id}",
         )
+
+    async def status(self, external_post_id: str) -> PublishResult:
+        post_id = external_post_id.removeprefix("mock-")
+        return PublishResult(
+            status="published",
+            external_post_id=external_post_id,
+            permalink=f"{PERMALINK_PREFIX}{post_id}",
+        )

@@ -9,7 +9,14 @@ from app.background import BackgroundWork
 from app.channels.base import ChannelPort
 from app.channels.inbound import mask
 from app.conversation.approval import Approval
-from app.conversation.events import Event, Notify, Published, PublishFailed, PublishPending
+from app.conversation.events import (
+    Event,
+    Notify,
+    Published,
+    PublishFailed,
+    PublishPending,
+    PublishUnconfirmed,
+)
 from app.media.public import PublicImages, PublicVideos
 from app.publishing.base import (
     PublisherError,
@@ -30,6 +37,10 @@ logger = logging.getLogger(__name__)
 MAX_PUBLISH_ATTEMPTS = 3
 DEFAULT_RETRY_AFTER_S = 5.0
 MAX_RETRY_AFTER_S = 30.0
+# A publish still processing is checked again after each of these waits (about 2 h in all), then
+# the Owner is asked to look at their account. Zernio replays a key's post for 24 h, so asking
+# again with the same key, for a post it never gave an id for, can't publish it twice.
+FOLLOW_UP_WAITS_S = (60.0, 180.0, 600.0, 1800.0, 3600.0)
 
 Sleep = Callable[[float], Awaitable[None]]
 
@@ -71,6 +82,7 @@ class PostPublisher:
         self._sleep = sleep
         self._background = background
         self._shared_account = shared_account
+        self._following: set[tuple[str, str]] = set()  # (sender, post id) being followed up
 
     def approve(
         self,
@@ -139,6 +151,67 @@ class PostPublisher:
             logger.exception("publishing post %s failed for %s", post.id, mask(post.sender))
             result = PublishResult(status="failed", error="unexpected error")
         await self._finish(post, result, channel, notify)
+        if self._posts.awaiting_outcome(post):
+            self._start_follow_up(post, account_id, channel, notify)
+
+    def _start_follow_up(
+        self, post: Post, account_id: str, channel: ChannelPort, notify: Notify
+    ) -> None:
+        """One follow-up per Post: it lives as long as the in-memory Post does (BUG-10)."""
+        key = (post.sender, post.id)
+        if key in self._following:
+            return
+        self._following.add(key)
+        self._background.start(
+            self._follow_up(post, account_id, channel, notify),
+            f"follow up publish {post.id} for {mask(post.sender)}",
+        )
+
+    async def _follow_up(
+        self, post: Post, account_id: str, channel: ChannelPort, notify: Notify
+    ) -> None:
+        """Ask the provider again at growing intervals until the outcome is final.
+
+        A check that errors is tried again at the next interval and never reports a failure.
+        A post the provider never gave an id for is asked for with its own idempotency key, which
+        replays the original post instead of publishing another.
+        """
+        try:
+            for check, wait_s in enumerate(FOLLOW_UP_WAITS_S, start=1):
+                await self._sleep(wait_s)
+                if not self._posts.awaiting_outcome(post):
+                    return
+                try:
+                    result = await self._check(post, account_id)
+                except Exception as exc:
+                    logger.warning("follow-up %d of post %s failed: %s", check, post.id, exc)
+                    continue
+                if result.status in ("published", "failed"):
+                    logger.info("follow-up %d of post %s: %s", check, post.id, result.status)
+                    await self._finish(post, result, channel, notify)
+                    return
+                if result.external_post_id:
+                    self._posts.publish_pending(post, result.external_post_id)
+            logger.warning("post %s still unconfirmed after the last follow-up", post.id)
+            self._posts.unconfirmed(post)
+            await notify(post.sender, PublishUnconfirmed(post.id), channel)
+        finally:
+            self._following.discard((post.sender, post.id))
+
+    async def _check(self, post: Post, account_id: str) -> PublishResult:
+        if post.external_post_id:
+            return await self._publisher.status(post.external_post_id)
+        self._serve(post)
+        return await self._publisher.publish(
+            account_id, post.caption, self._media(post), idempotency_key=post.idempotency_key
+        )
+
+    def _serve(self, post: Post) -> None:
+        """Keep the media served, however many images came after it: Instagram fetches it."""
+        for image in post.images:
+            self._images.keep(image.path, image.data)
+        if post.video is not None:
+            self._videos.keep(post.video.path, post.video.data)
 
     def _media(self, post: Post) -> PublishMedia:
         if post.video is not None:
@@ -163,10 +236,7 @@ class PostPublisher:
         uncertain: PublisherError | None = None
         retried = False
         for attempt in range(1, MAX_PUBLISH_ATTEMPTS + 1):
-            for image in post.images:  # still served, however many images came after it
-                self._images.keep(image.path, image.data)
-            if post.video is not None:
-                self._videos.keep(post.video.path, post.video.data)
+            self._serve(post)
             try:
                 return await self._publisher.publish(
                     account_id, post.caption, media, idempotency_key=post.idempotency_key

@@ -5,6 +5,7 @@ Allowed moves (ADR 0007 keeps the publisher behind the Owner's explicit approval
     pending_approval -> approved -> publishing   ([Aprobar], then [Publicar ahora])
     pending_approval | approved -> publishing    (the Owner's words: a plain "subilo")
     publishing -> published | failed | publish_pending
+    publish_pending -> published | failed | publish_unconfirmed   (the follow-up checks)
     pending_approval | approved -> discarded | replaced
     failed -> publishing   ([Reintentar])
 
@@ -175,6 +176,14 @@ class PostLifecycle:
         """Not final or not known: the post may be live, so no failure and no re-publish."""
         post.status = "publish_pending"
         post.external_post_id = external_post_id
+
+    def awaiting_outcome(self, post: Post) -> bool:
+        """Published or not, nobody knows yet: what the follow-up checks resolve."""
+        return post.status == "publish_pending"
+
+    def unconfirmed(self, post: Post) -> None:
+        """The follow-up ran out with no final answer: never republished, no longer on its way."""
+        post.status = "publish_unconfirmed"
 
     # Approval inputs
 

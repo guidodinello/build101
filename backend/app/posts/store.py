@@ -15,6 +15,7 @@ PostStatus = Literal[
     "publish_pending",  # not final or not known: the post may be live, never report a failure
     "published",
     "failed",  # definite failure only; [Reintentar] publishes again with a new key
+    "publish_unconfirmed",  # still pending after the last follow-up: never republished on its own
     "replaced",  # a newer revision was sent; no longer approvable
 ]
 # Statuses a post keeps while a publish may still be running or resolving.
