@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from app.carousel.schemas import (
     TemplateFamily,
 )
 from app.llm.client import ChatModel, Content, image_content, text_content
+from app.posts.voseo import tuteo_forms
 from app.prompts import tagged
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,13 @@ class PreviousPost:
     change: str | None  # the Owner's change, when it isn't already in the new brief
 
 
+def tuteo_note(forms: list[str]) -> str:
+    return (
+        f'Your draft used tuteo ({", ".join(forms)}). Rewrite it with "vos" '
+        "(tenés, querés, mirá, escribinos), changing nothing else."
+    )
+
+
 class PostDrafter:
     """Brief + photos + Brand Brain → the post's copy, and for a design the generator's input.
 
@@ -68,6 +77,27 @@ class PostDrafter:
 
     def __init__(self, model: ChatModel) -> None:
         self._model = model
+
+    async def _structured[T: BaseModel](
+        self,
+        system: str,
+        content: list[Content],
+        schema: type[T],
+        written: Callable[[T], list[str]],
+    ) -> T:
+        """One structured call; a draft in tuteo gets one rewrite with "vos", and a second miss is
+        logged and sent on."""
+        draft = await self._model.structured(AGENT, system, content, schema, "medium")
+        forms = tuteo_forms(*written(draft))
+        if not forms:
+            return draft
+        logger.warning("post draft in tuteo (%s), asking for one rewrite", ", ".join(forms))
+        retried = await self._model.structured(
+            AGENT, system, [*content, text_content(tuteo_note(forms))], schema, "medium"
+        )
+        if left := tuteo_forms(*written(retried)):
+            logger.warning("post draft still in tuteo (%s)", ", ".join(left))
+        return retried
 
     async def copy(
         self,
@@ -83,12 +113,11 @@ class PostDrafter:
             f"without a design.\n\nBrief: {brief}{revision_section(previous)}"
             f"{trend_section(trend_notes)}"
         )
-        return await self._model.structured(
-            AGENT,
+        return await self._structured(
             system_prompt(brand, notes),
             request_content(request, photos),
             PostCopy,
-            "medium",
+            copy_text,
         )
 
     async def recaption(
@@ -103,12 +132,11 @@ class PostDrafter:
             "Rewrite only the caption and the hashtags of this post: its images stay exactly as "
             f"they are.\n\nBrief: {previous.brief}{revision_section(previous)}"
         )
-        return await self._model.structured(
-            AGENT,
+        return await self._structured(
             system_prompt(brand, notes),
             request_content(request, photos),
             PostCopy,
-            "medium",
+            copy_text,
         )
 
     async def design(
@@ -131,12 +159,11 @@ class PostDrafter:
             f"A design of exactly {slide_count} slide(s) (4:5).{one_per_photo}\n\n"
             f"Brief: {brief}{revision_section(previous)}{trend_section(trend_notes)}"
         )
-        draft = await self._model.structured(
-            AGENT,
+        draft = await self._structured(
             system_prompt(brand, notes),
             request_content(request, photos),
             CarouselDraft,
-            "medium",
+            design_text,
         )
         slides = fit_slides(draft.slides, slide_count)
         family = draft.family
@@ -167,6 +194,15 @@ class PostDrafter:
             style_notes=draft.style_notes,
         )
         return copy, carousel_brief
+
+
+def copy_text(draft: PostCopy) -> list[str]:
+    return [draft.caption, *draft.hashtags]
+
+
+def design_text(draft: CarouselDraft) -> list[str]:
+    slides = [text for slide in draft.slides for text in (slide.kicker, slide.headline, slide.body)]
+    return [draft.caption, *draft.hashtags, *slides]
 
 
 def system_prompt(brand: BrandBrain | None, notes: list[str] | None = None) -> str:
