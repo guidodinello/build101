@@ -1,11 +1,18 @@
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
+from google import genai
 from google.genai import errors, types
 
 from app.imagegen.base import ImageGenBlocked, ImageGenNoImage, ImageGenUnavailable
-from app.imagegen.gemini import GeminiImageGen, build_contents, parse_response
+from app.imagegen.gemini import (
+    RETRY_OPTIONS,
+    GeminiImageGen,
+    build_contents,
+    parse_response,
+)
 from tests.conftest import make_image
 
 MODEL = "gemini-nano-banana-2.1"
@@ -163,3 +170,26 @@ async def test_generate_maps_api_errors_to_unavailable() -> None:
 
     with pytest.raises(ImageGenUnavailable, match="429 RESOURCE_EXHAUSTED"):
         await adapter.generate("prompt", [])
+
+
+@pytest.mark.parametrize("status", [429, 503])
+async def test_generate_tries_a_failing_image_call_at_most_twice(status: int) -> None:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(status, json={"error": {"code": status, "message": "busy"}})
+
+    fast = RETRY_OPTIONS.model_copy(update={"initial_delay": 0.01, "max_delay": 0.01})
+    client = genai.Client(
+        api_key="key",
+        http_options=types.HttpOptions(
+            retry_options=fast,
+            httpx_async_client=httpx.AsyncClient(transport=httpx.MockTransport(handle)),
+        ),
+    )
+    adapter = GeminiImageGen(client, MODEL, "minimal", "2K", max_concurrency=1)
+
+    with pytest.raises(ImageGenUnavailable):
+        await adapter.generate("prompt", [])
+    assert len(requests) == 2

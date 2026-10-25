@@ -327,7 +327,7 @@ Gemini call (`app/imagegen/gemini.py`; facts in [research](../research/image-gen
 ```python
 client = genai.Client(api_key=GEMINI_API_KEY, http_options=HttpOptions(
     timeout=120_000,
-    retry_options=HttpRetryOptions(attempts=4, initial_delay=2, max_delay=30)))  # the SDK does not retry by default
+    retry_options=HttpRetryOptions(attempts=2, initial_delay=2, max_delay=30)))  # the SDK does not retry by default; 2 attempts so one slow scene can't use up a Post's deadline
 
 resp = await client.aio.models.generate_content(
     model=GEMINI_IMAGE_MODEL,

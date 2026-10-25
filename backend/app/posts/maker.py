@@ -2,7 +2,8 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Literal
@@ -15,14 +16,14 @@ from app.carousel.generator import CarouselGenerator
 from app.carousel.schemas import MAX_SLIDES
 from app.channels.base import ChannelPort
 from app.channels.inbound import mask
-from app.conversation.events import Event, Notify, PostFailed, PostSent
+from app.conversation.events import Event, Notify, PostFailed, PostFailure, PostSent
 from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
-from app.imagegen.base import ImageGenPort
+from app.imagegen.base import ImageGenError, ImageGenPort
 from app.knowledge.base import BusinessKnowledge, Knowledge
 from app.media.images import add_logo, to_post_image
 from app.media.public import PublicImages
-from app.rendering.base import RendererPort
+from app.rendering.base import RendererError, RendererPort
 from app.rendering.slides import render_slides
 
 from .drafts import PostDrafter, PreviousPost
@@ -33,6 +34,9 @@ logger = logging.getLogger(__name__)
 
 MIN_SLIDES = 2
 WHATSAPP_CAPTION_MAX = 1024
+# Everything before sending (knowledge, copy, scenes, render, waiting for an image slot) must fit
+# in this; past it the Post fails and the Owner can ask again (BUG-13)
+POST_DEADLINE_S = 240.0
 
 
 class CreatePostArgs(BaseModel):
@@ -93,6 +97,7 @@ class PostMaker:
         now: Callable[[], datetime] = local_now,
         *,
         background: BackgroundWork,
+        deadline_s: float = POST_DEADLINE_S,
     ) -> None:
         self._drafter = drafter
         self._image_gen = image_gen
@@ -107,6 +112,7 @@ class PostMaker:
         self._generating: set[str] = set()
         self._designs_today: dict[str, tuple[date, int]] = {}
         self._background = background
+        self._deadline_s = deadline_s
 
     def create_post(
         self, sender: str, arguments: dict[str, Any], channel: ChannelPort, notify: Notify
@@ -195,8 +201,11 @@ class PostMaker:
         for photo in photos:
             photo.used = True
         post_id = uuid.uuid4().hex[:8]
+        counted_on = today if generates else None
         self._background.start(
-            self._generate(sender, post_id, args, photos, logo, channel, notify, remake),
+            self._generate(
+                sender, post_id, args, photos, logo, channel, notify, remake, counted_on
+            ),
             f"post {post_id} for {mask(sender)}",
         )
         return {"post_id": post_id, "status": "generating"}
@@ -211,22 +220,37 @@ class PostMaker:
         channel: ChannelPort,
         notify: Notify,
         remake: Remake | None = None,
+        counted_on: date | None = None,
     ) -> None:
+        """`counted_on`: the day this Post took one of the sender's daily designs, if it did."""
         started = time.monotonic()
+        steps: dict[str, float] = {}
+        delivered: list[str] = []
         event: Event
         try:
-            known = await self._known(sender)
-            post = await self._render(
-                args,
-                photos,
-                known.brand,
-                logo,
-                [note.text for note in known.notes],
-                remake,
-                known.trend_notes,
-            )
-            paths = await self._send(sender, post.images, post.text, channel)
-            self._keep(sender, post_id, args, photos, paths, post)
+            deadline = asyncio.timeout(self._deadline_s)
+            try:
+                async with deadline:
+                    with timed(steps, "knowledge"):
+                        known = await self._known(sender)
+                    post = await self._render(
+                        args,
+                        photos,
+                        known.brand,
+                        logo,
+                        [note.text for note in known.notes],
+                        remake,
+                        known.trend_notes,
+                        steps,
+                    )
+            except TimeoutError as exc:
+                if deadline.expired():
+                    raise PostDeadline(f"over {self._deadline_s:.0f}s") from exc
+                raise
+            # Sending is never cut off halfway: once the images are ready, they all go out.
+            with timed(steps, "send"):
+                await self._send(sender, post.images, post.text, channel, delivered)
+            self._keep(sender, post_id, args, photos, delivered, post)
             event = PostSent(
                 post_id,
                 len(post.images),
@@ -236,22 +260,42 @@ class PostMaker:
                 post.text,
             )
             logger.info(
-                "post %s (%s, %d images) sent to %s in %.1fs",
+                "post %s (%s, %d images) sent to %s in %.1fs (%s)",
                 post_id,
                 args.style,
                 len(post.images),
                 mask(sender),
                 time.monotonic() - started,
+                step_times(steps),
             )
-        except Exception:
+        except Exception as exc:
             # The task's boundary: nobody awaits it, so log and tell the Owner.
-            logger.exception("post %s failed for %s", post_id, mask(sender))
-            event = PostFailed(post_id, args.style, tuple(photo.id for photo in photos), args.brief)
+            reason = failure_reason(exc)
+            log = logger.warning if isinstance(exc, PostDeadline) else logger.exception
+            log(
+                "post %s failed for %s after %.1fs: %s (%s)",
+                post_id,
+                mask(sender),
+                time.monotonic() - started,
+                reason,
+                step_times(steps),
+            )
+            if counted_on is not None and not delivered:
+                self._give_back_design(sender, counted_on)
+            event = PostFailed(
+                post_id, args.style, tuple(photo.id for photo in photos), args.brief, reason
+            )
         finally:
             self._generating.discard(sender)
         # After the guard is released, and outside the try: a failing notify must not report a
         # failed post that the Owner already has.
         await notify(sender, event, channel)
+
+    def _give_back_design(self, sender: str, day: date) -> None:
+        """A design that never reached the Owner doesn't use up one of their daily designs."""
+        counted_day, count = self._designs_today.get(sender, (day, 0))
+        if counted_day == day and count > 0:
+            self._designs_today[sender] = (day, count - 1)
 
     async def _known(self, sender: str) -> BusinessKnowledge:
         """What the Agency knows about the sender's Business; a post makes do with nothing."""
@@ -268,16 +312,19 @@ class PostMaker:
         notes: list[str] | None = None,
         remake: Remake | None = None,
         trend_notes: str | None = None,
+        steps: dict[str, float] | None = None,
     ) -> RenderedPost:
         """The post's images in order (one per photo, unless a design asks for a slide count).
 
         Photos as they are get the logo stamped in a corner (ADR 0027); a design's slides are
         rendered from templates over text-free scenes, logo included (ADR 0029).
         """
+        steps = {} if steps is None else steps
         references = [photo.data for photo in photos]
         previous = remake.previous if remake else None
         if remake is not None and remake.images is not None:
-            copy = await self._drafter.recaption(references, remake.previous, brand, notes)
+            with timed(steps, "copy"):
+                copy = await self._drafter.recaption(references, remake.previous, brand, notes)
             return RenderedPost(
                 remake.images,
                 post_text(copy.caption, copy.hashtags),
@@ -285,37 +332,42 @@ class PostMaker:
                 style_prompt=remake.previous.style_prompt,
             )
         if args.style == "photos":
-            copy = await self._drafter.copy(
-                args.brief, references, brand, notes, previous, trend_notes
-            )
+            with timed(steps, "copy"):
+                copy = await self._drafter.copy(
+                    args.brief, references, brand, notes, previous, trend_notes
+                )
             images = [await asyncio.to_thread(to_post_image, data) for data in references]
             return RenderedPost(
                 await with_logo(images, logo), post_text(copy.caption, copy.hashtags), headlines=[]
             )
 
         count = args.slide_count or len(photos)
-        copy, brief = await self._drafter.design(
-            args.brief,
-            references,
-            [photo.id for photo in photos],
-            count,
-            brand,
-            notes,
-            previous,
-            trend_notes,
-        )
+        with timed(steps, "copy"):
+            copy, brief = await self._drafter.design(
+                args.brief,
+                references,
+                [photo.id for photo in photos],
+                count,
+                brand,
+                notes,
+                previous,
+                trend_notes,
+            )
         style_prompt = brief.style_prompt
         one_per_photo = len(photos) == count
-        scenes = await CarouselGenerator(self._image_gen).generate(
-            copy,
-            brief,
-            references,
-            slide_references={n: [data] for n, data in enumerate(references, start=1)}
-            if one_per_photo
-            else None,
-        )
+        with timed(steps, "scenes"):
+            scenes = await CarouselGenerator(self._image_gen).generate(
+                copy,
+                brief,
+                references,
+                slide_references={n: [data] for n, data in enumerate(references, start=1)}
+                if one_per_photo
+                else None,
+            )
+        with timed(steps, "render"):
+            images = await render_slides(self._renderer, copy, brief, scenes, brand, logo)
         return RenderedPost(
-            await render_slides(self._renderer, copy, brief, scenes, brand, logo),
+            images,
             post_text(copy.caption, copy.hashtags),
             headlines=[slide.headline for slide in copy.slides],
             style_prompt=style_prompt,
@@ -355,11 +407,17 @@ class PostMaker:
             )
 
     async def _send(
-        self, sender: str, images: list[bytes], caption: str, channel: ChannelPort
-    ) -> list[str]:
+        self,
+        sender: str,
+        images: list[bytes],
+        caption: str,
+        channel: ChannelPort,
+        delivered: list[str],
+    ) -> None:
         """Numbered images with the post text on the first, so nothing arrives out of order.
 
-        Returns the public path of each image, in order.
+        Appends the public path of each image to `delivered` once WhatsApp took it, so a send
+        that fails halfway still shows what reached the Owner.
         """
         count = len(images)
         numbers = [
@@ -368,16 +426,45 @@ class PostMaker:
         first = f"{numbers[0]}\n\n{caption}".strip()
         text_fits = len(first) <= WHATSAPP_CAPTION_MAX
         captions = [first if text_fits else numbers[0], *numbers[1:]]
-        paths: list[str] = []
         for image, image_caption in zip(images, captions, strict=True):
-            paths.append(self._images.add(image))
+            path = self._images.add(image)
             await channel.send_image(
-                sender, self._public_base_url + paths[-1], caption=image_caption or None
+                sender, self._public_base_url + path, caption=image_caption or None
             )
+            delivered.append(path)
         if not text_fits:
             logger.warning("post text is %d chars, over the image caption limit", len(caption))
             await channel.send_text(sender, caption)
-        return paths
+
+
+class PostDeadline(Exception):
+    """The Post didn't get its images ready within `POST_DEADLINE_S`."""
+
+
+def failure_reason(exc: Exception) -> PostFailure:
+    match exc:
+        case PostDeadline():
+            return "deadline"
+        case ImageGenError():
+            return "image_service"
+        case RendererError():
+            return "renderer"
+        case _:
+            return "failed"
+
+
+@contextmanager
+def timed(steps: dict[str, float], step: str) -> Iterator[None]:
+    """Adds the step's seconds to `steps`, also when it fails or is cancelled."""
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        steps[step] = steps.get(step, 0.0) + time.monotonic() - started
+
+
+def step_times(steps: dict[str, float]) -> str:
+    return ", ".join(f"{step} {seconds:.1f}s" for step, seconds in steps.items()) or "no steps"
 
 
 def previous_post(post: Post, change: str | None) -> PreviousPost:

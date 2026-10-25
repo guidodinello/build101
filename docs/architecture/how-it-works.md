@@ -123,11 +123,12 @@ A post is made in the background after the orchestrator calls `create_post` with
 2. **What the Agency knows.** One read of `Knowledge` (`knowledge/`, below) gives the latest Brand Brain version, the Owner's notes and the latest Niche Report of the Business's niche (its insights are the drafter's trend notes). If the database fails, the post goes ahead without them.
 3. **Copy and images.**
     - `photos` style: the drafter writes the caption, and the Owner's photos are cropped to 4:5.
-    - `design` style: the drafter writes the copy and a carousel brief. `CarouselGenerator` makes the cover first, then the other slides in parallel, each using the cover as its style reference.
+    - `design` style: the drafter writes the copy and a carousel brief. `CarouselGenerator` makes the cover first, then the other slides in parallel, each using the cover as its style reference. Each AI image call is tried at most twice. The Slide renderer (`rendering/takumi.py`) retries a 5xx or a timeout once after a short random pause, so a cold start doesn't throw away the scenes; other renderer errors are not retried.
+    - **Deadline.** Steps 2 and 3, including the wait for an image slot, must finish within `POST_DEADLINE_S` (default 240 s). Past it, the generation is cancelled (no image or render call keeps running), the Owner can ask for another Post right away, and a `PostFailed` event with reason `deadline` lets the orchestrator say it took too long and offer to try again. Sending is never cut off halfway.
 4. **Logo.** It is stamped in code (`media/images.add_logo`), never drawn by the AI ([ADR 0027](../decisions/0027-owner-logo-stamped-in-code.md)).
 5. **Send.** The JPEGs go into `PublicImages` and out to WhatsApp as numbered images, with the caption on the first.
 6. **Keep.** The post is saved through `PostLifecycle` (in memory) as `pending_approval`. If it replaces an older post, that one becomes `replaced` and can no longer be published.
-7. **Announce.** A `PostSent` event lets the orchestrator write the message, with Aprobar, Cambiar and Descartar buttons under it. If anything failed, a `PostFailed` event goes out instead.
+7. **Announce.** A `PostSent` event lets the orchestrator write the message, with Aprobar, Cambiar and Descartar buttons under it. If anything failed, a `PostFailed` event goes out instead, with its reason (`deadline`, `image_service`, `renderer` or `failed`). A design that fails before any image reached the Owner gives back the daily design it took. One log line per Post records how long each step took (knowledge, copy, scenes, render, send) and why it stopped.
 
 ## Publishing to Instagram, through Zernio
 
