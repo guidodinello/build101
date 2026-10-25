@@ -21,7 +21,7 @@ from app.copy import messages_es
 from app.imagegen.base import ImageGenError, ImageGenPort
 from app.knowledge.base import BusinessKnowledge, Knowledge
 from app.llm.client import LLMError
-from app.media.images import add_logo, to_post_image
+from app.media.images import UnreadableImage, add_logo, to_post_image
 from app.media.public import PublicImages
 from app.rendering.base import RenderedSlide, RendererError, RendererPort
 from app.rendering.slides import render_slides
@@ -407,7 +407,7 @@ async def reviewed(
     """The critic's fixes, or None when it asks for none; a failed review keeps the post."""
     try:
         review = await critic.review(copy, brief, rendered)
-    except LLMError:
+    except (LLMError, UnreadableImage):
         logger.exception("design review failed, the post goes out as rendered")
         return None
     revision = revise(brief, review)

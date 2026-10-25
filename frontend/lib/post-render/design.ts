@@ -78,6 +78,10 @@ export function textStyle(type: Typeface, size: number, weight = 400): CSSProper
   return { fontFamily: type.text, fontWeight: weight, fontSize: size, lineHeight: 1.36, letterSpacing: 0, textWrap: "balance" };
 }
 
+export function bodyStyle(type: Typeface, fitted: Fitted, weight = 400): CSSProperties {
+  return { ...textStyle(type, fitted.size, weight), lineClamp: fitted.maxLines };
+}
+
 export function labelStyle(type: Typeface, size = 22): CSSProperties {
   return {
     fontFamily: type.text,
@@ -119,7 +123,7 @@ type MeasuredLike = {
   children: MeasuredLike[];
 };
 
-export type Fitted = { size: number; lines: number; height: number };
+export type Fitted = { size: number; lines: number; height: number; maxLines: number };
 
 async function measureText(design: Design, request: Fit, size: number) {
   const node = createElement(
@@ -135,10 +139,10 @@ async function measureText(design: Design, request: Fit, size: number) {
 
 export async function fit(design: Design, request: Fit): Promise<Fitted> {
   const sizes = [...request.sizes].sort((a, b) => b - a);
-  let last = { size: sizes[sizes.length - 1] ?? 32, lines: 0, height: 0 };
+  let last = { size: sizes[sizes.length - 1] ?? 32, lines: 0, height: 0, maxLines: request.maxLines };
   for (const size of sizes) {
     const counted = await measureText(design, request, size);
-    last = { size, lines: counted.lines, height: counted.height };
+    last = { size, lines: counted.lines, height: counted.height, maxLines: request.maxLines };
     const tallEnough = request.maxHeight === undefined || counted.height <= request.maxHeight;
     if (counted.lines <= request.maxLines && counted.widest <= request.width + 1 && tallEnough) {
       design.report.fits.push({ slot: request.slot, size, lines: counted.lines, clamped: false });
@@ -146,7 +150,8 @@ export async function fit(design: Design, request: Fit): Promise<Fitted> {
     }
   }
   design.report.fits.push({ slot: request.slot, size: last.size, lines: last.lines, clamped: true });
-  return last;
+  const shown = Math.min(last.lines, request.maxLines);
+  return { ...last, lines: shown, height: (last.height * shown) / Math.max(1, last.lines) };
 }
 
 export function steps(largest: number, smallest: number, step = 4): number[] {

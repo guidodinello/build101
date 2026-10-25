@@ -96,8 +96,13 @@ def to_post_image(data: bytes) -> bytes:
 
 def review_copy(data: bytes) -> bytes:
     """A designed slide at half size, for the Design Critic (fewer image tokens)."""
-    with Image.open(BytesIO(data)) as source:
-        image = source.convert("RGB")
+    try:
+        with Image.open(BytesIO(data)) as source:
+            if source.width * source.height > MAX_PIXELS:
+                raise ImageTooLarge(f"{source.width}x{source.height} is over {MAX_PIXELS} px")
+            image = source.convert("RGB")
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise UnreadableImage(str(exc)) from exc
     return _to_jpeg(ImageOps.fit(image, REVIEW_SIZE, method=Image.Resampling.LANCZOS))
 
 

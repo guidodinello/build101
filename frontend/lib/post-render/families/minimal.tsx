@@ -7,6 +7,7 @@ import {
   HEIGHT,
   MARGIN,
   WIDTH,
+  bodyStyle,
   displayStyle,
   fit,
   ground,
@@ -198,7 +199,7 @@ async function windowContent(design: Design) {
       </div>
       <div style={{ position: "absolute", top: 96 + frame.height + 64, left: MARGIN, right: MARGIN, display: "flex", flexDirection: "column", gap: 24 }}>
         <div style={{ ...displayStyle(type.display, headline.size), color: surface.ink, textWrap: "balance" }}>{spec.headline}</div>
-        {body ? <div style={{ ...textStyle(type, body.size), color: alpha(surface.ink, surface.muted), maxWidth: 760 }}>{spec.body}</div> : null}
+        {body ? <div style={{ ...bodyStyle(type, body), color: alpha(surface.ink, surface.muted), maxWidth: 760 }}>{spec.body}</div> : null}
       </div>
       <Footer design={design} surface={surface} />
     </div>
@@ -251,7 +252,7 @@ async function side(design: Design) {
           {spec.kicker ? <Label design={design} text={spec.kicker} color={alpha(surface.ink, 0.65)} /> : null}
         </div>
         <div style={{ ...displayStyle(type.display, headline.size), color: surface.ink, textWrap: "balance" }}>{spec.headline}</div>
-        {body ? <div style={{ ...textStyle(type, body.size), color: alpha(surface.ink, surface.muted) }}>{spec.body}</div> : null}
+        {body ? <div style={{ ...bodyStyle(type, body), color: alpha(surface.ink, surface.muted) }}>{spec.body}</div> : null}
       </div>
       <div style={{ position: "absolute", left: MARGIN, bottom: 72, display: "flex", width: column, justifyContent: "space-between", alignItems: "center" }}>
         <BrandMark design={design} surface={surface.background} height={44} />
@@ -272,6 +273,16 @@ async function cta(design: Design) {
     maxLines: 3,
     sizes: steps(132, 64),
   });
+  const body = spec.body
+    ? await fit(design, {
+        slot: "body",
+        text: spec.body,
+        style: (size) => textStyle(type, size),
+        width: 780,
+        maxLines: 3,
+        sizes: steps(36, 30, 2),
+      })
+    : null;
   const circle = 440;
   return (
     <div
@@ -297,8 +308,17 @@ async function cta(design: Design) {
       <div style={{ ...displayStyle(type.display, headline.size), color: surface.ink, textAlign: "center", width: TEXT_WIDTH, justifyContent: "center", textWrap: "balance" }}>
         {spec.headline}
       </div>
-      {spec.body ? (
-        <div style={{ ...textStyle(type, 34), color: alpha(surface.ink, surface.muted), textAlign: "center", width: 780, justifyContent: "center", marginTop: -16 }}>
+      {body ? (
+        <div
+          style={{
+            ...bodyStyle(type, body),
+            color: alpha(surface.ink, surface.muted),
+            textAlign: "center",
+            width: 780,
+            justifyContent: "center",
+            marginTop: -16,
+          }}
+        >
           {spec.body}
         </div>
       ) : null}

@@ -19,6 +19,7 @@ from app.posts.drafts import SYSTEM_PROMPT, CarouselDraft, PostCopy, PostDrafter
 from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import WHATSAPP_CAPTION_MAX, PostMaker
 from app.posts.store import InMemoryPosts, Post, PostImage
+from app.rendering.base import RenderedSlide, SlideRender
 from app.rendering.mock import MockRenderer
 from tests.conftest import make_image
 from tests.fakes import CountingImageGen, FakeChannel, ScriptedModel, SequenceModel, brand_brain
@@ -927,3 +928,28 @@ async def test_a_failed_redo_sends_the_post_as_first_rendered(photos: InMemoryPh
 
     assert len(channel.images) == 3
     assert isinstance(events[0], PostSent)
+
+
+async def test_a_slide_the_critic_cannot_read_sends_the_post_as_rendered(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(3)})
+    critic = SequenceModel([DesignReview(slides=[])])
+    channel = FakeChannel()
+    renderer = BrokenRenderer()
+    posts, background = maker(
+        model, CountingImageGen(), photos, renderer=renderer, critic=DesignCritic(critic)
+    )
+
+    await design(posts, background, channel)
+
+    assert len(channel.images) == 3
+    assert critic.contents == []
+
+
+class BrokenRenderer(MockRenderer):
+    """Answers bytes that are not an image, as a misbehaving renderer could."""
+
+    async def render(self, slide: SlideRender) -> RenderedSlide:
+        await super().render(slide)
+        return RenderedSlide(image=b"not a jpeg")

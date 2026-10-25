@@ -6,6 +6,7 @@ import {
   HEIGHT,
   MARGIN,
   WIDTH,
+  bodyStyle,
   displayStyle,
   fit,
   ground,
@@ -75,7 +76,7 @@ async function overlayCover(design: Design) {
         <div style={{ width: 96, height: 4, marginBottom: 28, backgroundColor: design.colors.accent }} />
         <div style={{ ...displayStyle(type.display, headline.size), color: ink.ink, textWrap: "balance" }}>{spec.headline}</div>
         {body ? (
-          <div style={{ ...textStyle(type, body.size), color: alpha(ink.ink, 0.9), marginTop: 28, maxWidth: 800 }}>{spec.body}</div>
+          <div style={{ ...bodyStyle(type, body), color: alpha(ink.ink, 0.9), marginTop: 28, maxWidth: 800 }}>{spec.body}</div>
         ) : null}
         <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: 44, height: SWIPE_ROW }}>
           <SwipeCue design={design} color={ink.ink === design.colors.ink ? design.colors.paper : design.colors.ink} background={ink.ink} />
@@ -192,7 +193,7 @@ async function photoTop(design: Design) {
         <div style={{ ...displayStyle(type.display, headline.size), color: surface.ink, marginTop: 36, textWrap: "balance" }}>
           {spec.headline}
         </div>
-        {body ? <div style={{ ...textStyle(type, body.size), color: alpha(surface.ink, surface.muted), marginTop: 24 }}>{spec.body}</div> : null}
+        {body ? <div style={{ ...bodyStyle(type, body), color: alpha(surface.ink, surface.muted), marginTop: 24 }}>{spec.body}</div> : null}
       </div>
       <div
         style={{
@@ -257,7 +258,7 @@ async function fullBleed(design: Design) {
         <div style={{ ...displayStyle(type.display, headline.size), color: surface.ink, marginTop: 26, textWrap: "balance" }}>
           {spec.headline}
         </div>
-        {body ? <div style={{ ...textStyle(type, body.size), color: alpha(surface.ink, surface.muted), marginTop: 20 }}>{spec.body}</div> : null}
+        {body ? <div style={{ ...bodyStyle(type, body), color: alpha(surface.ink, surface.muted), marginTop: 20 }}>{spec.body}</div> : null}
         <div
           style={{
             display: "flex",
@@ -401,7 +402,7 @@ async function cta(design: Design) {
           {spec.headline}
         </div>
         {body ? (
-          <div style={{ ...textStyle(type, body.size), textAlign: "center", color: alpha(surface.ink, surface.muted), width: 780, justifyContent: "center", marginTop: -12 }}>
+          <div style={{ ...bodyStyle(type, body), textAlign: "center", color: alpha(surface.ink, surface.muted), width: 780, justifyContent: "center", marginTop: -12 }}>
             {spec.body}
           </div>
         ) : null}

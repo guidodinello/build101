@@ -7,8 +7,8 @@ CLAUDE_PREFIX = "claude-"
 
 
 def build_structured(settings: Settings, model: str | None, chat: ChatModel) -> StructuredModel:
-    """The model behind one agent's structured calls (ADR 0035); unset, the chat model."""
-    if model is None or model == settings.gemini_chat_model:
+    """The model behind one agent's structured calls (ADR 0035); unset or empty, the chat model."""
+    if not model or model == settings.gemini_chat_model:
         return chat
     if model.startswith(CLAUDE_PREFIX):
         if not settings.anthropic_api_key:

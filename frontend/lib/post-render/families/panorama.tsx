@@ -1,6 +1,6 @@
 import { BrandMark, Counter, Label, Photo, SavePill, Shade, SwipeCue } from "../chrome";
 import { alpha } from "../color";
-import { type Design, HEIGHT, MARGIN, WIDTH, displayStyle, fit, legible, steps, textStyle } from "../design";
+import { type Design, bodyStyle, HEIGHT, MARGIN, WIDTH, displayStyle, fit, legible, steps, textStyle } from "../design";
 import type { SlideSpec } from "../spec";
 
 const TEXT_WIDTH = WIDTH - MARGIN * 2;
@@ -95,7 +95,7 @@ export async function Panorama(design: Design) {
       ) : null}
       <div style={{ position: "absolute", top: blockTop, left: MARGIN, right: MARGIN, display: "flex", flexDirection: "column", gap: 24 }}>
         <div style={{ ...displayStyle(type.display, headline.size), color: text.ink, textWrap: "balance" }}>{spec.headline}</div>
-        {body ? <div style={{ ...textStyle(type, body.size), color: alpha(text.ink, 0.92), maxWidth: 820 }}>{spec.body}</div> : null}
+        {body ? <div style={{ ...bodyStyle(type, body), color: alpha(text.ink, 0.92), maxWidth: 820 }}>{spec.body}</div> : null}
         {spec.role === "cta" ? (
           <div style={{ display: "flex", marginTop: 16 }}>
             <SavePill design={design} color={text.ink === colors.ink ? colors.paper : colors.ink} background={text.ink} />

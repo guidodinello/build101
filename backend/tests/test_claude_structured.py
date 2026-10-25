@@ -97,6 +97,7 @@ def test_an_unset_model_is_the_chat_model_and_claude_needs_its_key() -> None:
     settings = Settings(_env_file=None, gemini_api_key="g")
 
     assert build_structured(settings, None, chat) is chat
+    assert build_structured(settings, "", chat) is chat
     assert build_structured(settings, settings.gemini_chat_model, chat) is chat
     assert isinstance(build_structured(settings, "gemini-4-argon", chat), GeminiChat)
     with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):

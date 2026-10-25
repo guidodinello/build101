@@ -1,7 +1,7 @@
 import { Check } from "lucide";
 import { BrandMark, Photo, SavePill, SwipeCue, pad } from "../chrome";
 import { INK, PAPER, WHITE, alpha, isDark, mix } from "../color";
-import { type Design, type Template, HEIGHT, WIDTH, displayStyle, fit, steps, textStyle } from "../design";
+import { type Design, bodyStyle, type Template, HEIGHT, WIDTH, displayStyle, fit, steps, textStyle } from "../design";
 import { Icon } from "../icon";
 import type { SlideSpec } from "../spec";
 
@@ -139,7 +139,7 @@ async function textCard(design: Design) {
   return (
     <Frame design={design} top={top}>
       <div style={{ ...displayStyle(type.display, headline.size), color: tone.ink, textWrap: "balance" }}>{spec.headline}</div>
-      {body ? <div style={{ ...textStyle(type, body.size), color: tone.muted }}>{spec.body}</div> : null}
+      {body ? <div style={{ ...bodyStyle(type, body), color: tone.muted }}>{spec.body}</div> : null}
       {cover ? (
         <div style={{ display: "flex", width: INNER, height: photoHeight, overflow: "hidden", borderRadius: 28 }}>
           <Photo src={spec.image} width={INNER} height={photoHeight} focus={spec.focus} />
@@ -201,7 +201,7 @@ async function checklist(design: Design) {
             >
               <Icon node={Check} size={30} color={tone.onAccent} strokeWidth={3} />
             </div>
-            <div style={{ ...textStyle(type, rows[index]?.size ?? 32, 500), color: tone.ink, paddingTop: 4 }}>{entry}</div>
+            <div style={{ ...(rows[index] ? bodyStyle(type, rows[index], 500) : textStyle(type, 32, 500)), color: tone.ink, paddingTop: 4 }}>{entry}</div>
           </div>
         ))}
       </div>
@@ -220,12 +220,22 @@ async function cta(design: Design) {
     maxLines: 3,
     sizes: steps(112, 60),
   });
-  const cardHeight = PADDING * 2 + 84 + 40 + headline.height + (spec.body ? 120 : 0) + 40 + 80;
+  const body = spec.body
+    ? await fit(design, {
+        slot: "body",
+        text: spec.body,
+        style: (size) => textStyle(type, size),
+        width: INNER,
+        maxLines: 4,
+        sizes: steps(36, 30, 2),
+      })
+    : null;
+  const cardHeight = PADDING * 2 + 84 + 40 + headline.height + (body ? body.height + 40 : 0) + 40 + 80;
   const top = Math.max(72, (HEIGHT - cardHeight) / 2);
   return (
     <Frame design={design} top={top}>
       <div style={{ ...displayStyle(type.display, headline.size), color: tone.ink, textWrap: "balance" }}>{spec.headline}</div>
-      {spec.body ? <div style={{ ...textStyle(type, 36), color: tone.muted }}>{spec.body}</div> : null}
+      {body ? <div style={{ ...bodyStyle(type, body), color: tone.muted }}>{spec.body}</div> : null}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <SavePill design={design} color={tone.onAccent} background={tone.accent} />
         <BrandMark design={design} surface={tone.background} height={52} />

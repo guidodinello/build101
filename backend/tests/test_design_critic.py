@@ -1,7 +1,9 @@
 import json
 
+import pytest
+
 from app.carousel.schemas import CarouselBrief, CarouselCopy
-from app.media.images import REVIEW_SIZE, image_size, review_copy
+from app.media.images import REVIEW_SIZE, UnreadableImage, image_size, review_copy
 from app.posts.critic import (
     MAX_NEW_SCENES,
     DesignCritic,
@@ -109,6 +111,11 @@ async def test_the_critic_sees_each_slide_at_half_size_with_what_the_renderer_me
 
 def test_a_review_copy_is_half_the_slide() -> None:
     assert image_size(review_copy(SLIDE)) == REVIEW_SIZE
+
+
+def test_a_slide_that_is_not_an_image_is_unreadable() -> None:
+    with pytest.raises(UnreadableImage):
+        review_copy(b"not a jpeg")
 
 
 def test_a_second_fix_for_the_same_slide_is_ignored(

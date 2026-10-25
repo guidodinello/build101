@@ -1,6 +1,6 @@
 import { BrandMark, Photo, SavePill } from "../chrome";
 import { INK, PAPER, WHITE, alpha, isDark, mix } from "../color";
-import { type Design, type Template, HEIGHT, MARGIN, WIDTH, displayStyle, fit, steps, textStyle } from "../design";
+import { type Design, bodyStyle, type Template, HEIGHT, MARGIN, WIDTH, displayStyle, fit, steps, textStyle } from "../design";
 import { HAND } from "../fonts";
 import type { SlideSpec } from "../spec";
 
@@ -176,7 +176,7 @@ async function polaroid(design: Design) {
       />
       <div style={{ position: "absolute", top: textTop, left: MARGIN, width: TEXT_WIDTH, display: "flex", flexDirection: "column", gap: 22 }}>
         <div style={{ ...displayStyle(type.display, headline.size), color: tone.ink, textWrap: "balance" }}>{spec.headline}</div>
-        {body ? <div style={{ ...textStyle(type, body.size), color: tone.muted }}>{spec.body}</div> : null}
+        {body ? <div style={{ ...bodyStyle(type, body), color: tone.muted }}>{spec.body}</div> : null}
       </div>
       {cover ? (
         <div style={{ position: "absolute", right: MARGIN, bottom: 52, display: "flex", alignItems: "center", gap: 10 }}>
@@ -249,7 +249,7 @@ async function taped(design: Design) {
         }}
       >
         <div style={{ ...displayStyle(type.display, headline.size), color: tone.ink, textWrap: "balance" }}>{spec.headline}</div>
-        {body ? <div style={{ ...textStyle(type, body.size), color: tone.muted }}>{spec.body}</div> : null}
+        {body ? <div style={{ ...bodyStyle(type, body), color: tone.muted }}>{spec.body}</div> : null}
       </div>
       <Footer design={design} tone={tone} />
     </div>
@@ -268,6 +268,16 @@ async function cta(design: Design) {
     maxLines: 3,
     sizes: steps(124, 64),
   });
+  const body = spec.body
+    ? await fit(design, {
+        slot: "body",
+        text: spec.body,
+        style: (size) => textStyle(type, size),
+        width: 760,
+        maxLines: 3,
+        sizes: steps(36, 30, 2),
+      })
+    : null;
   const x = (WIDTH - photo.width - 52) / 2;
   const pillInk = isDark(colors.block) ? PAPER : INK;
   return (
@@ -290,8 +300,10 @@ async function cta(design: Design) {
         <div style={{ ...displayStyle(type.display, headline.size), color: tone.ink, textAlign: "center", textWrap: "balance", width: TEXT_WIDTH, justifyContent: "center" }}>
           {spec.headline}
         </div>
-        {spec.body ? (
-          <div style={{ ...textStyle(type, 34), color: tone.muted, textAlign: "center", width: 760, justifyContent: "center" }}>{spec.body}</div>
+        {body ? (
+          <div style={{ ...bodyStyle(type, body), color: tone.muted, textAlign: "center", width: 760, justifyContent: "center" }}>
+            {spec.body}
+          </div>
         ) : null}
         <SavePill design={design} color={pillInk} background={colors.block} />
       </div>

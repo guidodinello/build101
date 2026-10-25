@@ -8,6 +8,7 @@ import {
   HEIGHT,
   MARGIN,
   WIDTH,
+  bodyStyle,
   displayStyle,
   fit,
   ground,
@@ -215,7 +216,7 @@ async function band(design: Design) {
         }}
       >
         <div style={{ ...displayStyle(type.display, headline.size), color: surface.ink, textWrap: "balance" }}>{spec.headline}</div>
-        {body ? <div style={{ ...textStyle(type, body.size), color: alpha(surface.ink, surface.muted) }}>{spec.body}</div> : null}
+        {body ? <div style={{ ...bodyStyle(type, body), color: alpha(surface.ink, surface.muted) }}>{spec.body}</div> : null}
       </div>
       <Footer design={design} surface={surface} />
     </div>
@@ -265,7 +266,7 @@ async function split(design: Design) {
         <Numeral design={design} surface={surface} size={240} />
         {spec.kicker ? <Label design={design} text={spec.kicker} color={alpha(surface.ink, 0.62)} /> : null}
         <div style={{ ...displayStyle(type.display, headline.size), color: surface.ink, textWrap: "balance" }}>{spec.headline}</div>
-        {body ? <div style={{ ...textStyle(type, body.size), color: alpha(surface.ink, surface.muted) }}>{spec.body}</div> : null}
+        {body ? <div style={{ ...bodyStyle(type, body), color: alpha(surface.ink, surface.muted) }}>{spec.body}</div> : null}
       </div>
       <Footer design={design} surface={surface} inset={photoWidth + 72} />
     </div>
@@ -283,13 +284,25 @@ async function cta(design: Design) {
     maxLines: 3,
     sizes: steps(156, 72),
   });
+  const body = spec.body
+    ? await fit(design, {
+        slot: "body",
+        text: spec.body,
+        style: (size) => textStyle(type, size),
+        width: 760,
+        maxLines: 3,
+        sizes: steps(36, 30, 2),
+      })
+    : null;
   const circle = 420;
   return (
     <div style={{ position: "relative", display: "flex", width: WIDTH, height: HEIGHT, backgroundColor: surface.background }}>
       <SeamNodes design={design} color={surface.accent} y={HEIGHT / 2} />
       <div style={{ position: "absolute", top: 150, left: MARGIN, right: MARGIN, display: "flex", flexDirection: "column", gap: 36 }}>
         <div style={{ ...displayStyle(type.display, headline.size), color: surface.ink, textWrap: "balance" }}>{spec.headline}</div>
-        {spec.body ? <div style={{ ...textStyle(type, 36), color: alpha(surface.ink, surface.muted), maxWidth: 760 }}>{spec.body}</div> : null}
+        {body ? (
+          <div style={{ ...bodyStyle(type, body), color: alpha(surface.ink, surface.muted), maxWidth: 760 }}>{spec.body}</div>
+        ) : null}
         <div style={{ display: "flex" }}>
           <SavePill design={design} color={surface.background} background={surface.ink} />
         </div>
