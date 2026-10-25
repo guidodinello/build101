@@ -401,6 +401,45 @@ async def test_a_failed_generation_emits_the_failure_and_frees_the_guard(
     assert posts.create_post(SENDER, request, channel, recorder(events))["status"] == "generating"
     await background.join()
 
+async def test_a_partial_send_keeps_sent_images_and_reports_the_count(
+    photos: InMemoryPhotos,
+) -> None:
+    class FailSecondImageChannel(FakeChannel):
+        attempts: int = 0
+
+        async def send_image(
+            self, to: str, image_url: str, caption: str | None = None
+        ) -> str:
+            self.attempts += 1
+            if self.attempts == 2:
+                raise RuntimeError("second image failed")
+            return await super().send_image(to, image_url, caption)
+
+    store = PostLifecycle()
+    channel = FailSecondImageChannel()
+    events: list[Event] = []
+    model = ScriptedModel(drafts={CarouselDraft: carousel_draft(2)})
+    posts, background = maker(model, CountingImageGen(), photos, store=store)
+
+    result = posts.create_post(
+        SENDER,
+        {"brief": "mesa", "asset_ids": ["f1", "f2"], "style": "design"},
+        channel,
+        recorder(events),
+    )
+    await background.join()
+
+    assert len(channel.images) == 1
+    assert len(store.pending(SENDER)) == 1
+    saved = store.pending(SENDER)[0]
+    assert len(saved.images) == 1
+    assert saved.headlines == ["Slide 1"]
+    assert events == [
+        PostFailed(result["post_id"], "design", ("f1", "f2"), "mesa", sent_count=1)
+    ]
+    assert "1 slide(s) reached the Owner" in events[0].note()
+
+
 
 async def test_only_designs_count_toward_the_daily_limit(photos: InMemoryPhotos) -> None:
     model = ScriptedModel(
