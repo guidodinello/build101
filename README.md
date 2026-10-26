@@ -62,3 +62,7 @@ Checks before a PR: `uv run ruff check . && uv run pyright && uv run pytest` in 
 Read [`AGENTS.md`](AGENTS.md): one workflow (capture, research, decide, plan, build, review, close the loop) that keeps what we learn in [`docs/`](docs/README.md). It applies whether you use Claude Code, another AI tool, or none.
 
 For the MVP build, work from [docs/implementation/tasks.md](docs/implementation/tasks.md) (one task ≈ one small PR) and follow the [development workflow](docs/workflow.md).
+
+## License
+
+[AGPL-3.0](LICENSE). Contributions are licensed under the same terms ([ADR 0036](docs/decisions/0036-license-agpl-3.md)).
