@@ -126,6 +126,22 @@ def test_prod_refuses_to_start_without_a_setting_it_needs(setting: str) -> None:
     assert problems(**{setting: None}) == {setting.upper()}
 
 
+def test_instagram_off_starts_without_the_meta_app() -> None:
+    settings = Settings(
+        **production(instagram="off", instagram_app_id=None, instagram_app_secret=None)
+    )
+
+    check_production(settings)
+    assert adapters_in_use(settings)["INSTAGRAM"] == "off"
+
+
+@pytest.mark.parametrize("instagram", ["mock", None], ids=["mock", "unset"])
+def test_the_meta_app_is_needed_only_with_instagram_meta(instagram: str | None) -> None:
+    assert problems(instagram=instagram, instagram_app_id=None, instagram_app_secret=None) == {
+        "INSTAGRAM"
+    }
+
+
 @pytest.mark.parametrize("blank", ["", " ", "\t"], ids=["empty", "space", "tab"])
 def test_a_blank_setting_counts_as_unset(blank: str) -> None:
     assert problems(kapso_webhook_secret=blank) == {"KAPSO_WEBHOOK_SECRET"}
@@ -210,8 +226,6 @@ def test_prod_with_nothing_set_names_every_setting_production_needs() -> None:
         "RENDERER_SECRET",
         "ZERNIO_API_KEY",
         "ZERNIO_ACCOUNT_ID",
-        "INSTAGRAM_APP_ID",
-        "INSTAGRAM_APP_SECRET",
         "WHATSAPP_BOT_NUMBER",
     ):
         assert name in message

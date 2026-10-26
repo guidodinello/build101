@@ -10,7 +10,7 @@ import { WizardStep } from "@/components/onboarding/wizard-step";
 import { useWizard } from "@/components/onboarding/wizard-context";
 import { messageOf, onboardingApi } from "@/lib/api";
 import { CATEGORIES, copyFor, isListedCategory, OTHER_CATEGORY } from "@/lib/categories";
-import { isInstagramConnected } from "@/lib/onboarding";
+import { stepAfterBusiness } from "@/lib/onboarding";
 
 const ONE_LINER_MAX = 120;
 
@@ -52,7 +52,7 @@ export function BusinessStep() {
         location: location.trim() || undefined,
       });
       setState(next);
-      goTo(isInstagramConnected(next) ? "products" : "instagram");
+      goTo(stepAfterBusiness(next));
     } catch (error) {
       toast.error(messageOf(error));
     } finally {

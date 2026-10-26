@@ -80,7 +80,12 @@ const OnboardingStateSchema = z.object({
   brand: z.object({ three_words: z.array(z.string()), colors: z.array(z.string()) }),
   assets: z.array(AssetSchema),
   preferences: QuestionnaireSchema.nullable(),
-  instagram: z.object({ status: InstagramStatusSchema, handle: z.string().nullable() }),
+  instagram: z.object({
+    status: InstagramStatusSchema,
+    handle: z.string().nullable(),
+    // Defaults to true for a backend from before INSTAGRAM=off, which always offered it.
+    available: z.boolean().default(true),
+  }),
   completed: z.boolean(),
   whatsapp_url: z.string(),
 });

@@ -222,9 +222,23 @@ async def test_new_link_starts_with_an_empty_state(client: httpx.AsyncClient) ->
     assert state["assets"] == []
     assert state["brand"] == {"three_words": [], "colors": []}
     assert state["preferences"] is None
-    assert state["instagram"] == {"status": "not_connected", "handle": None}
+    assert state["instagram"] == {"status": "not_connected", "handle": None, "available": True}
     assert state["completed"] is False
     assert state["whatsapp_url"] == "https://wa.me/59800000000"
+
+
+async def test_the_state_says_instagram_is_unavailable_when_it_is_off(
+    client: httpx.AsyncClient,
+) -> None:
+    token = await new_link(client)
+    settings = app.dependency_overrides[get_settings]()
+    app.dependency_overrides[get_settings] = lambda: settings.model_copy(
+        update={"instagram": "off"}
+    )
+
+    state = (await client.get(f"/api/o/{token}")).json()
+
+    assert state["instagram"]["available"] is False
 
 
 async def test_unknown_link_is_404_with_the_error_shape(client: httpx.AsyncClient) -> None:

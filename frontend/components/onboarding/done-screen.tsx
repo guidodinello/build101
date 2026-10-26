@@ -142,16 +142,19 @@ export function DoneScreen() {
             {photos}
             {imported > 0 && <span className="text-muted-foreground"> ({imported} de Instagram)</span>}
           </SummaryRow>
-          <SummaryRow label="Instagram">
-            {isInstagramConnected(state) && state.instagram.handle ? (
-              <span className="flex items-center gap-1 font-semibold text-primary">
-                <CheckIcon className="size-4" strokeWidth={2.6} aria-hidden />
-                {atHandle(state.instagram.handle)}
-              </span>
-            ) : (
-              <span className="text-muted-foreground">Lo conectás cuando quieras</span>
-            )}
-          </SummaryRow>
+          {/* With INSTAGRAM=off there is nothing to connect later, so no row unless it already is */}
+          {(state.instagram.available || isInstagramConnected(state)) && (
+            <SummaryRow label="Instagram">
+              {isInstagramConnected(state) && state.instagram.handle ? (
+                <span className="flex items-center gap-1 font-semibold text-primary">
+                  <CheckIcon className="size-4" strokeWidth={2.6} aria-hidden />
+                  {atHandle(state.instagram.handle)}
+                </span>
+              ) : (
+                <span className="text-muted-foreground">Lo conectás cuando quieras</span>
+              )}
+            </SummaryRow>
+          )}
         </dl>
       </section>
 
