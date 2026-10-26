@@ -9,8 +9,9 @@ module holds only:
 - verbatim events, sent as written without a model turn (`events.verbatim`): `brand_summary`,
   `JOB_FAILED` for a failed job and `BRAND_GENERATING`;
 - text sent directly, outside the chat: Flow 1 before the web form (`welcome`, `name_ack_link`,
-  `link_reminder`, the `OnboardingGate`, an exception recorded in ADR 0026), and `waitlist` to a
-  number not on the pilot list (the `PilotGate`, #186);
+  `link_reminder`, the `photos_kept*` replies to early photos, the `OnboardingGate`, an
+  exception recorded in ADR 0026), and `waitlist` to a number not on the pilot list (the
+  `PilotGate`, #186);
 - labels, not conversation: `carousel_slide`.
 """
 
@@ -70,12 +71,42 @@ BUTTON_KEEP_PHOTO = "No, guardala"
 BUTTON_KEEP_PHOTOS = "No, guardalas"
 
 
-def welcome(assistant_name: str) -> str:
+ASK_BUSINESS_NAME = "¿Cómo se llama tu negocio?"
+
+
+def _introduction(assistant_name: str) -> str:
     return (
         f"¡Hola! 👋 Soy {assistant_name}, tu agencia de marketing en WhatsApp. Te ayudo a "
         "planear, crear y publicar contenido para tus redes, y *nada se publica sin que vos lo "
-        "apruebes*. ¿Cómo se llama tu negocio?"
+        "apruebes*."
     )
+
+
+def welcome(assistant_name: str) -> str:
+    return f"{_introduction(assistant_name)} {ASK_BUSINESS_NAME}"
+
+
+# Photos sent before the wizard is submitted: kept as Brand assets for later posts.
+def photos_kept(count: int) -> str:
+    if count > 1:
+        return "Guardé las fotos para usarlas en tus posts 📸"
+    return "Guardé la foto para usarla en tus posts 📸"
+
+
+def welcome_with_photos(assistant_name: str, count: int) -> str:
+    return f"{_introduction(assistant_name)} {photos_kept(count)} {ASK_BUSINESS_NAME}"
+
+
+def photos_kept_ask_name(count: int) -> str:
+    return f"{photos_kept(count)} Antes, contame: {ASK_BUSINESS_NAME.lower()}"
+
+
+def photos_kept_link(count: int, url: str) -> str:
+    return f"{photos_kept(count)} {link_reminder(url)}"
+
+
+def photos_kept_form(count: int) -> str:
+    return f"{photos_kept(count)} Cuando completes el formulario que te mandé, arrancamos."
 
 
 def waitlist(assistant_name: str) -> str:

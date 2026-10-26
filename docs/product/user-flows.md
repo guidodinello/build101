@@ -96,6 +96,7 @@ Before this flow, and before any other: a number not on the pilot list (#186, [s
 3. Owner replies with the name ("Muebles Ramírez").
 4. Bot confirms, creates a magic link (`/o/{token}`, valid 7 days, reusable until the form is submitted) and sends it with a short explanation: "5 minutos, desde el celu". State → `awaiting_web_form`.
 5. If the owner writes again before finishing the form, the bot answers briefly and re-sends the link. It doesn't try to run the orchestrator yet.
+6. Photos sent at any point before the form is submitted (often the owner's first move: "me llegó esta mesa") are kept like chat photos (Flow 9): each is stored as a `brand_assets` row (`kind = photo`, `source = whatsapp`, its caption as the owner's hint) and described by the Asset Analyst, so the orchestrator can use them once onboarding is done. An album gets one reply, fixed copy (`photos_kept_*`): the photos are saved, plus what is still missing (the welcome or the name question, or the wizard link when a reminder is due). Up to 15 photos are kept per Business before the form (like the wizard's photo step); past that a photo still gets the reply but isn't stored or described. A photo that is too big or unreadable gets the same answer as in the chat. These photos don't show in the wizard's photo step and don't count toward its minimum, and they aren't linked to Products (the Catalog doesn't exist yet). Needs the database and Storage; without them the bot answers a photo as any other message.
 
 ## Flow 2 — Web onboarding form (Must)
 
