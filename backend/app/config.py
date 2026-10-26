@@ -99,6 +99,7 @@ class Settings(BaseSettings):
     instagram: Literal["meta", "mock"] = "mock"
     instagram_app_id: str | None = None
     instagram_app_secret: str | None = None
+    instagram_pilot_businesses: str = ""
     instagram_graph_version: str = "v24.0"
     instagram_import_max_posts: int = 100
     instagram_import_max_images: int = 24

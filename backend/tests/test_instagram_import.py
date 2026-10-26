@@ -124,6 +124,26 @@ async def business_of(sessions: async_sessionmaker[AsyncSession]) -> Business:
         return business
 
 
+async def test_connect_is_refused_when_business_is_not_in_instagram_pilot(
+    client: httpx.AsyncClient,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    token = await new_link(client)
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        enable_dev_endpoints=True,
+        dev_token="dev-secret",
+        frontend_url=FRONTEND,
+        public_backend_url="https://api.test",
+        instagram="meta",
+        instagram_pilot_businesses="",
+    )
+
+    response = await client.post(f"/api/o/{token}/instagram/connect")
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "instagram_not_allowed"
+
+
 async def test_connecting_keeps_the_token_queues_the_import_and_returns_to_the_wizard(
     client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -170,7 +190,7 @@ async def test_a_refused_consent_returns_to_the_wizard_without_connecting(
         headers=binding_cookie(started),
     )
 
-    assert response.headers["location"].endswith("?step=instagram&connected=0")
+    assert response.headers["location"].endswith("?step=instagram&connected=0&reason=declined")
     async with sessions() as db:
         assert await db.scalar(select(SocialAccount)) is None
 
@@ -241,7 +261,8 @@ async def test_a_callback_without_the_cookie_is_refused(
     )
 
     assert response.status_code == 400
-    assert response.json()["error"]["code"] == "invalid_state"
+    assert "No pudimos continuar con Instagram" in response.text
+    assert "Volver a WhatsApp" in response.text
     async with sessions() as db:
         assert await db.scalar(select(SocialAccount)) is None
 
@@ -262,7 +283,8 @@ async def test_a_callback_with_another_browsers_cookie_is_refused(
     )
 
     assert response.status_code == 400
-    assert response.json()["error"]["code"] == "invalid_state"
+    assert "No pudimos continuar con Instagram" in response.text
+    assert "Volver a WhatsApp" in response.text
     assert_cookie_cleared(response)
     async with sessions() as db:
         assert await db.scalar(select(SocialAccount)) is None
@@ -321,7 +343,8 @@ async def test_a_forged_cookie_is_refused(client: httpx.AsyncClient) -> None:
     )
 
     assert response.status_code == 400
-    assert response.json()["error"]["code"] == "invalid_state"
+    assert "No pudimos continuar con Instagram" in response.text
+    assert "Volver a WhatsApp" in response.text
 
 
 async def test_an_expired_or_forged_ticket_does_not_start_a_connect(
@@ -334,7 +357,9 @@ async def test_an_expired_or_forged_ticket_does_not_start_a_connect(
     for ticket in (expired, forged, ""):
         response = await client.get(f"/api/o/{token}/instagram/start", params={"ticket": ticket})
 
-        assert response.status_code in (400, 422)
+        assert response.status_code == 400
+        assert "No pudimos continuar con Instagram" in response.text
+        assert "Volver a WhatsApp" in response.text
         assert "set-cookie" not in response.headers
 
 
@@ -413,8 +438,8 @@ async def run_import(
     instagram: MockInstagram,
     max_images: int = 24,
 ) -> dict[str, Any]:
-    business = await business_of(sessions)
     job = import_instagram_job(instagram, max_posts=100, max_images=max_images)
+    business = await business_of(sessions)
     result = await job(job_context(sessions, storage, business.id), {})
     assert result is not None
     return result

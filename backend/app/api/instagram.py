@@ -9,13 +9,14 @@ import secrets
 from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, Request
-from fastapi.responses import PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.db.models import SocialAccount
+from app.instagram.access import instagram_allowed
 from app.instagram.base import InstagramError, InstagramPort
 from app.instagram.factory import get_instagram
 from app.instagram.oauth_state import (
@@ -53,7 +54,36 @@ BINDING_COOKIE_PATH = CALLBACK_PATH.rsplit("/", 1)[0]
 DEV_STATE_SECRET = secrets.token_hex(32)
 CONNECT_EXPIRED = "Se venció la conexión con Instagram. Volvé al formulario y probá de nuevo."
 
+
+def _connection_error_page(settings: Settings, message: str) -> HTMLResponse:
+    """Show a readable recovery page when the OAuth browser binding is missing or invalid."""
+    from html import escape
+
+    whatsapp_url = escape(settings.whatsapp_url, quote=True)
+    safe_message = escape(message)
+
+    return HTMLResponse(
+        f"""<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conexión con Instagram</title>
+</head>
+<body>
+  <main>
+    <h1>No pudimos continuar con Instagram</h1>
+    <p>{safe_message}</p>
+    <p><a href="{whatsapp_url}">Volver a WhatsApp</a></p>
+  </main>
+</body>
+</html>""",
+        status_code=400,
+    )
+
+
 InstagramDep = Annotated[InstagramPort, Depends(get_instagram)]
+
 
 router = APIRouter()
 
@@ -65,11 +95,18 @@ class ConnectResponse(BaseModel):
 @router.post("/api/o/{token}/instagram/connect", dependencies=[Depends(limit_onboarding_token)])
 async def connect_instagram(
     token: str,
-    _: OpenOnboardingDep,
+    onboarding: OpenOnboardingDep,
     request: Request,
     settings: SettingsDep,
 ) -> ConnectResponse:
     """The wizard navigates to `auth_url`; the start hop sets the cookie that binds the callback."""
+    if not instagram_allowed(settings, onboarding.business):
+        raise ApiError(
+            403,
+            "instagram_not_allowed",
+            "La conexión con Instagram todavía no está habilitada para este negocio.",
+        )
+
     ticket = sign_ticket(token, _state_secret(settings))
     start = f"{_backend_url(request, settings)}/api/o/{token}/instagram/start?ticket={ticket}"
     return ConnectResponse(auth_url=start)
@@ -84,15 +121,23 @@ async def start_instagram(
     settings: SettingsDep,
     instagram: InstagramDep,
     pilot: PilotDep,
-) -> RedirectResponse:
+) -> Response:
     """Top-level hop: set the binding cookie on our own origin, then go to the consent screen."""
     secret = _state_secret(settings)
     try:
         verify_ticket(token, ticket, secret)
     except InvalidState as exc:
         logger.warning("instagram start with a bad ticket: %s", exc)
-        raise ApiError(400, "invalid_state", CONNECT_EXPIRED) from None
-    await get_open_onboarding(await get_onboarding(token, session), session, pilot)
+        return _connection_error_page(settings, CONNECT_EXPIRED)
+
+    onboarding = await get_open_onboarding(await get_onboarding(token, session), session, pilot)
+    if not instagram_allowed(settings, onboarding.business):
+        raise ApiError(
+            403,
+            "instagram_not_allowed",
+            "La conexión con Instagram todavía no está habilitada para este negocio.",
+        )
+
     nonce, cookie = new_binding(token, secret)
     response = RedirectResponse(
         instagram.authorize_url(_redirect_uri(request, settings), nonce), status_code=303
@@ -127,8 +172,13 @@ async def instagram_callback(
         response: Response = await _finish_connect(
             token, code, error, request, session, settings, instagram, pilot
         )
+
     except ApiError as exc:
-        response = error_response(exc)
+        if exc.code == "invalid_state":
+            response = _connection_error_page(settings, CONNECT_EXPIRED)
+        else:
+            response = error_response(exc)
+
     except Exception:
         logger.exception("instagram callback failed")
         response = PlainTextResponse("Internal Server Error", status_code=500)
@@ -153,11 +203,15 @@ async def _finish_connect(
     settings: Settings,
     instagram: InstagramPort,
     pilot: PilotList,
-) -> RedirectResponse:
+) -> Response:
     onboarding = await get_onboarding(token, session)
     business = onboarding.business
     await check_pilot(pilot, business)
     wizard = onboarding_url(settings.frontend_url, token)
+    if not instagram_allowed(settings, business):
+        logger.info("instagram callback for disallowed business %s", business.id)
+        return RedirectResponse(wizard, status_code=303)
+
     # Locked before the check, as in get_open_onboarding: a submit in flight finishes first.
     await session.refresh(business, with_for_update=True)
     if await is_submitted(session, business.id):
@@ -169,13 +223,19 @@ async def _finish_connect(
 
     if error or not code:
         logger.info("instagram connect for %s not authorized: %s", business.id, error)
-        return RedirectResponse(back + "0", status_code=303)
+        return RedirectResponse(
+            f"{back}0&reason=declined",
+            status_code=303,
+        )
     try:
         ig_token = await instagram.exchange_code(code, _redirect_uri(request, settings))
         profile = await instagram.profile(ig_token.access_token)
     except InstagramError:
         logger.exception("instagram connect for %s failed", business.id)
-        return RedirectResponse(back + "0", status_code=303)
+        return RedirectResponse(
+            f"{back}0&reason=account",
+            status_code=303,
+        )
 
     account = await session.scalar(
         select(SocialAccount).where(
