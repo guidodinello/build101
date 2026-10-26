@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app import ratelimit
@@ -24,7 +24,7 @@ from app.main import app
 from app.onboarding import uploads
 from app.onboarding.links import hash_token
 from app.pilot import PilotList, get_pilot_list
-from app.storage import StorageError, get_storage
+from app.storage import SignedUpload, StorageError, get_storage
 from tests.conftest import make_image, requires_db
 from tests.fakes import CountingStorage, FakeChannel, FakeStorage
 
@@ -1403,3 +1403,233 @@ async def test_the_limit_is_keyed_on_the_hash_of_the_token(
     await client.get(f"/api/o/{token}")
 
     assert list(limiter._buckets) == [hash_token(token)]
+
+
+def track_request_sessions(sessions: async_sessionmaker[AsyncSession]) -> list[AsyncSession]:
+    """The sessions the API opens from here on, to check none is mid-transaction during I/O."""
+    opened: list[AsyncSession] = []
+
+    async def session() -> AsyncIterator[AsyncSession]:
+        async with sessions() as db:
+            opened.append(db)
+            yield db
+
+    app.dependency_overrides[get_session] = session
+    return opened
+
+
+async def assert_nothing_held(
+    sessions: async_sessionmaker[AsyncSession], opened: list[AsyncSession], asset_id: str | None
+) -> None:
+    assert opened
+    assert not [db for db in opened if db.in_transaction()]
+    async with sessions() as db:
+        # NOWAIT fails at once if a request still holds the row.
+        await db.scalar(select(Business).with_for_update(nowait=True))
+        if asset_id is not None:
+            await db.scalar(
+                select(BrandAsset)
+                .where(BrandAsset.id == uuid.UUID(asset_id))
+                .with_for_update(nowait=True)
+            )
+        await db.rollback()
+
+
+async def test_completing_a_photo_holds_no_transaction_across_storage_or_the_decode(
+    client: httpx.AsyncClient,
+    storage: FakeStorage,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#161: the download, the decode and both uploads run with no transaction open and no row
+    locked, so they hold no pooled connection and block no other request."""
+    token = await new_link(client)
+    asset_id = await uploaded_to_storage(client, storage, token)
+    opened = track_request_sessions(sessions)
+    checked: list[str] = []
+    download, upload_object, read = storage.download, storage.upload, onboarding.read_upload
+
+    async def checked_download(
+        bucket: str, path: str, *, max_bytes: int | None = None
+    ) -> bytes | None:
+        await assert_nothing_held(sessions, opened, asset_id)
+        checked.append("download")
+        return await download(bucket, path, max_bytes=max_bytes)
+
+    async def checked_upload(bucket: str, path: str, data: bytes, content_type: str) -> None:
+        await assert_nothing_held(sessions, opened, asset_id)
+        checked.append("upload")
+        await upload_object(bucket, path, data, content_type)
+
+    async def checked_read(data: bytes, content_type: str, kind: str) -> uploads.ProcessedUpload:
+        await assert_nothing_held(sessions, opened, asset_id)
+        checked.append("decode")
+        return await read(data, content_type, kind)
+
+    storage.download = checked_download  # type: ignore[method-assign]
+    storage.upload = checked_upload  # type: ignore[method-assign]
+    monkeypatch.setattr(onboarding, "read_upload", checked_read)
+
+    response = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "ready"
+    assert checked[:2] == ["download", "decode"]
+    assert "upload" in checked
+    async with sessions() as db:
+        asset = await db.get(BrandAsset, uuid.UUID(asset_id))
+        assert asset is not None and asset.status == "ready"
+        jobs = (await db.scalars(select(Job).where(Job.kind == "analyze_asset"))).all()
+    assert [job.payload["asset_id"] for job in jobs] == [asset_id]
+
+
+async def test_a_refused_photo_holds_no_transaction_while_its_files_are_removed(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    asset_id = await uploaded_to_storage(client, storage, token, data=b"not an image")
+    opened = track_request_sessions(sessions)
+    remove = storage.remove
+    removed: list[bool] = []
+
+    async def checked_remove(bucket: str, paths: list[str]) -> None:
+        await assert_nothing_held(sessions, opened, asset_id)
+        removed.append(True)
+        await remove(bucket, paths)
+
+    storage.remove = checked_remove  # type: ignore[method-assign]
+
+    response = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+
+    assert response.status_code == 422
+    assert removed == [True]
+    async with sessions() as db:
+        asset = await db.get(BrandAsset, uuid.UUID(asset_id))
+    assert asset is not None and asset.status == "failed"
+
+
+async def test_requesting_an_upload_holds_no_transaction_while_storage_signs_it(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    """#161: the wizard's parallel uploads don't queue on the Business lock behind Supabase."""
+    token = await new_link(client)
+    opened = track_request_sessions(sessions)
+    sign = storage.create_signed_upload_url
+    signed: list[str] = []
+
+    async def checked_sign(bucket: str, path: str) -> SignedUpload:
+        await assert_nothing_held(sessions, opened, None)
+        signed.append(path)
+        return await sign(bucket, path)
+
+    storage.create_signed_upload_url = checked_sign  # type: ignore[method-assign]
+
+    response = await request_upload(client, token, "photo")
+
+    assert response.status_code == 200, response.text
+    assert len(signed) == 1
+    async with sessions() as db:
+        asset = await db.get(BrandAsset, uuid.UUID(response.json()["asset_id"]))
+    assert asset is not None and asset.status == "uploading" and asset.storage_path == signed[0]
+
+
+async def test_parallel_upload_requests_still_respect_the_cap(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    for _ in range(onboarding.MAX_PHOTOS - 2):
+        await upload(client, storage, token)
+
+    responses = await asyncio.gather(*(request_upload(client, token, "photo") for _ in range(5)))
+
+    assert sorted(response.status_code for response in responses) == [200, 200, 422, 422, 422]
+    async with sessions() as db:
+        holding = await db.scalar(
+            select(func.count()).where(BrandAsset.archived_at.is_(None), BrandAsset.kind == "photo")
+        )
+    assert holding == onboarding.MAX_PHOTOS
+
+
+async def test_an_upload_request_after_the_submit_signs_nothing(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    async with sessions() as db:
+        link = await db.scalar(select(MagicLink))
+        assert link is not None
+        link.completed_at = datetime.now(UTC)
+        await db.commit()
+    signed: list[str] = []
+
+    async def sign(bucket: str, path: str) -> SignedUpload:
+        signed.append(path)
+        raise AssertionError("signed after the submit")
+
+    storage.create_signed_upload_url = sign  # type: ignore[method-assign]
+
+    response = await request_upload(client, token, "photo")
+
+    assert response.status_code == 409
+    assert error_code(response) == "onboarding_completed"
+    assert signed == []
+
+
+async def test_two_concurrent_completes_of_one_photo_process_it_once(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    counting = CountingStorage()
+    app.dependency_overrides[get_storage] = lambda: counting
+    token = await new_link(client)
+    asset_id = await uploaded_to_storage(client, counting, token)
+    download = counting.download
+
+    async def slow_download(
+        bucket: str, path: str, *, max_bytes: int | None = None
+    ) -> bytes | None:
+        await asyncio.sleep(0.2)  # the second /complete arrives meanwhile
+        return await download(bucket, path, max_bytes=max_bytes)
+
+    counting.download = slow_download  # type: ignore[method-assign]
+
+    first, second = await asyncio.gather(
+        client.post(f"/api/o/{token}/assets/{asset_id}/complete"),
+        client.post(f"/api/o/{token}/assets/{asset_id}/complete"),
+    )
+
+    assert (first.status_code, second.status_code) == (200, 200)
+    assert first.json()["status"] == second.json()["status"] == "ready"
+    assert counting.downloads == 1
+    async with sessions() as db:
+        jobs = (await db.scalars(select(Job).where(Job.kind == "analyze_asset"))).all()
+    assert len(jobs) == 1
+
+
+async def test_a_photo_archived_while_it_is_read_stays_archived_and_leaves_no_files(
+    client: httpx.AsyncClient, storage: FakeStorage, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    asset_id = await uploaded_to_storage(client, storage, token)
+    download = storage.download
+
+    async def download_then_archive(
+        bucket: str, path: str, *, max_bytes: int | None = None
+    ) -> bytes | None:
+        data = await download(bucket, path, max_bytes=max_bytes)
+        deleted = await asyncio.wait_for(
+            client.delete(f"/api/o/{token}/assets/{asset_id}"), timeout=5
+        )
+        assert deleted.status_code == 204
+        return data
+
+    storage.download = download_then_archive  # type: ignore[method-assign]
+
+    response = await client.post(f"/api/o/{token}/assets/{asset_id}/complete")
+
+    assert response.status_code == 404
+    assert error_code(response) == "asset_not_found"
+    assert not [path for path in storage.objects if asset_id in path]
+    async with sessions() as db:
+        asset = await db.get(BrandAsset, uuid.UUID(asset_id))
+        jobs = (await db.scalars(select(Job).where(Job.kind == "analyze_asset"))).all()
+    assert asset is not None and asset.archived_at is not None and asset.status != "ready"
+    assert jobs == []
