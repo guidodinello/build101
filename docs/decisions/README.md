@@ -54,3 +54,4 @@ When an ADR is superseded, set its Status to `superseded`, add `- Superseded by:
 | [0033](0033-ai-generated-reels-veo.md) | AI-generated Reels from a product image with Veo, behind a flag (amends 0012) | proposed | 2026-10-19 |
 | [0034](0034-zod-api-response-schemas.md) | Check backend responses in the frontend with Zod schemas | proposed | 2026-10-19 |
 | [0035](0035-art-director-design-rules-and-design-critic.md) | The Art Director designs with rules, layout knobs and brand fonts, and a Design Critic reviews every rendered carousel (amends 0029) | proposed | 2026-10-25 |
+| [0036](0036-license-agpl-3.md) | License the repository under AGPL-3.0 | proposed | 2026-10-26 |
