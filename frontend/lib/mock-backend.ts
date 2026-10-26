@@ -61,7 +61,7 @@ function business(token: string): MockBusiness {
       brand: { three_words: [], colors: [] },
       assets: [],
       preferences: null,
-      instagram: { status: "not_connected", handle: null },
+      instagram: { status: "not_connected", handle: null, available: true },
       completed: false,
       whatsapp_url: process.env.NEXT_PUBLIC_WHATSAPP_URL ?? "https://wa.me/",
     };
@@ -203,6 +203,7 @@ export function deleteAsset(token: string, assetId: string) {
 export function connectInstagram(token: string) {
   const found = business(token);
   found.instagram = {
+    ...found.instagram,
     status: "connected",
     handle: found.business.instagram_handle ?? "tunegocio",
   };

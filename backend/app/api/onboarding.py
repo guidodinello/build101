@@ -714,13 +714,15 @@ async def _state(
             for asset in assets
         ],
         preferences=schemas.Questionnaire.model_validate(preferences) if preferences else None,
-        instagram=await _instagram(session, business),
+        instagram=await _instagram(session, business, settings),
         completed=await is_submitted(session, business.id),
         whatsapp_url=settings.whatsapp_url,
     )
 
 
-async def _instagram(session: AsyncSession, business: Business) -> schemas.Instagram:
+async def _instagram(
+    session: AsyncSession, business: Business, settings: Settings
+) -> schemas.Instagram:
     """The connection that reads the account for the Brand Brain (ADR 0028); publishing still
     goes to the one demo account (ADR 0024)."""
     account = await session.scalar(
@@ -729,10 +731,17 @@ async def _instagram(session: AsyncSession, business: Business) -> schemas.Insta
         .order_by(SocialAccount.updated_at.desc())
         .limit(1)
     )
+    available = settings.instagram != "off"
     if account is None:
-        return schemas.Instagram(status="not_connected", handle=business.instagram_handle)
+        return schemas.Instagram(
+            status="not_connected", handle=business.instagram_handle, available=available
+        )
     # str column, Literal field: typed in #89
-    return schemas.Instagram(status=account.status, handle=account.handle)  # pyright: ignore[reportArgumentType]
+    return schemas.Instagram(
+        status=account.status,  # pyright: ignore[reportArgumentType]
+        handle=account.handle,
+        available=available,
+    )
 
 
 def _to_asset(asset: BrandAsset, url: str, product_ids: list[str]) -> schemas.Asset:

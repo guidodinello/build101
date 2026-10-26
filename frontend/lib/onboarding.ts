@@ -18,8 +18,13 @@ export const MAX_PRODUCTS = 5;
 export const MAX_PRODUCT_PHOTOS = 5;
 export const MAX_BRAND_WORDS = 3;
 
-export function isStep(value: unknown): value is Step {
-  return value === "done" || STEPS.includes(value as WizardStepId);
+// The steps this Owner walks: no Instagram step when the backend has it off (INSTAGRAM=off).
+export function wizardSteps(state: OnboardingState): readonly WizardStepId[] {
+  return state.instagram.available ? STEPS : STEPS.filter((step) => step !== "instagram");
+}
+
+export function isStep(value: unknown, state: OnboardingState): value is Step {
+  return value === "done" || wizardSteps(state).includes(value as WizardStepId);
 }
 
 export function readyPhotos(state: OnboardingState) {
@@ -48,12 +53,17 @@ export function isInstagramConnected(state: OnboardingState) {
   return state.instagram.status === "connected";
 }
 
+// After the business: connect Instagram, unless it is connected already or off.
+export function stepAfterBusiness(state: OnboardingState): Step {
+  return state.instagram.available && !isInstagramConnected(state) ? "instagram" : "products";
+}
+
 export function resumeStep(state: OnboardingState): Step {
   if (state.completed) return "done";
   const { business } = state;
   if (!business.name || !business.category || !business.one_liner) return "business";
   if (state.products.filter((product) => !product.archived).length === 0) {
-    return isInstagramConnected(state) ? "products" : "instagram";
+    return stepAfterBusiness(state);
   }
   if (readyPhotos(state).length < MIN_PHOTOS) return "photos";
   if (state.brand.three_words.length === 0) return "brand";
