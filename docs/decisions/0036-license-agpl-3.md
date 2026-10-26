@@ -1,7 +1,7 @@
 # 0036: License the repository under AGPL-3.0
 
 - Date: 2026-10-26
-- Status: proposed
+- Status: accepted
 
 ## Context
 
