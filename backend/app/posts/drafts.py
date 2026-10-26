@@ -93,11 +93,12 @@ class PostDrafter:
         notes: list[str] | None = None,
         previous: PreviousPost | None = None,
         trend_notes: str | None = None,
+        recent_captions: list[str] | None = None,
     ) -> PostCopy:
         request = (
             f"Write the caption for a post of {len(photos)} photo(s), posted as they are, "
             f"without a design.\n\nBrief: {brief}{revision_section(previous)}"
-            f"{trend_section(trend_notes)}"
+            f"{trend_section(trend_notes)}{recent_section(recent_captions)}"
         )
         return await self._model.structured(
             AGENT,
@@ -137,6 +138,7 @@ class PostDrafter:
         notes: list[str] | None = None,
         previous: PreviousPost | None = None,
         trend_notes: str | None = None,
+        recent_captions: list[str] | None = None,
     ) -> tuple[CarouselCopy, CarouselBrief]:
         one_per_photo = (
             " Each slide is built from its own photo, in order."
@@ -146,6 +148,7 @@ class PostDrafter:
         request = (
             f"A design of exactly {slide_count} slide(s) (4:5).{one_per_photo}\n\n"
             f"Brief: {brief}{revision_section(previous)}{trend_section(trend_notes)}"
+            f"{recent_section(recent_captions)}"
         )
         draft = await self._designer.structured(
             AGENT,
@@ -215,6 +218,13 @@ def trend_section(trend_notes: str | None) -> str:
     if not trend_notes:
         return ""
     return f"\n\n{tagged('trend_notes', trend_notes.splitlines())}"
+
+
+def recent_section(recent_captions: list[str] | None) -> str:
+    """The Business's latest Posts' texts, escaped, so a new Post doesn't repeat their opening."""
+    if not recent_captions:
+        return ""
+    return f"\n\n{tagged('recent_posts', recent_captions)}"
 
 
 def revision_section(previous: PreviousPost | None) -> str:
