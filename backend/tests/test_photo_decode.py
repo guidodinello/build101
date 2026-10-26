@@ -3,16 +3,24 @@
 import asyncio
 import threading
 import time
+from collections.abc import Callable
+from pathlib import Path
+from types import ModuleType
 
 import pytest
 from PIL import Image
 
-from app.carousel.generator import prepare_references
+from app.carousel import generator
+from app.carousel.generator import CarouselGenerator, prepare_references
+from app.carousel.schemas import CarouselBrief, CarouselCopy
 from app.conversation.events import PhotoTooLarge, PhotoUnreadable
+from app.imagegen.base import GeneratedImage
 from app.media import images
 from app.media.images import ImageTooLarge, UnreadableImage, decode, prepare_reference
 from app.onboarding import uploads
 from app.onboarding.uploads import read_upload
+from app.posts import maker
+from app.posts.maker import with_logo
 from tests.conftest import make_image
 from tests.fakes import FakeChannel, ScriptedModel, text_reply
 from tests.test_chat_handler import EVENT_REPLY, SENDER, build, message, step_text
@@ -32,24 +40,30 @@ def never_decoded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(images, "reference_from", refuse)
 
 
-def count_decodes(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
-    """Slow `reference_from` in both modules, counting how many run at once."""
+def count_decodes(monkeypatch: pytest.MonkeyPatch, *also: tuple[ModuleType, str]) -> dict[str, int]:
+    """Slow `reference_from` in both modules, and each `(module, name)` in `also`, counting how
+    many run at once."""
     seen = {"running": 0, "peak": 0, "calls": 0}
     lock = threading.Lock()
-    original = images.reference_from
 
-    def slow(image: Image.Image) -> bytes:
-        with lock:
-            seen["running"] += 1
-            seen["calls"] += 1
-            seen["peak"] = max(seen["peak"], seen["running"])
-        time.sleep(0.05)
-        with lock:
-            seen["running"] -= 1
-        return original(image)
+    def slowed[**P, T](original: Callable[P, T]) -> Callable[P, T]:
+        def slow(*args: P.args, **kwargs: P.kwargs) -> T:
+            with lock:
+                seen["running"] += 1
+                seen["calls"] += 1
+                seen["peak"] = max(seen["peak"], seen["running"])
+            time.sleep(0.05)
+            with lock:
+                seen["running"] -= 1
+            return original(*args, **kwargs)
 
-    monkeypatch.setattr(images, "reference_from", slow)
-    monkeypatch.setattr(uploads, "reference_from", slow)  # process_upload binds its own name
+        return slow
+
+    slow_reference = slowed(images.reference_from)
+    monkeypatch.setattr(images, "reference_from", slow_reference)
+    monkeypatch.setattr(uploads, "reference_from", slow_reference)  # process_upload binds its own
+    for module, name in also:
+        monkeypatch.setattr(module, name, slowed(getattr(module, name)))
     return seen
 
 
@@ -172,3 +186,70 @@ async def test_the_carousel_references_decode_under_the_same_limit(
 
     assert len(prepared) == 5
     assert seen["peak"] == 2
+
+
+async def test_a_post_render_and_uploads_share_the_decode_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = count_decodes(monkeypatch, (maker, "add_logo"))
+    data = make_image((SIDE, 80))
+    logo = make_image((40, 40), format="PNG")
+
+    await asyncio.gather(
+        with_logo([data] * 3, logo),
+        *(read_upload(data, "image/jpeg", "photo") for _ in range(3)),
+    )
+
+    assert seen["calls"] == 6
+    assert seen["peak"] == images.MAX_CONCURRENT_DECODES == 2
+
+
+SCENE = make_image((SIDE, 125))
+
+
+class InstantImageGen:
+    """Every scene at once, so the slides' decodes all want a slot together."""
+
+    async def generate(
+        self,
+        prompt: str,
+        reference_images: list[bytes],
+        style_image: bytes | None = None,
+        *,
+        aspect_ratio: str | None = None,
+        image_size: str | None = None,
+    ) -> GeneratedImage:
+        await asyncio.sleep(0)
+        return GeneratedImage(data=SCENE, mime="image/jpeg", provider="fake", model=None, usage={})
+
+
+async def test_a_carousel_and_uploads_share_the_decode_limit(
+    monkeypatch: pytest.MonkeyPatch, carousel_spec: tuple[CarouselCopy, CarouselBrief]
+) -> None:
+    copy, brief = carousel_spec
+    seen = count_decodes(monkeypatch, (generator, "to_post_image"))
+    data = make_image((SIDE, 80))
+
+    slides, *_ = await asyncio.gather(
+        CarouselGenerator(InstantImageGen()).generate(copy, brief, [data]),
+        *(read_upload(data, "image/jpeg", "photo") for _ in range(3)),
+    )
+
+    assert len(slides) == len(copy.slides)
+    assert seen["peak"] == images.MAX_CONCURRENT_DECODES == 2
+
+
+APP = Path(__file__).resolve().parent.parent / "app"
+# The only threads started outside `decode`: `decode` itself, the upload reader that takes the
+# same slot, and the mock video's file read (no image decode).
+OWN_THREADS = {"media/images.py", "onboarding/uploads.py", "videogen/mock.py"}
+
+
+def test_image_work_starts_threads_only_through_the_decode_limit() -> None:
+    threaded = {
+        path.relative_to(APP).as_posix()
+        for path in APP.rglob("*.py")
+        if "asyncio.to_thread(" in path.read_text()
+    }
+
+    assert threaded == OWN_THREADS

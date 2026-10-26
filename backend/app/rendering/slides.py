@@ -4,7 +4,7 @@ from app.agents.schemas import BrandBrain
 from app.carousel.generator import GeneratedSlide
 from app.carousel.prompts import scene
 from app.carousel.schemas import CarouselBrief, CarouselCopy, family_layout
-from app.media.images import data_uri, logo_for_render
+from app.media.images import data_uri, decode, logo_for_render
 
 from .base import RenderedSlide, RendererPort, RenderLogo, SlideRender, render_brand
 
@@ -21,7 +21,7 @@ async def render_slides(
     if [generated.index for generated in scenes] != list(range(1, len(copy.slides) + 1)):
         raise ValueError("render_slides needs one scene per slide, in order")
     family = "editorial" if brief.family == "panorama" and len(copy.slides) == 1 else brief.family
-    render_logo = await asyncio.to_thread(prepared_logo, logo) if logo else None
+    render_logo = await decode(prepared_logo, logo) if logo else None
     tokens = render_brand(brand)
     requests: list[SlideRender] = []
     for slide, generated in zip(copy.slides, scenes, strict=True):
