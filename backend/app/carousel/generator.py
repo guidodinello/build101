@@ -69,21 +69,38 @@ class CarouselGenerator:
         references: list[bytes],
         current: list[GeneratedSlide],
         indexes: list[int],
+        slide_references: dict[int, list[bytes]] | None = None,
     ) -> list[GeneratedSlide]:
-        """A panorama is regenerated whole: one slice alone would break the seams."""
+        """A panorama is regenerated whole: one slice alone would break the seams.
+
+        `slide_references` overrides `references` for the slides it lists, as in `generate`.
+        """
         check_slides_match(copy, brief)
         check_redo_request(len(copy.slides), current, indexes)
         if is_panorama(copy, brief):
             return await self.generate(copy, brief, references)
         prepared = await prepare_references(references)
+        per_slide = {
+            index: await prepare_references(slide_refs)
+            for index, slide_refs in (slide_references or {}).items()
+            if index in indexes
+        }
         slides = {slide.index: slide for slide in current}
 
         if COVER in indexes:
             anchor = slides[COVER + 1].image if COVER + 1 in slides else None
-            slides[COVER] = await self._slide(copy, brief, COVER, prepared, style_image=anchor)
+            slides[COVER] = await self._slide(
+                copy, brief, COVER, per_slide.get(COVER, prepared), style_image=anchor
+            )
 
         redone = await gather_slides(
-            self._slide(copy, brief, index, prepared, style_image=slides[COVER].image)
+            self._slide(
+                copy,
+                brief,
+                index,
+                per_slide.get(index, prepared),
+                style_image=slides[COVER].image,
+            )
             for index in sorted(set(indexes) - {COVER})
         )
         slides.update((slide.index, slide) for slide in redone)

@@ -2,6 +2,7 @@
 
 - Date: 2026-10-18
 - Status: proposed
+- Amended by: [0035](0035-art-director-design-rules-and-design-critic.md) (three more families, layout knobs, brand font pairs, text fitting and legibility in the renderer, a Design Critic)
 
 ## Context
 

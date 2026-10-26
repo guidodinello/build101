@@ -29,8 +29,14 @@ type CtaLinkProps = VariantProps<typeof ctaVariants> & {
 };
 
 export function CtaLink({ href = WHATSAPP_START_URL, icon, variant, size, className, children }: CtaLinkProps) {
+  const external = href.startsWith("http");
   return (
-    <a href={href} className={cn(ctaVariants({ variant, size }), className)}>
+    <a
+      href={href}
+      target={external ? "_blank" : undefined}
+      rel={external ? "noopener noreferrer" : undefined}
+      className={cn(ctaVariants({ variant, size }), className)}
+    >
       {icon && <MessageCircleIcon className="size-5" aria-hidden="true" />}
       {children}
     </a>

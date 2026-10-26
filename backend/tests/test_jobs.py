@@ -41,7 +41,7 @@ from app.jobs.queue import enqueue, retry_failed
 from app.jobs.runner import JobContext, JobRunner
 from app.jobs.setup import NOTIFY_ON_FAILURE, REQUEUE_IF_INTERRUPTED, UNDO
 from app.llm.client import Step, user_step
-from app.media.public import PublicImages
+from app.media.public import PublicImages, PublicVideos
 from app.posts.lifecycle import PostLifecycle
 from app.publishing.mock import MOCK_ACCOUNT_ID, MockPublisher
 from app.rendering.mock import MockRenderer
@@ -520,6 +520,7 @@ async def test_a_summary_that_fails_before_the_send_fails_the_job_and_offers_a_r
             renderer=MockRenderer(),
             publisher=MockPublisher(delay_s=0),
             images=PublicImages(),
+            videos=PublicVideos(),
             background=BackgroundWork(),
             public_backend_url="https://backend.test",
             account_id=MOCK_ACCOUNT_ID,

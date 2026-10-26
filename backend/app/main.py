@@ -40,8 +40,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             get_channel(),
             lambda: app.dependency_overrides.get(get_owner_notify, get_owner_notify)(),
         )
-    except ValueError:
-        logger.warning("job runner is off: no WhatsApp channel", exc_info=True)
+    except ValueError as exc:
+        logger.warning("job runner is off: %s", exc, exc_info=True)
         runner = None
     if runner:
         await runner.start()

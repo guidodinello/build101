@@ -15,8 +15,10 @@ from app.imagegen.factory import build_image_gen
 from app.knowledge.base import Knowledge
 from app.knowledge.db import DbKnowledge
 from app.knowledge.local import LocalKnowledge, load_trend_notes
-from app.llm.client import ChatModel, GeminiChat
+from app.llm.client import ChatModel, GeminiChat, StructuredModel
+from app.llm.factory import build_structured
 from app.media.public import PublicImages, PublicVideos
+from app.posts.critic import DesignCritic
 from app.posts.drafts import PostDrafter
 from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import PostMaker
@@ -69,6 +71,7 @@ class ChatParts:
     renderer: RendererPort
     publisher: PublisherPort
     images: PublicImages
+    videos: PublicVideos
     background: BackgroundWork
     public_backend_url: str
     account_id: str | None
@@ -86,12 +89,14 @@ class ChatParts:
     sessions: async_sessionmaker[AsyncSession] | None = None
     # None while VIDEO_GEN_ENABLED is off: no maker, so no tool and no Veo call (ADR 0033).
     video_gen: VideoGenPort | None = None
-    videos: PublicVideos | None = None
     photo_debounce_s: float = PHOTO_DEBOUNCE_S
     keep_alive_s: float = KEEP_ALIVE_S
     publish_sleep: Sleep | None = None
     # None: every Owner's Approval publishes to `account_id` (ADR 0024).
     shared_account: SharedAccountGuard | None = None
+    # ADR 0035: the Art Director's model (None: `model`) and the review of rendered designs
+    designer: StructuredModel | None = None
+    critic: DesignCritic | None = None
     now: Callable[[], datetime] = local_now
 
 
@@ -123,7 +128,7 @@ def build_chat(parts: ChatParts) -> Chat:
     knowledge = parts.knowledge or LocalKnowledge(parts.notes, parts.history)
     background = parts.background
     posts = PostMaker(
-        PostDrafter(parts.model),
+        PostDrafter(parts.model, parts.designer),
         parts.image_gen,
         parts.renderer,
         photos,
@@ -133,9 +138,10 @@ def build_chat(parts: ChatParts) -> Chat:
         parts.max_posts_per_day,
         knowledge=knowledge,
         now=parts.now,
+        critic=parts.critic,
         background=background,
     )
-    public_videos = parts.videos or PublicVideos()
+    public_videos = parts.videos
     public_videos.serve_from(store.video)
     publishing = PostPublisher(
         parts.publisher,
@@ -201,11 +207,18 @@ def build_chat(parts: ChatParts) -> Chat:
     )
 
 
+def design_critic(settings: Settings, chat: ChatModel) -> DesignCritic | None:
+    """Only designs drawn by the real renderer are worth a review: the mock draws no text."""
+    if not settings.design_critic or settings.renderer != "takumi":
+        return None
+    return DesignCritic(build_structured(settings, settings.design_critic_model, chat))
+
+
 def build_conversation(
     settings: Settings,
     images: PublicImages,
     publisher: PublisherPort,
-    videos: PublicVideos | None = None,
+    videos: PublicVideos,
 ) -> Conversation:
     match settings.inbound_handler:
         case "chat":
@@ -271,6 +284,8 @@ def build_conversation(
                     video_gen=build_video_gen(settings),
                     videos=videos,
                     shared_account=shared_account,
+                    designer=build_structured(settings, settings.art_director_model, model),
+                    critic=design_critic(settings, model),
                 )
             )
             if sessions is None:

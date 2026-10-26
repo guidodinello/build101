@@ -10,7 +10,7 @@ from app.config import Settings
 from app.conversation.factory import ChatParts, Conversation, build_chat, build_conversation
 from app.conversation.history import InMemoryHistory
 from app.copy import messages_es
-from app.media.public import PublicImages
+from app.media.public import PublicImages, PublicVideos
 from app.posts.publish import MAX_RETRY_AFTER_S
 from app.posts.shared_account import SharedAccountGuard
 from app.posts.store import Post, PostImage, PostVideo
@@ -73,6 +73,7 @@ class Rig:
                 renderer=MockRenderer(),
                 publisher=self.publisher,
                 images=self.images,
+                videos=PublicVideos(),
                 background=self.background,
                 public_backend_url=BASE_URL,
                 account_id=account_id,
@@ -580,11 +581,16 @@ def test_the_chat_publishes_behind_the_guard_from_the_settings(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     named = build_conversation(
-        chat_settings(env="prod", zernio_owner_phone=SENDER), PublicImages(), MockPublisher()
+        chat_settings(env="prod", zernio_owner_phone=SENDER),
+        PublicImages(),
+        MockPublisher(),
+        PublicVideos(),
     )
     with caplog.at_level(logging.WARNING, logger="app.conversation.factory"):
-        unnamed = build_conversation(chat_settings(env="prod"), PublicImages(), MockPublisher())
-    local = build_conversation(chat_settings(), PublicImages(), MockPublisher())
+        unnamed = build_conversation(
+            chat_settings(env="prod"), PublicImages(), MockPublisher(), PublicVideos()
+        )
+    local = build_conversation(chat_settings(), PublicImages(), MockPublisher(), PublicVideos())
 
     def guard(conversation: Conversation) -> SharedAccountGuard:
         return conversation.handler._buttons._publisher._shared_account

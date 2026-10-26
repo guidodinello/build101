@@ -76,9 +76,9 @@ async def run(
     designed = await render_slides(build_renderer(settings), copy, brief, slides, None, None)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    for slide, image in zip(slides, designed, strict=True):
+    for slide, rendered in zip(slides, designed, strict=True):
         (out_dir / f"scene-{slide.index}.jpg").write_bytes(slide.image)
-        (out_dir / f"slide-{slide.index}.jpg").write_bytes(image)
+        (out_dir / f"slide-{slide.index}.jpg").write_bytes(rendered.image)
         (out_dir / f"slide-{slide.index}.prompt.txt").write_text(slide.prompt)
     report = {
         "total_seconds": round(total_seconds, 1),

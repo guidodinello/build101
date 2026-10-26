@@ -1,6 +1,7 @@
-import { renderSlide } from "@/lib/post-render/render";
-import { SAMPLE_SLIDES, sampleSpec } from "@/lib/post-render/samples";
+import { RENDER_REPORT_HEADER, reportHeader } from "@/lib/post-render/design";
 import { previewEnabled } from "@/lib/post-render/preview";
+import { renderSlide } from "@/lib/post-render/render";
+import { SAMPLE_SLIDES, sampleOptions, sampleSpec } from "@/lib/post-render/samples";
 import { FAMILIES } from "@/lib/post-render/spec";
 
 export async function GET(request: Request) {
@@ -11,6 +12,8 @@ export async function GET(request: Request) {
   if (!family || !Number.isInteger(index) || index < 1 || index > SAMPLE_SLIDES.length) {
     return Response.json({ error: "unknown_sample" }, { status: 400 });
   }
-  const image = await renderSlide(await sampleSpec(family, index, params.get("logo") === "1"));
-  return new Response(new Uint8Array(image), { headers: { "content-type": "image/jpeg", "cache-control": "no-store" } });
+  const slide = await renderSlide(await sampleSpec(sampleOptions(params, family, index)));
+  return new Response(new Uint8Array(slide.image), {
+    headers: { "content-type": "image/jpeg", "cache-control": "no-store", [RENDER_REPORT_HEADER]: reportHeader(slide.report) },
+  });
 }

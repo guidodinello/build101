@@ -1,0 +1,47 @@
+{
+  "business_name": "Taller Roble",
+  "one_liner": "Muebles de roble macizo hechos a medida en Montevideo",
+  "description": "Taller familiar que diseña y fabrica mesas, aparadores y bibliotecas de roble macizo a medida, con terminaciones naturales.",
+  "category": "furniture",
+  "location": "Montevideo, Uruguay",
+  "goal": "sales",
+  "audiences": [
+    {
+      "name": "Parejas que arman su casa",
+      "description": "30 a 45 años, primera casa o mudanza, buscan muebles que duren",
+      "pains": ["Muebles de placa que se rompen", "No saben qué medida elegir"],
+      "motivations": ["Una pieza para toda la vida", "Que quede perfecto en su espacio"]
+    }
+  ],
+  "value_props": ["Roble macizo, no placa", "Hecho a la medida de tu casa", "Terminación natural con aceite vegetal"],
+  "voice": {
+    "descriptors": ["cálido", "artesanal", "cercano"],
+    "formality": 2,
+    "humor": 2,
+    "emoji_policy": "few",
+    "do": ["Hablar de vos", "Mostrar el proceso del taller"],
+    "dont": ["Decir 'barato'", "Prometer plazos"],
+    "sample_phrases": ["Hecha a mano, para durar", "Contanos tu espacio y la diseñamos"]
+  },
+  "pillars": [
+    {"id": "a-medida", "name": "A medida", "description": "Cómo diseñamos para cada casa", "example_ideas": ["Medidas para elegir tu mesa"]},
+    {"id": "taller", "name": "El taller", "description": "El proceso y las manos detrás", "example_ideas": ["De la tabla a la mesa"]},
+    {"id": "cuidado", "name": "Cuidado", "description": "Cómo cuidar la madera", "example_ideas": ["Tres cuidados para tu mesa de roble"]}
+  ],
+  "featured_products": [],
+  "ctas": ["Escribinos por WhatsApp", "Guardalo para cuando lo necesites"],
+  "hashtags": ["#mueblesamedida", "#roblemacizo", "#montevideo", "#diseñointerior"],
+  "posting": {"posts_per_week": 3, "preferred_days": ["tue", "thu", "sat"], "preferred_time": "19:00"},
+  "constraints": ["No poner precios"],
+  "visual_identity": {
+    "primary_color": "#5B3A29",
+    "secondary_color": "#9BA88D",
+    "accent_color": "#C8833B",
+    "background_color": "#F3EDE2",
+    "text_color": "#2B1D14",
+    "logo_asset_id": null,
+    "photo_style": "luz natural, madera, ambientes cálidos",
+    "font_pair": "serif-classic"
+  },
+  "whatsapp_summary": "• *Cómo hablamos:* cálidos y cercanos"
+}

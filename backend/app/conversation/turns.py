@@ -31,7 +31,7 @@ from app.llm.client import (
     user_step,
 )
 from app.posts.lifecycle import PostLifecycle
-from app.prompts import load_prompt
+from app.prompts import escape, load_prompt
 from app.storage import StorageError
 
 from .approval import Approval
@@ -406,7 +406,7 @@ def context_block(
     listed = {photo.asset_id for photo in recent if photo.asset_id}
     kept = [photo for photo in library or [] if photo.asset_id not in listed]
     if kept:
-        described = "\n".join(f"- {photo.id}: {photo.caption}" for photo in kept)
+        described = "\n".join(f"- {photo.id}: {escape(photo.caption or '')}" for photo in kept)
         block += f"\n<brand_photos>\n{described}\n</brand_photos>"
     if has_logo:
         block += "\n<brand_logo>uploaded</brand_logo>"
@@ -420,7 +420,7 @@ def local_time(now: datetime) -> str:
 def describe_photo(photo: Photo) -> str:
     line = f"- {photo.id} sent {photo.received_at:%H:%M}"
     if photo.caption:
-        line += f', caption "{photo.caption}"'
+        line += f', caption "{escape(photo.caption)}"'
     if photo.description:
-        line += f": {photo.description}"
+        line += f": {escape(photo.description)}"
     return line

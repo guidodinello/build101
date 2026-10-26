@@ -2,10 +2,11 @@ import asyncio
 
 from app.agents.schemas import BrandBrain
 from app.carousel.generator import GeneratedSlide
-from app.carousel.schemas import CarouselBrief, CarouselCopy
+from app.carousel.prompts import scene
+from app.carousel.schemas import CarouselBrief, CarouselCopy, family_layout
 from app.media.images import data_uri, decode, logo_for_render
 
-from .base import RendererPort, RenderLogo, SlideRender, render_brand
+from .base import RenderedSlide, RendererPort, RenderLogo, SlideRender, render_brand
 
 
 async def render_slides(
@@ -15,28 +16,35 @@ async def render_slides(
     scenes: list[GeneratedSlide],
     brand: BrandBrain | None,
     logo: bytes | None,
-) -> list[bytes]:
+) -> list[RenderedSlide]:
     """Each slide's design over its scene, in order; the logo only when the Owner asked."""
-    if [scene.index for scene in scenes] != list(range(1, len(copy.slides) + 1)):
+    if [generated.index for generated in scenes] != list(range(1, len(copy.slides) + 1)):
         raise ValueError("render_slides needs one scene per slide, in order")
     family = "editorial" if brief.family == "panorama" and len(copy.slides) == 1 else brief.family
     render_logo = await decode(prepared_logo, logo) if logo else None
     tokens = render_brand(brand)
-    requests = [
-        SlideRender(
-            family=family,
-            index=scene.index,
-            count=len(copy.slides),
-            role=slide.role,
-            kicker=slide.kicker,
-            headline=slide.headline,
-            body=slide.body,
-            image=data_uri(scene.image),
-            logo=render_logo,
-            brand=tokens,
+    requests: list[SlideRender] = []
+    for slide, generated in zip(copy.slides, scenes, strict=True):
+        design = scene(brief, generated.index)
+        requests.append(
+            SlideRender(
+                family=family,
+                index=generated.index,
+                count=len(copy.slides),
+                role=slide.role,
+                layout=family_layout(family, design.layout),
+                emphasis=design.emphasis,
+                focus=design.focus,
+                surface=design.surface,
+                kicker=slide.kicker,
+                headline=slide.headline,
+                body=slide.body,
+                items=slide.items,
+                image=data_uri(generated.image),
+                logo=render_logo,
+                brand=tokens,
+            )
         )
-        for slide, scene in zip(copy.slides, scenes, strict=True)
-    ]
     return list(await asyncio.gather(*(renderer.render(request) for request in requests)))
 
 

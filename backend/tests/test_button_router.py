@@ -16,7 +16,7 @@ from app.conversation.events import (
 from app.conversation.outbound import buttons
 from app.conversation.photos import InMemoryPhotos
 from app.copy import messages_es
-from app.media.public import PublicImages
+from app.media.public import PublicImages, PublicVideos
 from app.posts.drafts import PostCopy, PostDrafter
 from app.posts.lifecycle import PostLifecycle
 from app.posts.maker import PostMaker
@@ -69,6 +69,7 @@ class Rig:
             ACCOUNT,
             background=self.background,
             shared_account=shared_account,
+            videos=PublicVideos(),
         )
         self.events: list[object] = []
         self.channel = FakeChannel()

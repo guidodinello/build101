@@ -29,6 +29,16 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
+    # Majors that break the toolchain, bumped by hand when it catches up:
+    # typescript-eslint doesn't support TS 7 yet, eslint-config-next's plugins
+    # cap their eslint peer at ^9, and @types/node should track the Node we run.
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       frontend-dependencies:
         patterns:

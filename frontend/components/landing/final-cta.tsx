@@ -26,6 +26,8 @@ export function FinalCta() {
       </Bubble>
       <a
         href={WHATSAPP_START_URL}
+        target="_blank"
+        rel="noopener noreferrer"
         className="group mt-7 flex items-center gap-3 rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ld-accent/70 focus-visible:ring-offset-4 focus-visible:ring-offset-ld-forest"
       >
         <span className="flex min-h-16.5 min-w-0 flex-1 items-center rounded-full bg-white/9 px-5 text-base font-medium text-ld-on-dark-muted shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)] transition-colors group-hover:bg-white/12 sm:px-7 sm:text-[19px]">

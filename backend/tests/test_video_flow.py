@@ -161,8 +161,8 @@ def test_flag_off_builds_no_video_maker_and_flag_on_builds_one(
     off = Settings(inbound_handler="chat", gemini_api_key="k", public_backend_url=BASE_URL)
     on = off.model_copy(update={"video_gen_enabled": True, "video_gen": "mock"})
 
-    build_conversation(off, PublicImages(), FakePublisher())
-    build_conversation(on, PublicImages(), FakePublisher())
+    build_conversation(off, PublicImages(), FakePublisher(), PublicVideos())
+    build_conversation(on, PublicImages(), FakePublisher(), PublicVideos())
 
     chat_off, chat_on = built
     assert chat_off.video_maker is None
