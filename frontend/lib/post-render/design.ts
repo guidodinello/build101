@@ -131,9 +131,7 @@ async function measureText(design: Design, request: Fit, size: number) {
     { style: { display: "flex", width: request.width, textWrap: "balance", ...request.style(size) } },
     request.text,
   );
-  const measured = (await measure(node, { renderer: design.renderer, width: WIDTH, height: HEIGHT * 3 })) as MeasuredLike & {
-    height: number;
-  };
+  const measured = await measure(node, { renderer: design.renderer, width: WIDTH, height: HEIGHT * 3 });
   return { ...lineCount(measured), height: measured.height };
 }
 

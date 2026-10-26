@@ -1,4 +1,9 @@
+from typing import Literal
+
 from .schemas import CarouselBrief, CarouselCopy, Layout, SlideRole, SlideScene, TemplateFamily
+
+# What the renderer draws: a requested layout, or one a family picks per role
+ResolvedLayout = Layout | SlideRole | Literal["circle", "window-content"]
 
 FIXED_RULES = """Rules:
 - Show the real product from the product reference images exactly as it is: keep its shape, \
@@ -12,7 +17,7 @@ CALM_BACKGROUND = "one clear subject, centered, on a simple, uncluttered backgro
 # Where each layout shows the scene, and so what the 4:5 photo must leave calm or keep away from
 # the crop (ADR 0029, ADR 0035). Keys are the layouts each family resolves to, as in
 # frontend/lib/post-render/families/*.tsx.
-FRAMING: dict[tuple[TemplateFamily, str], str] = {
+FRAMING: dict[tuple[TemplateFamily, ResolvedLayout], str] = {
     ("editorial", "overlay"): (
         "Full-bleed vertical 4:5 photo. The headline is set over the lower 40% of the frame, "
         "so keep that area calm and uncluttered (floor, wall, tabletop, soft shadow) and place "
@@ -134,15 +139,18 @@ def build_panorama_prompt(brief: CarouselBrief, copy: CarouselCopy) -> str:
     return "\n\n".join(sections)
 
 
+CTA_LAYOUTS: dict[TemplateFamily, ResolvedLayout] = {"editorial": "card", "numbers": "circle"}
+
+
 def resolved_layout(
     family: TemplateFamily, role: SlideRole, layout: Layout, items: list[str]
-) -> str:
+) -> ResolvedLayout:
     """The layout the renderer draws (frontend/lib/post-render/families/*.tsx resolve the same)."""
     match family, role:
         case "panorama", _:
             return role
         case _, "cta":
-            return {"editorial": "card", "numbers": "circle"}.get(family, "cta")
+            return CTA_LAYOUTS.get(family, "cta")
         case "editorial", "cover":
             return "frame" if layout == "frame" else "overlay"
         case "editorial", _:
@@ -165,7 +173,7 @@ def resolved_layout(
             return "polaroid"
 
 
-def framing(family: TemplateFamily, layout: str) -> str:
+def framing(family: TemplateFamily, layout: ResolvedLayout) -> str:
     """A one-slide panorama has nothing to span, so it is framed like an editorial cover."""
     if family == "panorama":
         return FRAMING[("editorial", "overlay")]

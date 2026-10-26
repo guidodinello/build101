@@ -85,7 +85,6 @@ export class ImageRejectedError extends SpecError {
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const IMAGE_DATA_URI = /^data:image\/(jpeg|png|webp);base64,/;
-const COLOR_KEYS = ["primary", "secondary", "accent", "background", "text"] as const;
 const LIMITS = { kicker: 40, headline: 120, body: 320, item: 80, name: 80 };
 
 type Json = Record<string, unknown>;
@@ -161,13 +160,18 @@ function headerBytes(dataUri: string): Uint8Array {
 
 function colors(value: unknown): BrandColors {
   if (!isObject(value)) throw new SpecError("brand.colors must be an object");
-  const parsed = {} as BrandColors;
-  for (const key of COLOR_KEYS) {
-    const color = value[key];
-    if (typeof color !== "string" || !HEX.test(color)) throw new SpecError(`brand.colors.${key} must be #RRGGBB`);
-    parsed[key] = color.toUpperCase();
-  }
-  return parsed;
+  return {
+    primary: hexColor(value.primary, "primary"),
+    secondary: hexColor(value.secondary, "secondary"),
+    accent: hexColor(value.accent, "accent"),
+    background: hexColor(value.background, "background"),
+    text: hexColor(value.text, "text"),
+  };
+}
+
+function hexColor(value: unknown, key: keyof BrandColors): string {
+  if (typeof value !== "string" || !HEX.test(value)) throw new SpecError(`brand.colors.${key} must be #RRGGBB`);
+  return value.toUpperCase();
 }
 
 function logo(value: unknown): Logo | null {
