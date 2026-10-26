@@ -253,6 +253,26 @@ async def test_the_senders_trend_notes_reach_the_draft(photos: InMemoryPhotos) -
     assert '"- [hook] Pieza heredable."' in model.structured_calls[0][0]["text"]
 
 
+async def test_the_latest_kept_captions_reach_the_draft_newest_first(
+    photos: InMemoryPhotos,
+) -> None:
+    model = ScriptedModel(drafts={PostCopy: PostCopy(caption="Mesa", hashtags=[])})
+    store = PostLifecycle()
+    for n, status in enumerate(["published", "discarded", "published", "pending_approval"], 1):
+        store.add(
+            Post(f"p{n}", SENDER, [PostImage("a.jpg", b"x")], f"Caption {n}", status=status)  # pyright: ignore[reportArgumentType]
+        )
+    posts, background = maker(model, CountingImageGen(), photos, store=store)
+    posts.create_post(
+        SENDER, {"brief": "mesa", "asset_ids": ["f1"], "style": "photos"}, FakeChannel(), drop
+    )
+    await background.join()
+
+    request = model.structured_calls[0][0]["text"]
+    assert request.index("Caption 4") < request.index("Caption 3") < request.index("Caption 1")
+    assert "Caption 2" not in request
+
+
 async def test_one_photo_is_a_single_image_post_without_numbering(photos: InMemoryPhotos) -> None:
     model = ScriptedModel(
         drafts={

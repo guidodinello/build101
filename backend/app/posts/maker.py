@@ -29,7 +29,7 @@ from app.rendering.slides import render_slides
 from .critic import DesignCritic, Revision, changed, revise
 from .drafts import PostDrafter, PreviousPost
 from .lifecycle import PostLifecycle
-from .store import Post, PostImage
+from .store import Post, PostImage, PostStatus
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,10 @@ class Remake:
 
     previous: PreviousPost
     images: list[bytes] | None = None  # set when only the caption changes
+
+
+RECENT_CAPTIONS = 3
+SKIPPED_FOR_VARIETY: frozenset[PostStatus] = frozenset({"discarded", "failed", "replaced"})
 
 
 class PostMaker:
@@ -228,6 +232,7 @@ class PostMaker:
                 [note.text for note in known.notes],
                 remake,
                 known.trend_notes,
+                self._recent_captions(sender, post_id, remake),
             )
             paths = await self._send(sender, post.images, post.text, channel)
             self._keep(sender, post_id, args, photos, paths, post)
@@ -257,6 +262,18 @@ class PostMaker:
         # failed post that the Owner already has.
         await notify(sender, event, channel)
 
+    def _recent_captions(self, sender: str, current_id: str, remake: Remake | None) -> list[str]:
+        """The texts of the sender's latest Posts that were kept or may still be approved."""
+        remade = remake.previous.text if remake else None
+        kept = [
+            post.caption
+            for post in self._posts.all(sender)
+            if post.id != current_id
+            and post.caption != remade
+            and post.status not in SKIPPED_FOR_VARIETY
+        ]
+        return kept[-RECENT_CAPTIONS:][::-1]
+
     async def _known(self, sender: str) -> BusinessKnowledge:
         """What the Agency knows about the sender's Business; a post makes do with nothing."""
         if self._knowledge is None:
@@ -272,6 +289,7 @@ class PostMaker:
         notes: list[str] | None = None,
         remake: Remake | None = None,
         trend_notes: str | None = None,
+        recent_captions: list[str] | None = None,
     ) -> RenderedPost:
         """The post's images in order (one per photo, unless a design asks for a slide count).
 
@@ -290,7 +308,7 @@ class PostMaker:
             )
         if args.style == "photos":
             copy = await self._drafter.copy(
-                args.brief, references, brand, notes, previous, trend_notes
+                args.brief, references, brand, notes, previous, trend_notes, recent_captions
             )
             images = [await asyncio.to_thread(to_post_image, data) for data in references]
             return RenderedPost(
@@ -307,6 +325,7 @@ class PostMaker:
             notes,
             previous,
             trend_notes,
+            recent_captions,
         )
         style_prompt = brief.style_prompt
         one_per_photo = len(photos) == count
