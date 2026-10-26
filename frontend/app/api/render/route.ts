@@ -1,11 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { RENDER_REPORT_HEADER, reportHeader } from "@/lib/post-render/design";
 import { renderSlide } from "@/lib/post-render/render";
-import { ImageRejectedError, SpecError, parseSlideSpec } from "@/lib/post-render/spec";
-
-// The backend sends a scene and a logo as data URIs, at most about 3.1 MB together; Vercel itself
-// rejects bodies over 4.5 MB.
-const MAX_BODY_BYTES = 4_000_000;
+import { ImageRejectedError, MAX_BODY_BYTES, SpecError, parseSlideSpec } from "@/lib/post-render/spec";
 
 function authorized(request: Request): boolean {
   const secret = process.env.RENDER_SECRET;
