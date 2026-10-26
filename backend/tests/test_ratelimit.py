@@ -1,9 +1,11 @@
 import asyncio
+import logging
 from dataclasses import dataclass, field
 
 import pytest
 
-from app.channels.base import ChannelError, ChannelPort, InboundMessage
+from app.background import BackgroundWork
+from app.channels.base import ChannelError, ChannelPort, InboundMedia, InboundMessage
 from app.channels.inbound import EchoHandler, RateLimitedHandler
 from app.channels.router import get_conversation, get_inbound_handler
 from app.config import Settings
@@ -26,6 +28,17 @@ class Clock:
 def text(sender: str = "59899000001", message_id: str = "wamid.1") -> InboundMessage:
     return InboundMessage(
         kind="text", message_id=message_id, sender=sender, phone_number_id="1", text="hola", raw={}
+    )
+
+
+def photo(sender: str = "59899000001", message_id: str = "wamid.photo") -> InboundMessage:
+    return InboundMessage(
+        kind="image",
+        message_id=message_id,
+        sender=sender,
+        phone_number_id="1",
+        media=InboundMedia(media_id=f"media.{message_id}", mime_type="image/jpeg"),
+        raw={},
     )
 
 
@@ -142,7 +155,23 @@ def limited(
 ) -> tuple[RateLimitedHandler, RecordingHandler]:
     inner = RecordingHandler()
     limiter = RateLimiter(burst=burst, per_minute=60, clock=clock or Clock())
-    return RateLimitedHandler(inner, limiter, NOTICE), inner
+    return RateLimitedHandler(inner, limiter, NOTICE, background=BackgroundWork()), inner
+
+
+def photo_limited(
+    photo_burst: int, background: BackgroundWork, clock: Clock | None = None
+) -> tuple[RateLimitedHandler, RecordingHandler]:
+    clock = clock or Clock()
+    inner = RecordingHandler()
+    handler = RateLimitedHandler(
+        inner,
+        RateLimiter(burst=1, per_minute=60, clock=clock),
+        NOTICE,
+        photos=RateLimiter(burst=photo_burst, per_minute=60, clock=clock),
+        background=background,
+        dropped_photos_delay_s=0,
+    )
+    return handler, inner
 
 
 async def test_a_turn_over_the_limit_gets_a_short_reply_and_never_reaches_the_handler() -> None:
@@ -216,6 +245,7 @@ async def test_an_album_flood_stops_reaching_the_handler_and_gets_no_notice() ->
         RateLimiter(burst=30, per_minute=10, clock=clock),
         NOTICE,
         albums=RateLimiter(burst=5, per_minute=2, clock=clock),
+        background=BackgroundWork(),
     )
     channel = FakeChannel()
 
@@ -231,6 +261,96 @@ async def test_an_album_flood_stops_reaching_the_handler_and_gets_no_notice() ->
 
     await handler.handle(text(), channel)  # albums don't touch the turn bucket
     assert len(inner.handled) == 7
+
+
+async def test_photos_do_not_spend_turns() -> None:
+    background = BackgroundWork()
+    handler, inner = photo_limited(photo_burst=50, background=background)
+    channel = FakeChannel()
+
+    for number in range(40):
+        await handler.handle(photo(message_id=f"wamid.p{number}"), channel)
+    await handler.handle(text(), channel)  # the turn bucket (burst 1) is still full
+    await background.join()
+
+    assert len(inner.handled) == 41
+    assert channel.sent == []
+
+
+async def test_photos_over_their_limit_are_logged_and_counted_to_the_owner_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    background = BackgroundWork()
+    handler, inner = photo_limited(photo_burst=3, background=background)
+    channel = FakeChannel()
+
+    with caplog.at_level(logging.WARNING, logger="app.channels.inbound"):
+        for number in range(7):
+            await handler.handle(photo(message_id=f"wamid.p{number}"), channel)
+        await background.join()
+
+    assert [m.message_id for m in inner.handled] == ["wamid.p0", "wamid.p1", "wamid.p2"]
+    assert channel.sent == [("59899000001", messages_es.photos_not_received(4))]
+    for number in range(3, 7):
+        assert f"wamid.p{number}" in caplog.text
+
+
+async def test_each_stretch_of_dropped_photos_gets_its_own_count() -> None:
+    clock = Clock()
+    background = BackgroundWork()
+    handler, _ = photo_limited(photo_burst=1, background=background, clock=clock)
+    channel = FakeChannel()
+
+    for number in range(3):
+        await handler.handle(photo(message_id=f"wamid.a{number}"), channel)
+    await background.join()
+    clock.now += 1  # one photo a second: one token is back
+    for number in range(2):
+        await handler.handle(photo(message_id=f"wamid.b{number}"), channel)
+    await background.join()
+
+    assert [text for _, text in channel.sent] == [
+        messages_es.photos_not_received(2),
+        messages_es.photos_not_received(1),
+    ]
+
+
+async def test_dropped_photos_are_counted_per_sender() -> None:
+    background = BackgroundWork()
+    handler, _ = photo_limited(photo_burst=1, background=background)
+    channel = FakeChannel()
+
+    for sender, count in (("59899000001", 3), ("59899000002", 2)):
+        for number in range(count):
+            await handler.handle(photo(sender, message_id=f"wamid.{sender}.{number}"), channel)
+    await background.join()
+
+    assert sorted(channel.sent) == [
+        ("59899000001", messages_es.photos_not_received(2)),
+        ("59899000002", messages_es.photos_not_received(1)),
+    ]
+
+
+async def test_a_failing_dropped_photos_notice_is_only_logged() -> None:
+    class BrokenChannel(FakeChannel):
+        async def send_text(self, to: str, text: str) -> str:
+            raise ChannelError("kapso 500")
+
+    background = BackgroundWork()
+    handler, _ = photo_limited(photo_burst=1, background=background)
+    channel = BrokenChannel()
+
+    for number in range(2):
+        await handler.handle(photo(message_id=f"wamid.p{number}"), channel)
+    await background.join()
+
+    await handler.handle(text(), channel)  # still usable
+    assert channel.sent == []
+
+
+def test_the_photo_notice_counts_in_spanish() -> None:
+    assert messages_es.photos_not_received(1).startswith("No me llegó 1 foto")
+    assert messages_es.photos_not_received(4).startswith("No me llegaron 4 fotos")
 
 
 async def test_a_failing_notice_does_not_break_the_webhook_task() -> None:

@@ -19,6 +19,10 @@ MAX_TRACKED_KEYS = 10_000
 # reaches the refill.
 TURNS_BURST = 30
 TURNS_PER_MINUTE = 10
+# A photo costs no turn (photos are answered together, after a pause) but is stored and analyzed,
+# so it has a bucket of its own: two large albums fit in the burst.
+PHOTOS_BURST = 60
+PHOTOS_PER_MINUTE = 20
 # An album announcement costs no turn, but a sender can't send them without end either.
 ALBUM_BURST = 5
 ALBUM_PER_MINUTE = 2
