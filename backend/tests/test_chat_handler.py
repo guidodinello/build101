@@ -180,6 +180,59 @@ async def test_text_gets_the_model_reply_with_typing() -> None:
     assert model.tools_seen[0] and model.tools_seen[0][0]["name"] == "create_post"
 
 
+async def test_reaction_is_read_without_typing_or_a_model_turn() -> None:
+    model, channel = ScriptedModel(), FakeChannel()
+    reaction = message(
+        "text",
+        kind="reaction",
+        reaction_emoji="❤️",
+        reaction_message_id="wamid.TARGET",
+    )
+
+    await build(model)[0].handler.handle(reaction, channel)
+
+    assert channel.read == [(reaction.message_id, False)]
+    assert channel.sent == []
+    assert model.calls == []
+
+
+async def test_reaction_does_not_cancel_a_waiting_photo_batch() -> None:
+    model, channel = ScriptedModel(), FakeChannel()
+    chat, background = build(model)
+    await chat.handler.handle(message("image"), channel)
+    reaction = message("text", kind="reaction")
+
+    await chat.handler.handle(reaction, channel)
+    await background.join()
+
+    assert channel.read == [(reaction.message_id, False), (reaction.message_id, True)]
+    assert len(model.calls) == 1
+    assert channel.sent == [(SENDER, REPLY_TEXT)]
+
+
+async def test_yes_reaction_to_the_exact_publish_question_starts_publish() -> None:
+    model, channel = ScriptedModel(), FakeChannel()
+    chat, background = build(model)
+    post = Post("p1", SENDER, [PostImage("/media/p1.jpg", b"jpeg")], "Mesa de roble")
+    chat.lifecycle.add(post)
+    chat.lifecycle.note_reply(SENDER, "¡Listo! ¿Lo subo?", post.id)
+    chat.lifecycle.note_sent(SENDER, "wamid.OUT")
+    reaction = message(
+        "text",
+        kind="reaction",
+        reaction_emoji="👍",
+        reaction_message_id="wamid.OUT",
+    )
+
+    await chat.handler.handle(reaction, channel)
+
+    assert post.status == "publishing"
+    assert channel.read == [(reaction.message_id, False)]
+    assert channel.sent == []
+    assert model.calls == []
+    await background.join()
+
+
 async def test_second_turn_resends_history_with_thought_steps() -> None:
     model, channel = ScriptedModel(), FakeChannel()
     chat, _ = build(model)

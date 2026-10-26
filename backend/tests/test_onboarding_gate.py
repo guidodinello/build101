@@ -83,6 +83,19 @@ async def test_an_unknown_number_gets_the_welcome(rig: Rig) -> None:
     assert rig.chat.handled == []
 
 
+async def test_a_reaction_during_onboarding_is_silent_and_never_becomes_the_name(
+    rig: Rig,
+) -> None:
+    reaction = message("text", kind="reaction", reaction_emoji="👍")
+
+    await rig.gate.handle(reaction, rig.channel)
+
+    assert rig.channel.sent == []
+    assert rig.channel.read == [(reaction.message_id, False)]
+    assert await rig.business() is None
+    assert rig.chat.handled == []
+
+
 async def test_the_name_is_saved_and_the_link_sent(rig: Rig) -> None:
     await rig.gate.handle(text("Hola"), rig.channel)
     await rig.gate.handle(text("  Muebles Ramírez ", after_the_welcome()), rig.channel)
