@@ -65,9 +65,15 @@ export type SlideSpec = {
   brand: Brand;
 };
 
+// The backend sends a scene and a logo as data URIs, at most about 3.1 MB together; Vercel itself
+// rejects bodies over 4.5 MB.
+export const MAX_BODY_BYTES = 4_000_000;
+// Everything but the two images: the text fields at their limits, even fully \u-escaped, take a few KB.
+const SPEC_OVERHEAD_BYTES = 64_000;
 // A scene is 1080×1350 and its logo at most 600 px (backend `media/images.py`); a worst-case noise
-// JPEG is a 1.25 MB data URI and a noise PNG logo 1.8 MB, so 2.5 MB leaves headroom.
-export const MAX_DATA_URI_CHARS = 2_500_000;
+// JPEG is a 1.25 MB data URI and a noise PNG logo 1.8 MB. A slide carries up to two images, so both at
+// this cap still fit the body cap, and an oversized image gets 422 rather than 413.
+export const MAX_DATA_URI_CHARS = Math.floor((MAX_BODY_BYTES - SPEC_OVERHEAD_BYTES) / 2);
 export const MAX_IMAGE_SIDE = 4096;
 const HEADER_BASE64_CHARS = 65_536;
 
