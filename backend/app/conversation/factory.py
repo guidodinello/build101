@@ -71,6 +71,7 @@ class ChatParts:
     renderer: RendererPort
     publisher: PublisherPort
     images: PublicImages
+    videos: PublicVideos
     background: BackgroundWork
     public_backend_url: str
     account_id: str | None
@@ -88,7 +89,6 @@ class ChatParts:
     sessions: async_sessionmaker[AsyncSession] | None = None
     # None while VIDEO_GEN_ENABLED is off: no maker, so no tool and no Veo call (ADR 0033).
     video_gen: VideoGenPort | None = None
-    videos: PublicVideos | None = None
     photo_debounce_s: float = PHOTO_DEBOUNCE_S
     keep_alive_s: float = KEEP_ALIVE_S
     publish_sleep: Sleep | None = None
@@ -141,7 +141,7 @@ def build_chat(parts: ChatParts) -> Chat:
         critic=parts.critic,
         background=background,
     )
-    public_videos = parts.videos or PublicVideos()
+    public_videos = parts.videos
     public_videos.serve_from(store.video)
     publishing = PostPublisher(
         parts.publisher,
@@ -218,7 +218,7 @@ def build_conversation(
     settings: Settings,
     images: PublicImages,
     publisher: PublisherPort,
-    videos: PublicVideos | None = None,
+    videos: PublicVideos,
 ) -> Conversation:
     match settings.inbound_handler:
         case "chat":

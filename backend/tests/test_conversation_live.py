@@ -20,7 +20,7 @@ from app.conversation.notes import InMemoryNotes
 from app.conversation.photos import InMemoryPhotos
 from app.knowledge.base import BusinessKnowledge, CatalogItem
 from app.llm.client import GeminiChat
-from app.media.public import PublicImages
+from app.media.public import PublicImages, PublicVideos
 from app.posts.lifecycle import PostLifecycle
 from app.posts.store import Post, PostImage
 from app.publishing.mock import MOCK_ACCOUNT_ID, MockPublisher
@@ -93,6 +93,7 @@ def rig(compactor_budget: tuple[int, int] | None = None) -> Rig:
             renderer=MockRenderer(),
             publisher=MockPublisher(delay_s=0),
             images=PublicImages(),
+            videos=PublicVideos(),
             background=background,
             public_backend_url="https://backend.test",
             account_id=MOCK_ACCOUNT_ID,
