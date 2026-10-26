@@ -202,6 +202,7 @@ def logo_backing(behind: Image.Image, mark: Image.Image) -> tuple[int, int, int]
         if alpha.getextrema()[1] >= OPAQUE_ALPHA  # pyright: ignore[reportOperatorIssue]
         else 1
     )
+    # Pillow stubs type the `point()` callback's argument as `ImagePointTransform`; it gets ints.
     shape = alpha.point(
         lambda value: 255 if value >= threshold else 0  # pyright: ignore[reportOperatorIssue]
     )

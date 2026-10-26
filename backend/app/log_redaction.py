@@ -1,5 +1,6 @@
 import logging
 import re
+from typing import override
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
@@ -45,6 +46,7 @@ class RedactQueryTokens(logging.Filter):
     only exists once the record is formatted: rewrite the args instead.
     """
 
+    @override
     def filter(self, record: logging.LogRecord) -> bool:
         if isinstance(record.args, tuple):
             record.args = tuple(_redact_arg(arg) for arg in record.args)
@@ -63,6 +65,7 @@ class RedactAccessLog(logging.Filter):
     """Masks tokens in uvicorn's access lines, which log `%s - "%s %s HTTP/%s" %d` with the
     request target (path and query) as the third arg."""
 
+    @override
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
         if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
