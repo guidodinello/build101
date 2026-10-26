@@ -16,7 +16,7 @@ from app.carousel.schemas import (
     Surface,
 )
 from app.llm.client import Content, StructuredModel, image_content, text_content
-from app.media.images import review_copy
+from app.media.images import decode, review_copy
 from app.rendering.base import RenderedSlide
 
 logger = logging.getLogger(__name__)
@@ -64,9 +64,7 @@ class DesignCritic:
     async def review(
         self, copy: CarouselCopy, brief: CarouselBrief, slides: list[RenderedSlide]
     ) -> DesignReview:
-        previews = await asyncio.gather(
-            *(asyncio.to_thread(review_copy, slide.image) for slide in slides)
-        )
+        previews = await asyncio.gather(*(decode(review_copy, slide.image) for slide in slides))
         content: list[Content] = [
             text_content(slide_sheet(copy, brief, slides)),
             *(image_content(preview, "image/jpeg") for preview in previews),
