@@ -34,6 +34,11 @@ Messages for the Owner. Since [ADR 0026](../decisions/0026-owner-messages-from-t
 | `welcome` | Flow 1, first message | ¡Hola! 👋 Soy {assistant_name}, tu agencia de marketing en WhatsApp. Te ayudo a planear, crear y publicar contenido para tus redes, y *nada se publica sin que vos lo apruebes*. ¿Cómo se llama tu negocio? | — |
 | `name_ack_link` | Flow 1, name received | ¡Buenísimo, {business_name}! Para conocer tu marca necesito unos datos y algunas fotos. Son 5 minutos desde el celu 👇 {onboarding_url} | — |
 | `link_reminder` | Message while `awaiting_web_form` | Para arrancar me falta que completes esto (5 min) 👇 {onboarding_url} | — |
+| `photos_kept` | Photos sent before the form is submitted (Flow 1, step 6), the first part of each reply below; plural for an album | Guardé la foto para usarla en tus posts 📸 / Guardé las fotos para usarlas en tus posts 📸 | — |
+| `welcome_with_photos` | Photos as the first message | The `welcome` with `photos_kept` before its question | — |
+| `photos_kept_ask_name` | Photos while `awaiting_name` | {photos_kept} Antes, contame: ¿cómo se llama tu negocio? | — |
+| `photos_kept_link` | Photos while `awaiting_web_form`, reminder due | {photos_kept} {link_reminder} | — |
+| `photos_kept_form` | Photos while `awaiting_web_form`, within the reminder cooldown | {photos_kept} Cuando completes el formulario que te mandé, arrancamos. | — |
 | `waitlist` | Any message from a number not on the pilot list (#186), whatever it sends and whatever its Business: at most once a day per number, then nothing. Fixed text, no model turn | ¡Hola! 👋 Gracias por escribirnos. {assistant_name} está en un piloto cerrado con pocos negocios. Cuando abramos más lugares lo vas a ver en nuestra web. | — |
 | `brand_generating` *(verbatim event `BrandGenerating`: fixed text, no model turn)* | Form submitted | ¡Gracias! Estoy estudiando tu marca, en un minuto te cuento lo que entendí ⏳ | — |
 | `brand_summary` | Flow 3, sent by the `generate_brand` job | Esto es lo que entendí de *{business_name}* 👇 {summary} ¿Es así? (`{summary}` is the Brand Strategist's own text, so this is a verbatim event, `BrandSummaryReady`: a fixed frame, no model turn, ADR 0026) | `brand_ok` "Sí, es mi marca" · `brand_fix` "Corregir algo" |

@@ -41,7 +41,7 @@ from .events import Notify
 from .history import Compactor, DbHistory, History, InMemoryHistory
 from .library import BrandLibrary
 from .notes import DbNotes, InMemoryNotes, OwnerNotes
-from .onboarding import OnboardingGate
+from .onboarding import EarlyPhotos, OnboardingGate
 from .outbound import FixedReplies
 from .photo_batches import PHOTO_DEBOUNCE_S, PhotoBatches
 from .photo_keeper import PhotoKeeper
@@ -290,8 +290,29 @@ def build_conversation(
             )
             if sessions is None:
                 return Conversation(chat.handler, chat.notify)
+            # Photos sent before the form are kept as Brand assets, so only with Storage. Its
+            # replies are fixed copy, like the rest of the gate's.
+            early_photos = (
+                EarlyPhotos(
+                    PhotoBatches(
+                        InMemoryPhotos(),
+                        None,
+                        settings.max_photo_mb,
+                        FixedReplies(history),
+                        background=chat.background,
+                    ),
+                    PhotoKeeper(model, sessions, storage),
+                    chat.background,
+                )
+                if storage
+                else None
+            )
             gate = OnboardingGate(
-                chat.handler, sessions, settings.frontend_url, settings.assistant_name
+                chat.handler,
+                sessions,
+                settings.frontend_url,
+                settings.assistant_name,
+                photos=early_photos,
             )
             return Conversation(gate, chat.notify)
         case "echo":
