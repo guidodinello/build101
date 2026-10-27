@@ -6,9 +6,10 @@ here when a task starts writing it.
 
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Numeric, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -199,3 +200,33 @@ class PilotSender(Base):
 
     phone: Mapped[str] = mapped_column(primary_key=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class AgentRun(Base):
+    """One model call: what it used and its estimated cost (T10, #205). `app.llm.ledger` writes
+    it in batches, off the request path; rows are never updated."""
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    business_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("businesses.id"))
+    job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("jobs.id"))
+    post_id: Mapped[str | None]
+    agent: Mapped[str]
+    model: Mapped[str]
+    effort: Mapped[str | None]
+    service_tier: Mapped[str | None]
+    input: Mapped[dict[str, Any] | None]
+    output: Mapped[dict[str, Any] | None]
+    stop_reason: Mapped[str | None]
+    input_tokens: Mapped[int | None]
+    cache_read_tokens: Mapped[int | None]
+    thought_tokens: Mapped[int | None]
+    output_tokens: Mapped[int | None]
+    image_size: Mapped[str | None]
+    image_count: Mapped[int | None]
+    video_seconds: Mapped[int | None]
+    latency_ms: Mapped[int | None]
+    error: Mapped[str | None]
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    created_at: Mapped[datetime]

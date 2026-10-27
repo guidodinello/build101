@@ -20,6 +20,7 @@ from app.copy import messages_es
 from app.imagegen.base import ImageGenError, ImageGenPort
 from app.knowledge.base import BusinessKnowledge, Knowledge
 from app.llm.client import LLMError
+from app.llm.ledger import scoped
 from app.media.images import UnreadableImage, add_logo, decode, to_post_image
 from app.media.public import PublicImages
 from app.rendering.base import RenderedSlide, RendererError, RendererPort
@@ -198,10 +199,11 @@ class PostMaker:
         for photo in photos:
             photo.used = True
         post_id = uuid.uuid4().hex[:8]
-        self._background.start(
-            self._generate(sender, post_id, args, photos, logo, channel, notify, remake),
-            f"post {post_id} for {mask(sender)}",
-        )
+        with scoped(post_id=post_id):
+            self._background.start(
+                self._generate(sender, post_id, args, photos, logo, channel, notify, remake),
+                f"post {post_id} for {mask(sender)}",
+            )
         return {"post_id": post_id, "status": "generating"}
 
     async def _generate(

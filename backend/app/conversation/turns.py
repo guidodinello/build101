@@ -30,6 +30,7 @@ from app.llm.client import (
     text_content,
     user_step,
 )
+from app.llm.ledger import scoped
 from app.posts.lifecycle import PostLifecycle
 from app.prompts import escape, load_prompt
 from app.storage import StorageError
@@ -158,8 +159,9 @@ class Turns:
         may not have it.
         """
         try:
-            async with self._history.lock(sender):
-                await self.event_turn(sender, event, channel)
+            with scoped(sender=sender):
+                async with self._history.lock(sender):
+                    await self.event_turn(sender, event, channel)
         except Exception:
             if verbatim(event):
                 raise

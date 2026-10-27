@@ -17,6 +17,7 @@ from app.knowledge.db import DbKnowledge
 from app.knowledge.local import LocalKnowledge, load_trend_notes
 from app.llm.client import ChatModel, GeminiChat, StructuredModel
 from app.llm.factory import build_structured
+from app.llm.ledger import MeteredChat, get_ledger
 from app.media.public import PublicImages, PublicVideos
 from app.posts.critic import DesignCritic
 from app.posts.drafts import PostDrafter
@@ -229,7 +230,11 @@ def build_conversation(
                     "INBOUND_HANDLER=chat needs PUBLIC_BACKEND_URL: WhatsApp fetches the "
                     "post images from it"
                 )
-            model = GeminiChat.from_api_key(settings.gemini_api_key, settings.gemini_chat_model)
+            model = MeteredChat(
+                GeminiChat.from_api_key(settings.gemini_api_key, settings.gemini_chat_model),
+                settings.gemini_chat_model,
+                get_ledger(),
+            )
             account_id = settings.zernio_account_id or (
                 MOCK_ACCOUNT_ID if settings.publisher == "mock" else None
             )
