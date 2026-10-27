@@ -154,19 +154,6 @@ class PilotGate:
         self._replied = TtlMap[bool](reply_every_s, max_keys, clock)
 
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
-        if message.kind == "reaction":
-            try:
-                allowed = await self._pilot.allows(message.sender)
-            except DATABASE_DOWN:
-                logger.exception(
-                    "pilot list unavailable, dropping reaction from %s", mask(message.sender)
-                )
-                return
-            if allowed:
-                await self._inner.handle(message, channel)
-            else:
-                await mark_read(message.message_id, channel, typing=False)
-            return
         try:
             allowed = await self._pilot.allows(message.sender)
         except DATABASE_DOWN:
@@ -177,6 +164,8 @@ class PilotGate:
         if allowed:
             await self._inner.handle(message, channel)
             return
+        if message.kind == "reaction":
+            await mark_read(message.message_id, channel, typing=False)
         number = phone_digits(message.sender)
         if self._replied.get(number):
             logger.info("%s from %s dropped: not on the pilot list", message.kind, mask(number))

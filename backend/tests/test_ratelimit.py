@@ -29,6 +29,16 @@ def text(sender: str = "59899000001", message_id: str = "wamid.1") -> InboundMes
     )
 
 
+def reaction(sender: str = "59899000001", message_id: str = "wamid.reaction") -> InboundMessage:
+    return text(sender, message_id).model_copy(
+        update={
+            "kind": "reaction",
+            "reaction_emoji": "👍",
+            "reaction_message_id": "wamid.target",
+        }
+    )
+
+
 def album(sender: str = "59899000001") -> InboundMessage:
     return InboundMessage(
         kind="album", message_id="wamid.album", sender=sender, phone_number_id="1", raw={}
@@ -182,6 +192,17 @@ async def test_senders_are_limited_one_by_one() -> None:
     await handler.handle(text("59899000002"), channel)
 
     assert [m.sender for m in inner.handled] == ["59899000001", "59899000002"]
+
+
+async def test_reactions_spend_a_turn_token_and_are_limited_with_other_messages() -> None:
+    handler, inner = limited(burst=1)
+    channel = FakeChannel()
+
+    await handler.handle(reaction(message_id="wamid.first"), channel)
+    await handler.handle(reaction(message_id="wamid.over"), channel)
+
+    assert [m.message_id for m in inner.handled] == ["wamid.first"]
+    assert channel.sent == [("59899000001", NOTICE)]
 
 
 async def test_an_album_announcement_is_free() -> None:

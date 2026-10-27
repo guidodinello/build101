@@ -154,9 +154,6 @@ class RateLimitedHandler:
         self._notified: OrderedDict[str, None] = OrderedDict()
 
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
-        if message.kind == "reaction":
-            await self._inner.handle(message, channel)
-            return
         if message.kind == "album":
             if self._albums.take(message.sender):
                 await self._inner.handle(message, channel)

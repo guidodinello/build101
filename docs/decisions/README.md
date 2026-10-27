@@ -25,7 +25,7 @@ When an ADR is superseded, set its Status to `superseded`, add `- Superseded by:
 | [0004](0004-frontend-nextjs-vercel.md) | Frontend in Next.js on Vercel | proposed; hand-written REST types superseded by [0034](0034-zod-api-response-schemas.md) | 2026-10-17 |
 | [0005](0005-single-instance-in-process-jobs.md) | One backend instance with in-process jobs for the MVP | proposed | 2026-10-17 |
 | [0006](0006-fixed-agent-catalog-brand-brain.md) | Fixed agent catalog personalized by a Brand Brain | proposed | 2026-10-17 |
-| [0007](0007-approve-every-post.md) | Every post needs explicit approval | proposed | 2026-10-17 |
+| [0007](0007-approve-every-post.md) | Every post needs explicit approval | proposed; reaction approval implemented in [PR #235](https://github.com/sejalk19/build101/pull/235) for [issue #203](https://github.com/sejalk19/build101/issues/203) | 2026-10-17 |
 | [0008](0008-publishing-via-zernio.md) | Publish through Zernio | proposed | 2026-10-17 |
 | [0009](0009-branded-templates-over-real-photos.md) | Branded HTML templates over the Owner's real photos | superseded by [0018](0018-ai-image-generation-service.md) | 2026-10-17 |
 | [0010](0010-anthropic-sdk-own-orchestration.md) | Anthropic SDK with our own orchestration | superseded | 2026-10-17 |
