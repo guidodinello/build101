@@ -85,7 +85,7 @@ class _Turn:
     with_photos: bool  # refresh the library, attach the unseen photos, keep the Owner posted
     owner_request: bool  # whether the tools that act on the Owner's words are allowed
     thinking: ThinkingLevel
-    message_id: str
+    message_id: str | None  # the Owner's message the typing indicator marks; None for an event
 
 
 class Turns:
@@ -167,7 +167,7 @@ class Turns:
             logger.exception("%s event failed for %s", type(event).__name__, mask(sender))
 
     async def event_turn(
-        self, sender: str, event: Event, channel: ChannelPort, message_id: str = ""
+        self, sender: str, event: Event, channel: ChannelPort, message_id: str | None = None
     ) -> None:
         """Answer `event` with one model turn; the caller holds the sender's lock.
 
@@ -335,7 +335,7 @@ class Turns:
         self._photos.set_logo(sender, logo)
 
     async def _keep_owner_posted(
-        self, sender: str, message_id: str, looking_at_photos: bool, channel: ChannelPort
+        self, sender: str, message_id: str | None, looking_at_photos: bool, channel: ChannelPort
     ) -> None:
         """A slow turn gets one "ya te digo" message, then the typing indicator again."""
         await asyncio.sleep(self._keep_alive_s)
@@ -345,7 +345,7 @@ class Turns:
             await channel.send_text(sender, holding)
         except ChannelError:
             logger.warning("holding message failed for %s", mask(sender), exc_info=True)
-        while True:
+        while message_id is not None:
             await mark_read(message_id, channel)
             await asyncio.sleep(self._keep_alive_s)
 

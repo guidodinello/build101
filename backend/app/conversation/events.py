@@ -12,6 +12,8 @@ from typing import Literal
 from app.channels.base import ChannelPort
 from app.copy import messages_es
 
+VideoFailureReason = Literal["blocked", "rejected", "unavailable", "timeout", "no_video", "failed"]
+
 
 @dataclass(frozen=True, slots=True)
 class PostSent:
@@ -68,7 +70,7 @@ class VideoSent:
 @dataclass(frozen=True, slots=True)
 class VideoFailed:
     post_id: str
-    reason: str  # blocked, rejected, unavailable, timeout, no_video or failed
+    reason: VideoFailureReason
     photo_ids: tuple[str, ...]
 
     def note(self) -> str:
