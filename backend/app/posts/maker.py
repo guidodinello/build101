@@ -1,7 +1,7 @@
 import logging
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Literal
@@ -27,6 +27,7 @@ from app.rendering.slides import render_slides
 
 from .critic import DesignCritic, Revision, changed, revise
 from .drafts import PostDrafter, PreviousPost
+from .figures import given_facts, unsupported_figures
 from .lifecycle import PostLifecycle
 from .store import Post, PostImage
 
@@ -227,6 +228,7 @@ class PostMaker:
                 [note.text for note in known.notes],
                 remake,
                 known.trend_notes,
+                given_facts(args.brief, known, [note.text for note in known.notes]),
             )
             paths = await self._send(sender, post.images, post.text, channel)
             self._keep(sender, post_id, args, photos, paths, post)
@@ -271,6 +273,7 @@ class PostMaker:
         notes: list[str] | None = None,
         remake: Remake | None = None,
         trend_notes: str | None = None,
+        given: str = "",
     ) -> RenderedPost:
         """The post's images in order (one per photo, unless a design asks for a slide count).
 
@@ -288,8 +291,13 @@ class PostMaker:
                 style_prompt=remake.previous.style_prompt,
             )
         if args.style == "photos":
-            copy = await self._drafter.copy(
-                args.brief, references, brand, notes, previous, trend_notes
+            copy = await without_invented_figures(
+                lambda brief: self._drafter.copy(
+                    brief, references, brand, notes, previous, trend_notes
+                ),
+                args.brief,
+                given,
+                lambda copy: post_text(copy.caption, copy.hashtags),
             )
             images = [await decode(to_post_image, data) for data in references]
             return RenderedPost(
@@ -297,15 +305,20 @@ class PostMaker:
             )
 
         count = args.slide_count or len(photos)
-        copy, brief = await self._drafter.design(
+        copy, brief = await without_invented_figures(
+            lambda text: self._drafter.design(
+                text,
+                references,
+                [photo.id for photo in photos],
+                count,
+                brand,
+                notes,
+                previous,
+                trend_notes,
+            ),
             args.brief,
-            references,
-            [photo.id for photo in photos],
-            count,
-            brand,
-            notes,
-            previous,
-            trend_notes,
+            given,
+            lambda drafted: carousel_text(drafted[0]),
         )
         style_prompt = brief.style_prompt
         one_per_photo = len(photos) == count
@@ -418,6 +431,31 @@ async def reviewed(
         [(fix.index, fix.problems) for fix in review.fixes],
     )
     return revision if changed(brief, revision) else None
+
+
+def carousel_text(copy: CarouselCopy) -> str:
+    slides = (f"{s.kicker} {s.headline} {s.body} {' '.join(s.items)}" for s in copy.slides)
+    return "\n".join([post_text(copy.caption, copy.hashtags), *slides])
+
+
+async def without_invented_figures[T](
+    draft: Callable[[str], Awaitable[T]],
+    brief: str,
+    given: str,
+    text_of: Callable[[T], str],
+) -> T:
+    """Draft; if the text states prices or discounts the Owner never gave, ask once for a rewrite
+    without them and keep that one (the Owner approves every post before it goes out)."""
+    drafted = await draft(brief)
+    invented = unsupported_figures(text_of(drafted), given)
+    if not invented:
+        return drafted
+    logger.warning("draft states figures the Owner never gave, rewriting once: %s", invented)
+    note = (
+        f"Your previous draft stated figures that are not in the brief: {', '.join(invented)}. "
+        "Write it again without them."
+    )
+    return await draft(f"{brief}\n\n{note}")
 
 
 def previous_post(post: Post, change: str | None) -> PreviousPost:

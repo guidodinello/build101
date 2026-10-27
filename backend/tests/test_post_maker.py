@@ -953,3 +953,39 @@ class BrokenRenderer(MockRenderer):
     async def render(self, slide: SlideRender) -> RenderedSlide:
         await super().render(slide)
         return RenderedSlide(image=b"not a jpeg")
+
+
+async def test_a_draft_with_an_invented_price_is_rewritten_once(photos: InMemoryPhotos) -> None:
+    model = SequenceModel(
+        [
+            PostCopy(caption="Mesa de roble, 20% off y $1.500 hoy", hashtags=["#roble"]),
+            PostCopy(caption="Mesa de roble a medida", hashtags=["#roble"]),
+        ]
+    )
+    store = PostLifecycle()
+    posts, background = maker(model, CountingImageGen(), photos, store=store)  # type: ignore[arg-type]
+    posts.create_post(
+        SENDER,
+        {"brief": "mesa de roble", "asset_ids": ["f1"], "style": "photos"},
+        FakeChannel(),
+        drop,
+    )
+    await background.join()
+
+    assert len(model.contents) == 2
+    assert "20%, $1.500" in model.contents[1][0]["text"]  # type: ignore[typeddict-item]
+    assert "Mesa de roble a medida" in store.pending(SENDER)[0].caption
+
+
+async def test_a_draft_with_figures_from_the_brief_is_kept(photos: InMemoryPhotos) -> None:
+    model = SequenceModel([PostCopy(caption="Mesa de roble, $1.500 hasta el viernes", hashtags=[])])
+    posts, background = maker(model, CountingImageGen(), photos)  # type: ignore[arg-type]
+    posts.create_post(
+        SENDER,
+        {"brief": "mesa de roble a $1500", "asset_ids": ["f1"], "style": "photos"},
+        FakeChannel(),
+        drop,
+    )
+    await background.join()
+
+    assert len(model.contents) == 1
