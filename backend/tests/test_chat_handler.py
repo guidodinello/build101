@@ -237,6 +237,16 @@ async def test_a_slow_reply_about_new_photos_says_it_is_looking_at_them() -> Non
     assert channel.sent[0] == (SENDER, messages_es.LOOKING_AT_PHOTOS)
 
 
+async def test_a_slow_event_about_photos_with_no_owner_message_marks_nothing_read() -> None:
+    model, channel = ScriptedModel(delay_s=0.25), FakeChannel()
+    chat, _ = build(model, keep_alive_s=0.1)
+
+    await chat.notify(SENDER, PhotosReceived(("f1",)), channel)
+
+    assert channel.sent[0] == (SENDER, messages_es.STILL_WORKING)
+    assert channel.read == []
+
+
 async def test_voice_note_is_answered_from_its_transcript() -> None:
     model, channel = ScriptedModel(), FakeChannel()
 
