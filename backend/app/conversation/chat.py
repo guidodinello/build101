@@ -5,6 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.channels.base import ChannelPort, InboundMessage
 from app.channels.inbound import mark_read, mask
 from app.copy import messages_es
+from app.llm.ledger import scoped
 
 from .button_router import ButtonRouter
 from .events import (
@@ -39,6 +40,11 @@ class ChatHandler:
         self._history = history
 
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
+        # The model calls of this message, and of the work it starts, are the sender's (#205)
+        with scoped(sender=message.sender):
+            await self._handle(message, channel)
+
+    async def _handle(self, message: InboundMessage, channel: ChannelPort) -> None:
         match message.kind:
             case "album":
                 return

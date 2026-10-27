@@ -15,7 +15,9 @@ from app.background import get_background_work
 from app.channels.router import close_clients, get_channel, get_owner_notify
 from app.channels.router import router as whatsapp_router
 from app.config import Settings, adapters_in_use, check_production, get_settings
+from app.db.session import get_sessionmaker
 from app.jobs.setup import build_job_runner
+from app.llm.ledger import get_ledger
 from app.log_redaction import RedactAccessLog, RedactQueryTokens
 from app.media.public import router as media_router
 
@@ -46,11 +48,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if runner:
         await runner.start()
     app.state.job_runner = runner
+    background = app.dependency_overrides.get(get_background_work, get_background_work)()
+    ledger = get_ledger()
+    sessions = get_sessionmaker() if get_settings().database_url else None
+    if sessions:
+        ledger.open()
+        background.start_service(ledger.run(sessions), "agent run ledger")
     yield
     if runner:
         runner.stop()
-    background = app.dependency_overrides.get(get_background_work, get_background_work)()
+    ledger.stop()
     await background.drain(get_settings().shutdown_timeout_s)
+    if sessions:
+        # What the work the drain waited for recorded after the ledger's last write
+        await ledger.write(sessions)
     # Not in the channel router's lifespan, which ends before this one: work that finishes in the
     # drain still tells the Owner through these clients.
     await close_clients()

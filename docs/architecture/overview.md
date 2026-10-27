@@ -102,7 +102,7 @@ flowchart TB
 3. **Long work runs in background jobs.** The webhook returns `200` in < 1 s. The orchestrator's tools *enqueue* jobs and return immediately; jobs send their own WhatsApp messages when they finish.
 4. **Ports for everything external.** `ChannelPort` (WhatsApp through Kapso / Simulator), `PublisherPort` (Provider / Mock), `ImageGenPort` (Gemini / OpenAI / Mock), `TranscriberPort` (Gemini / Mock). Switching is an env var; the mocks serve local runs and rehearsals, and `ENV=prod` refuses to start on one.
 5. **Per-business serialization.** Inbound messages for the same business are processed one at a time (an in-process `asyncio.Lock` per business ID). Different businesses run concurrently.
-6. **Everything is logged.** Every LLM call writes an `agent_runs` row (agent, input, output, tokens, latency, error). It's our debugger during the hackathon.
+6. **Everything is logged.** Every text, image and video model call writes an `agent_runs` row (agent, model, Business, job and Post, tokens with cached and thought tokens, images, video seconds, latency, error and an estimated cost), in batches off the request path; the Owner's text stays out of it unless a debug setting puts it in ([data-model.md § Notes](data-model.md#notes)). It's how we know what an Owner, an agent or a Post costs.
 
 ## Request lifecycle: inbound WhatsApp message
 
@@ -253,7 +253,7 @@ build101/
 │   │   ├── imagegen/         # base.py (ImageGenPort), gemini.py, openai.py, mock.py
 │   │   ├── transcription/    # base.py (TranscriberPort), gemini.py, mock.py (voice notes)
 │   │   ├── media/            # video.py (ffprobe, keyframes, WhatsApp preview), images.py (HEIC, palette, prepare_reference, resize to 1080×1350)
-│   │   ├── llm/              # client.py (wrapper + agent_runs logging)
+│   │   ├── llm/              # client.py (Gemini), anthropic.py, ledger.py (agent_runs), prices.py
 │   │   ├── prompts/          # __init__.py (load_prompt, {{include}}), shared/writing_style.md
 │   │   ├── storage.py
 │   │   ├── copy/messages_es.py

@@ -1,5 +1,7 @@
 import asyncio
+import logging
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -18,6 +20,7 @@ from app.llm.client import (
     text_content,
     user_step,
 )
+from app.llm.usage import Usage, collecting
 
 
 class TimingOutInteractions:
@@ -46,7 +49,8 @@ class FakeInteraction:
     status: str
     output_text: str | None = None
     steps: list[FakeStep] = field(default_factory=list)
-    usage: None = None
+    usage: Any = None
+    service_tier: str | None = None
     errors: None = None
 
 
@@ -216,3 +220,32 @@ async def test_a_grounded_call_with_no_output_is_an_error() -> None:
 
     with pytest.raises(LLMError, match="niche_analyst"):
         await model.grounded("niche_analyst", "system", [], Title, "medium", [])
+
+
+async def test_a_call_reports_and_logs_its_usage_with_cached_tokens(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    usage = SimpleNamespace(
+        total_input_tokens=9000,
+        total_cached_tokens=6000,
+        total_thought_tokens=300,
+        total_output_tokens=120,
+    )
+    model, _ = chat_with(
+        FakeInteraction(status="completed", output_text="hola", usage=usage, service_tier="flex")
+    )
+
+    with collecting() as reported, caplog.at_level(logging.INFO, logger=client_module.__name__):
+        await model.reply("orchestrator", "system", [user_step("hola")], "low")
+
+    assert reported == [
+        Usage(
+            input_tokens=9000,
+            cached_tokens=6000,
+            thought_tokens=300,
+            output_tokens=120,
+            service_tier="flex",
+            stop_reason="completed",
+        )
+    ]
+    assert "in=9000 cached=6000 out=120 thought=300 tier=flex" in caplog.text
