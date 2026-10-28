@@ -9,6 +9,10 @@ from .base import Button, ChannelError, InboundAudio, InboundMedia, InboundMessa
 # Kapso webhook v2 (confirmed 2026-10-17): top level `message`, `conversation`,
 # `phone_number_id`. `message` has Meta-style fields plus a `kapso` block.
 MESSAGE_RECEIVED_EVENT = "whatsapp.message.received"
+# A message we sent that WhatsApp could not deliver, e.g. 131047 outside the 24 h window (#204).
+MESSAGE_FAILED_EVENT = "whatsapp.message.failed"
+# How deep `failure_codes` looks for Meta's `errors` arrays in a failed-message event.
+MAX_ERROR_DEPTH = 6
 
 # The HMAC covers the body only, so a captured body stays valid forever; one older than this is
 # acknowledged and dropped (#105). Kapso delivers within seconds and retries about twice.
@@ -187,3 +191,35 @@ def _media(mime_type: str | None, kapso: _Kapso, media_id: str) -> InboundMedia:
         mime_type=mime_type,
         byte_size=(kapso.media_data or _MediaData()).byte_size,
     )
+
+
+def failed_message_id(payload: object) -> str | None:
+    """The `wamid` of the message a failed-message event is about."""
+    message = payload.get("message") if isinstance(payload, dict) else None
+    return _str_or_none(message.get("id")) if isinstance(message, dict) else None
+
+
+def failure_codes(payload: object, depth: int = 0) -> list[str]:
+    """Every WhatsApp error code in a failed-message event, in order.
+
+    Kapso's v2 event keeps Meta's message fields plus its own `kapso` block; where it puts Meta's
+    `errors` array (`[{"code": 131047, "title": ...}]`) is not confirmed, so any `errors` array is
+    read, at any depth up to `MAX_ERROR_DEPTH`.
+    """
+    if depth > MAX_ERROR_DEPTH:
+        return []
+    codes: list[str] = []
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key == "errors" and isinstance(value, list):
+                codes += [
+                    str(error["code"])
+                    for error in value
+                    if isinstance(error, dict) and isinstance(error.get("code"), int | str)
+                ]
+            else:
+                codes += failure_codes(value, depth + 1)
+    elif isinstance(payload, list):
+        for item in payload:
+            codes += failure_codes(item, depth + 1)
+    return codes

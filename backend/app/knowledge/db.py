@@ -42,13 +42,19 @@ async def active_products(
 
 
 async def latest_brand_brain(db: AsyncSession, business_id: uuid.UUID) -> BrandBrain | None:
-    row = await db.scalar(
+    row = await latest_brand_version(db, business_id)
+    return BrandBrain.model_validate(row.data) if row else None
+
+
+async def latest_brand_version(
+    db: AsyncSession, business_id: uuid.UUID
+) -> BrandBrainVersion | None:
+    return await db.scalar(
         select(BrandBrainVersion)
         .where(BrandBrainVersion.business_id == business_id)
         .order_by(BrandBrainVersion.version.desc())
         .limit(1)
     )
-    return BrandBrain.model_validate(row.data) if row else None
 
 
 def niche_of(business: Business) -> Niche:
@@ -93,7 +99,7 @@ class DbKnowledge:
             business = await business_of(db, sender)
             if business is None:
                 return BusinessKnowledge()
-            brand = await latest_brand_brain(db, business.id)
+            version = await latest_brand_version(db, business.id)
             products = await active_products(db, business.id, MAX_PRODUCTS)
             rows = await db.scalars(
                 select(OwnerNote)
@@ -123,9 +129,10 @@ class DbKnowledge:
         ]
         return BusinessKnowledge(
             facts,
-            brand,
-            catalog,
-            notes,
+            BrandBrain.model_validate(version.data) if version else None,
+            brand_summary_sent=version is not None and version.summary_sent_at is not None,
+            catalog=catalog,
+            notes=notes,
             summary=business.conversation_summary,
             trend_notes=trends,
         )

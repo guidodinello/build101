@@ -55,6 +55,7 @@ def test_an_empty_context_renders_nothing() -> None:
 def test_the_context_lists_what_is_known() -> None:
     context = BusinessKnowledge(
         brand=brand_brain(),
+        brand_summary_sent=True,
         catalog=[CatalogItem("Mesa nórdica", "$U 12.000", "Roble macizo")],
         notes=[Note("n1", "No poner precios")],
         summary="Pidió un post de la mesa.",

@@ -377,7 +377,7 @@ run_turn(business, inbound_text):
 
 ### Memory and context (built, [ADR 0030](../decisions/0030-orchestrator-memory-and-context.md))
 
-- **System prompt** = the static instructions, then `<business>`, `<brand_brain>`, `<brand_summary_sent>`, `<catalog>`, `<owner_notes>`, `<trend_notes>` and `<conversation_summary>`: read by `Knowledge` (`app/knowledge`) and rendered by `app/conversation/context.py`. They change only when the data does, so the prefix still caches.
+- **System prompt** = the static instructions, then `<business>`, `<brand_brain>`, `<brand_summary_sent>` (only once that summary reached the Owner, [#204](https://github.com/guidodinello/build101/issues/204)), `<catalog>`, `<owner_notes>`, `<trend_notes>` and `<conversation_summary>`: read by `Knowledge` (`app/knowledge`) and rendered by `app/conversation/context.py`. They change only when the data does, so the prefix still caches.
 - **History** in `conversation_steps` (`DbHistory`), in memory without a database. Past about 40,000 estimated tokens the oldest whole turns are folded into `businesses.conversation_summary` by `conversation_summarizer` and deleted (`Compactor`, after the turn, under the sender's lock).
 - **Thinking**: `medium` for the Owner's turns, `low` for event turns.
 - **Out-of-band messages**: the brand summary job adds a `[brand summary sent]` note to the history.

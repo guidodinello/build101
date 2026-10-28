@@ -16,7 +16,8 @@ def render(context: BusinessKnowledge) -> str:
     if context.brand:
         brand = context.brand.model_dump_json(exclude={"whatsapp_summary"})
         blocks.append(tagged("brand_brain", brand))
-        blocks.append(tagged("brand_summary_sent", context.brand.whatsapp_summary))
+        if context.brand_summary_sent:
+            blocks.append(tagged("brand_summary_sent", context.brand.whatsapp_summary))
     if context.catalog:
         blocks.append(tagged("catalog", "\n".join(catalog_line(item) for item in context.catalog)))
     if context.notes:

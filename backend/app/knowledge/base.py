@@ -50,6 +50,7 @@ class BusinessFacts:
 class BusinessKnowledge:
     business: BusinessFacts | None = None
     brand: BrandBrain | None = None
+    brand_summary_sent: bool = False  # the latest brand's summary reached the Owner (#204)
     catalog: list[CatalogItem] = field(default_factory=list)
     notes: list[Note] = field(default_factory=list)
     summary: str | None = None

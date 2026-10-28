@@ -52,7 +52,7 @@ We never call Meta directly: Kapso sits in between and exposes a Meta-compatible
 
 1. Kapso POSTs the message. The body is capped at 256 KiB before anything else.
 2. The `X-Webhook-Signature` header is checked: an HMAC-SHA256 of the raw body with `KAPSO_WEBHOOK_SECRET`. A bad signature gets a 401.
-3. Events other than `whatsapp.message.received` get a 200 and are ignored. A 4xx would make Kapso retry.
+3. `whatsapp.message.failed` (a message of ours WhatsApp couldn't deliver) is logged with its error codes. Other events besides `whatsapp.message.received` get a 200 and are ignored. A 4xx would make Kapso retry.
 4. `kapso_webhook.py` turns the payload into an `InboundMessage` of kind text, button, image, audio, album or other. Voice notes arrive already transcribed by Kapso.
 5. Duplicates are dropped by WhatsApp message id (an in-memory store).
 6. The backend answers 200 at once and handles the message in a background task, so Kapso never waits for the AI.
@@ -165,7 +165,7 @@ Onboarding starts in WhatsApp, moves to a web wizard for the details, and ends b
 | Job | What it does | Ends with |
 |---|---|---|
 | `analyze_asset` | Runs the asset analyst on one photo | The analysis saved on `brand_assets` |
-| `generate_brand` | Waits up to 60 s for the photo analyses, then runs the brand strategist | A new `brand_brains` version, and a WhatsApp summary with Sí and Corregir algo buttons |
+| `generate_brand` | Waits up to 60 s for the photo analyses, then runs the brand strategist | A new `brand_brains` version, and a WhatsApp summary with Sí and Corregir algo buttons. The summary goes out only within 24 h of the Owner's last message (`businesses.last_inbound_at`); otherwise it waits, and `OnboardingGate` sends it before answering the Owner's next message (`conversation/brand_summary.py`, #204) |
 | `generate_niche_report` | Runs the niche analyst for one niche (`payload.niche_id`, no Business) | This week's `niche_reports` row for that niche, replaced if a retry already wrote it. Nothing is sent to the Owner |
 
 **The weekly Niche Report** (`jobs/niche.py`, [ADR 0025](../decisions/0025-weekly-niche-report.md)) has no cron. The runner's poller runs a check when it starts and then every 15 minutes: for each niche with at least one `active` Business and no report for the current week (Monday, in the niche's timezone), it queues `generate_niche_report`, unless a job for that niche is already queued, running or done this week, or two have already failed this week (each attempt runs billed Google searches). So a deploy produces the week's report at once, and a missed Monday is caught up. Every Business maps to the MVP's niche, `curated-wood-furniture-uy`, for now. The orchestrator's context and the post drafter read the latest report of the Business's niche on every turn and every post, as `<trend_notes>`, through `Knowledge`.

@@ -291,7 +291,7 @@ def build_conversation(
             if sessions is None:
                 return Conversation(chat.handler, chat.notify)
             gate = OnboardingGate(
-                chat.handler, sessions, settings.frontend_url, settings.assistant_name
+                chat.handler, chat.notify, sessions, settings.frontend_url, settings.assistant_name
             )
             return Conversation(gate, chat.notify)
         case "echo":

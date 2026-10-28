@@ -1,5 +1,8 @@
 import logging
 import time
+import uuid
+from datetime import UTC, datetime
+from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -19,6 +22,9 @@ from app.onboarding.state import (
 )
 from app.ratelimit import MAX_TRACKED_KEYS, KeyedLocks, TtlMap
 
+from .brand_summary import latest_summary_pending, send_pending_summary
+from .events import Notify
+
 logger = logging.getLogger(__name__)
 
 MAX_NAME_CHARS = 200
@@ -29,21 +35,29 @@ REMINDER_COOLDOWN_S = 30.0
 STATE_TTL_S = 600.0
 
 
+class _Answer(NamedTuple):
+    reply: str | None  # None once the form is submitted: the chat handler answers
+    pending_summary: uuid.UUID | None = None  # the Business whose brand summary waits to go out
+
+
 class OnboardingGate:
     """Flow 1 before the web form: welcome, the business name, the magic link.
 
-    Plain code, no LLM. Once the form is submitted every message goes to the chat handler.
+    Plain code, no LLM. Once the form is submitted every message goes to the chat handler, after
+    a brand summary that waited for it (#204). Every message records when the Owner last wrote.
     """
 
     def __init__(
         self,
         chat: InboundHandler,
+        notify: Notify,
         sessions: async_sessionmaker[AsyncSession],
         frontend_url: str,
         assistant_name: str,
         reminder_cooldown_s: float = REMINDER_COOLDOWN_S,
     ) -> None:
         self._chat = chat
+        self._notify = notify
         self._sessions = sessions
         self._frontend_url = frontend_url
         self._assistant_name = assistant_name
@@ -56,30 +70,40 @@ class OnboardingGate:
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
         async with self._locks.hold(message.sender):
             try:
-                reply = await self._onboard(message)
+                reply, pending_summary = await self._onboard(message)
             except SQLAlchemyError:
                 logger.exception("onboarding lookup failed for %s", mask(message.sender))
-                reply = messages_es.REPLY_FAILED
+                reply, pending_summary = messages_es.REPLY_FAILED, None
             if reply:
                 await mark_read(message.message_id, channel)
                 await channel.send_text(message.sender, reply)
+            if pending_summary is not None:
+                await self._send_summary(pending_summary, message.sender, channel)
         if reply is None:
             await self._chat.handle(message, channel)
 
-    async def _onboard(self, message: InboundMessage) -> str | None:
-        """The reply before the form ("" to stay quiet), or None once the form is submitted."""
+    async def _onboard(self, message: InboundMessage) -> _Answer:
+        """The reply before the form ("" to stay quiet), or None once the form is submitted, with
+        the Business whose brand summary waits for this message."""
         async with self._sessions() as db:
             business = await db.scalar(
                 select(Business).where(Business.owner_phone == message.sender).with_for_update()
             )
+            created = business is None
             if business is None:
                 business = Business(owner_phone=message.sender)
                 db.add(business)
+            business.last_inbound_at = _later(business.last_inbound_at, written_at(message))
             state = state_of(business)
             if state not in BEFORE_THE_FORM:
-                return None
+                pending = await latest_summary_pending(db, business)
+                await db.commit()
+                return _Answer(None, business.id if pending else None)
             if message.kind == "album":
-                return ""
+                # An album announcement alone doesn't make a Business; the next message does.
+                if not created:
+                    await db.commit()
+                return _Answer("")
 
             name = business_name(message)
             if state == OnboardingState.NEW:
@@ -87,19 +111,30 @@ class OnboardingGate:
                 self._welcomed_at.set(message.sender, time.time())
                 reply = self._welcome(message.sender)
             elif state == OnboardingState.AWAITING_NAME and self._written_before_welcome(message):
-                return ""
+                await db.commit()
+                return _Answer("")
             elif state == OnboardingState.AWAITING_NAME and name is not None:
                 business.name = name
                 name_received(business)
                 reply = messages_es.name_ack_link(name, self._new_link(db, business))
             elif self._prompted_recently(message.sender):
-                return ""
+                await db.commit()
+                return _Answer("")
             elif state == OnboardingState.AWAITING_NAME:
                 reply = self._welcome(message.sender)
             else:
                 reply = messages_es.link_reminder(self._new_link(db, business))
             await db.commit()
-        return reply
+        return _Answer(reply)
+
+    async def _send_summary(
+        self, business_id: uuid.UUID, sender: str, channel: ChannelPort
+    ) -> None:
+        """The brand summary that waited for this message, before the message is answered."""
+        try:
+            await send_pending_summary(self._sessions, business_id, self._notify, channel)
+        except SQLAlchemyError:
+            logger.exception("pending brand summary failed for %s", mask(sender))
 
     def _welcome(self, sender: str) -> str:
         self._last_prompt.set(sender, time.monotonic())
@@ -122,6 +157,18 @@ class OnboardingGate:
     def _prompted_recently(self, sender: str) -> bool:
         last = self._last_prompt.get(sender)
         return last is not None and time.monotonic() - last < self._reminder_cooldown_s
+
+
+def written_at(message: InboundMessage) -> datetime:
+    """When the Owner sent `message`: WhatsApp's timestamp, or now when it has none."""
+    if message.timestamp is None:
+        return datetime.now(UTC)
+    return datetime.fromtimestamp(message.timestamp, UTC)
+
+
+def _later(recorded: datetime | None, written: datetime) -> datetime:
+    """Messages can be handled out of order: the last one written opened the window last."""
+    return written if recorded is None else max(recorded, written)
 
 
 def business_name(message: InboundMessage) -> str | None:

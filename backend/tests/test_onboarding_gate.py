@@ -14,7 +14,7 @@ from app.conversation.onboarding import OnboardingGate
 from app.copy import messages_es
 from app.db.models import Business, MagicLink
 from tests.conftest import FIXTURES, requires_db
-from tests.fakes import FakeChannel
+from tests.fakes import EventLog, FakeChannel
 
 pytestmark = requires_db
 
@@ -66,7 +66,12 @@ class Rig:
 @pytest.fixture
 def rig(sessions: async_sessionmaker[AsyncSession]) -> Rig:
     chat = FakeChat()
-    return Rig(OnboardingGate(chat, sessions, FRONTEND, ASSISTANT), chat, FakeChannel(), sessions)
+    return Rig(
+        OnboardingGate(chat, EventLog(), sessions, FRONTEND, ASSISTANT),
+        chat,
+        FakeChannel(),
+        sessions,
+    )
 
 
 async def add_business(rig: Rig, state: str) -> None:
@@ -153,7 +158,7 @@ async def test_the_reminder_comes_back_after_the_cooldown(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     chat = FakeChat()
-    gate = OnboardingGate(chat, sessions, FRONTEND, ASSISTANT, reminder_cooldown_s=0)
+    gate = OnboardingGate(chat, EventLog(), sessions, FRONTEND, ASSISTANT, reminder_cooldown_s=0)
     rig = Rig(gate, chat, FakeChannel(), sessions)
     await add_business(rig, "awaiting_web_form")
 
@@ -194,7 +199,7 @@ async def test_the_per_sender_state_stays_bounded_under_many_numbers(
 ) -> None:
     monkeypatch.setattr(onboarding, "MAX_TRACKED_KEYS", 3)
     chat, channel = FakeChat(), FakeChannel()
-    gate = OnboardingGate(chat, sessions, FRONTEND, ASSISTANT)
+    gate = OnboardingGate(chat, EventLog(), sessions, FRONTEND, ASSISTANT)
 
     for number in range(10):
         await gate.handle(message("text", text="Hola", sender=f"598990000{number:02d}"), channel)
