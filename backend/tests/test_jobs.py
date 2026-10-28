@@ -151,6 +151,38 @@ async def test_a_queued_job_runs_and_records_its_result(
     assert seen == [{"n": 1}]
 
 
+async def test_a_finalize_db_error_clears_running_id_and_marks_job_failed(
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    business = await add_business(sessions)
+    job_id = await queue(sessions, "analyze_asset", business)
+
+    async def ok(context: JobContext, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"done": True}
+
+    original_commit = AsyncSession.commit
+    commit_count = 0
+
+    async def fail_finalization_commit(self: AsyncSession) -> None:
+        nonlocal commit_count
+        commit_count += 1
+        if commit_count == 2:
+            raise SQLAlchemyError("simulated finalization commit failure")
+        await original_commit(self)
+
+    monkeypatch.setattr(AsyncSession, "commit", fail_finalization_commit)
+    jobs, background = runner(sessions, {"analyze_asset": ok}, FakeChannel())
+
+    await jobs.run_due()
+    await background.join()
+
+    job = await job_row(sessions, job_id)
+    assert jobs._running_ids == set()
+    assert job.status == "failed"
+    assert "finalization failed" in (job.error or "")
+
+
 async def test_a_failed_job_tells_the_owner_with_a_retry_button(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:

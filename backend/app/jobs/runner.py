@@ -263,22 +263,56 @@ class JobRunner:
             # The task's boundary: nobody awaits it, so the row and the log carry the error.
             logger.exception("job %s (%s) failed", job_id, kind)
             error = repr(exc)[:MAX_ERROR_CHARS]
-        async with self._sessions() as db:
-            # Only while the row is still this run's: once another instance took the job for dead,
-            # this run's outcome is dropped, a failure's `undo` and `JobFailed` with it.
-            owned = await db.scalar(
-                update(Job)
-                .where(Job.id == job_id, Job.status == "running", Job.attempts == attempt)
-                .values(
-                    status="failed" if error else "succeeded",
-                    result=result,
-                    error=error,
-                    finished_at=datetime.now(UTC),
+        owned = None
+        try:
+            async with self._sessions() as db:
+                # Only while the row is still this run's: once another instance took the job for
+                # dead, this run's outcome is dropped, a failure's undo and JobFailed with it.
+                owned = await db.scalar(
+                    update(Job)
+                    .where(Job.id == job_id, Job.status == "running", Job.attempts == attempt)
+                    .values(
+                        status="failed" if error else "succeeded",
+                        result=result,
+                        error=error,
+                        finished_at=datetime.now(UTC),
+                    )
+                    .returning(Job.id)
                 )
-                .returning(Job.id)
-            )
-            await db.commit()
-        self._running_ids.discard(job_id)
+                await db.commit()
+        except Exception as exc:
+            logger.exception("job %s (%s) finalization failed", job_id, kind)
+            finalize_error = f"finalization failed: {exc!r}"[:MAX_ERROR_CHARS]
+            try:
+                async with self._sessions() as db:
+                    failed = await db.scalar(
+                        update(Job)
+                        .where(
+                            Job.id == job_id,
+                            Job.status == "running",
+                            Job.attempts == attempt,
+                        )
+                        .values(
+                            status="failed",
+                            error=finalize_error,
+                            finished_at=datetime.now(UTC),
+                        )
+                        .returning(Job.id)
+                    )
+                    await db.commit()
+            except Exception:
+                logger.exception(
+                    "could not mark job %s (%s) failed after finalization error",
+                    job_id,
+                    kind,
+                )
+            else:
+                if failed is not None:
+                    await self._after_failure(job_id, kind, business_id)
+            return
+        finally:
+            self._running_ids.discard(job_id)
+
         if owned is None:
             logger.warning(
                 "job %s (%s) attempt %d was taken for dead elsewhere: its outcome is dropped",
