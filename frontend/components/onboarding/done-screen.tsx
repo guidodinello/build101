@@ -10,6 +10,7 @@ import { ScreenLayout } from "@/components/onboarding/screen-layout";
 import { WhatsAppButton } from "@/components/onboarding/whatsapp-link";
 import { useWizard } from "@/components/onboarding/wizard-context";
 import { ApiError, messageOf, onboardingApi } from "@/lib/api";
+import { withText } from "@/lib/whatsapp";
 import {
   atHandle,
   currentLogo,
@@ -101,7 +102,7 @@ export function DoneScreen() {
     <ScreenLayout
       title={state.business.name ? `¡Listo, ${state.business.name}!` : "¡Listo!"}
       subtitle="Ya tengo todo. Ahora estudio tu marca y en un minuto te escribo por WhatsApp con lo que entendí."
-      footer={<WhatsAppButton href={state.whatsapp_url} label="Volver a WhatsApp" />}
+      footer={<WhatsAppButton href={withText(state.whatsapp_url, "Listo")} label="Volver a WhatsApp" />}
     >
       <section
         aria-label="Lo que me contaste"

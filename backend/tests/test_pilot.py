@@ -38,7 +38,7 @@ from app.pilot import (
 )
 from app.ratelimit import TURNS_BURST
 from tests.conftest import requires_db, sign
-from tests.fakes import CountingImageGen, FakeChannel, ScriptedModel
+from tests.fakes import CountingImageGen, EventLog, FakeChannel, ScriptedModel
 from tests.test_chat_handler import build, message
 from tests.test_ratelimit import Clock
 from tests.test_whatsapp_router import FIXTURE_TIME, SECRET, post, raw_fixture
@@ -445,7 +445,7 @@ def onboarding_rig(
 ) -> tuple[PilotGate, RecordingHandler]:
     chat = RecordingHandler()
     pilot = PilotList(frozenset(), sessions, open_when_empty=False)
-    onboarding = OnboardingGate(chat, sessions, "https://app.test", ASSISTANT)
+    onboarding = OnboardingGate(chat, EventLog(), sessions, "https://app.test", ASSISTANT)
     return PilotGate(onboarding, pilot, WAITLIST), chat
 
 

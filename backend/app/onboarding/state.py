@@ -100,7 +100,7 @@ def form_submitted(business: Business) -> None:
 
 
 def brand_brain_written(business: Business) -> None:
-    """A Brand Brain version was saved and its summary is going out to the Owner."""
+    """A Brand Brain version was saved; its summary goes out, or waits for the 24 h window."""
     _expect(
         business,
         "brand_brain_written",

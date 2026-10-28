@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -9,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.brand_strategist import BrandInputs, write_brand_brain
 from app.agents.schemas import BrandBrain
-from app.conversation.events import BrandSummaryReady
+from app.conversation.brand_summary import send_pending_summary, window_open
 from app.db.models import BrandAsset, BrandBrainVersion, Business, Job
 from app.knowledge.db import active_products, latest_brand_brain
 from app.onboarding.state import (
@@ -32,6 +33,9 @@ ANALYSES_POLL_S = 2.0
 
 async def generate_brand(context: JobContext, payload: dict[str, Any]) -> dict[str, Any]:
     """Brand Strategist → new Brand Brain version → `brand_summary` with its buttons (Flow 3).
+
+    The summary goes out only inside WhatsApp's 24 h window; otherwise, or when its send fails,
+    it waits for the Owner's next message (#204), which `OnboardingGate` answers with it first.
 
     `payload["correction"]` (the Owner's words after "Corregir algo", or an `update_brand`
     change) runs revise mode on the latest version.
@@ -69,12 +73,14 @@ async def generate_brand(context: JobContext, payload: dict[str, Any]) -> dict[s
         )
         brand_brain_written(business)
         await db.commit()
-        owner_phone, channel_kind, name = business.owner_phone, business.channel, business.name
+        channel_kind, last_inbound_at = business.channel, business.last_inbound_at
 
-    if channel_kind == "whatsapp":
-        # A failed delivery fails the job, so the Owner is told and can retry (`JobFailed`).
-        event = BrandSummaryReady(name or brain.business_name, brain.whatsapp_summary)
-        await context.notify(owner_phone, event, context.channel)
+    if channel_kind != "whatsapp":
+        return {"version": version}
+    if not window_open(last_inbound_at, datetime.now(UTC)):
+        logger.info("brand summary of %s waits for the Owner's next message", business_id)
+        return {"version": version, "summary": "pending"}
+    await send_pending_summary(context.sessions, business_id, context.notify, context.channel)
     return {"version": version}
 
 

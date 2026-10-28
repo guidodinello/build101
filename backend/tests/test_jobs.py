@@ -80,6 +80,8 @@ async def add_business(
             one_liner="Muebles restaurados",
             location="Montevideo",
             onboarding_state=state,
+            # The Owner just wrote: the summary can go out (#204).
+            last_inbound_at=datetime.now(UTC),
             onboarding_data={
                 "brand": {"three_words": ["a", "b", "c"], "colors": ["#2f3e2c"]},
                 "preferences": {"goal": "sales", "posts_per_week": 3, "avoid": "precios"},
@@ -547,7 +549,7 @@ class FailsOnceHistory(DbHistory):
         return await super().get(sender)
 
 
-async def test_a_summary_that_fails_before_the_send_fails_the_job_and_offers_a_retry(
+async def test_a_summary_that_fails_before_the_send_waits_for_the_next_message(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     business, channel = await add_business(sessions), FakeChannel()
@@ -581,12 +583,13 @@ async def test_a_summary_that_fails_before_the_send_fails_the_job_and_offers_a_r
     await jobs.run_due()
     await background.join()
 
-    assert (await job_row(sessions, job_id)).status == "failed"
-    # The Owner never got the summary, and is told with the retry.
-    assert channel.buttons == [(PHONE, messages_es.JOB_FAILED, [f"retry:{job_id}"])]
+    # The brand is written: the summary waits for the Owner's next message (#204), no Reintentar.
+    assert (await job_row(sessions, job_id)).status == "succeeded"
+    assert channel.buttons == []
+    assert await summary_sent_at(sessions) is None
 
 
-async def test_a_summary_that_cant_be_delivered_fails_the_job_and_offers_a_retry(
+async def test_a_summary_that_cant_be_delivered_waits_for_the_next_message(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
     business, channel = await add_business(sessions), FailsOnceChannel()
@@ -598,12 +601,16 @@ async def test_a_summary_that_cant_be_delivered_fails_the_job_and_offers_a_retry
     await jobs.run_due()
     await background.join()
 
-    assert (await job_row(sessions, job_id)).status == "failed"
-    assert channel.buttons == [(PHONE, messages_es.JOB_FAILED, [f"retry:{job_id}"])]
+    assert (await job_row(sessions, job_id)).status == "succeeded"
+    assert channel.buttons == []
+    assert await summary_sent_at(sessions) is None
     # The summary never reached the Owner, so the history has no note about it.
-    assert await DbHistory(sessions).get(PHONE) == [
-        user_step(JobFailed(job_id, "generate_brand").note())
-    ]
+    assert await DbHistory(sessions).get(PHONE) == []
+
+
+async def summary_sent_at(sessions: async_sessionmaker[AsyncSession]) -> datetime | None:
+    async with sessions() as db:
+        return await db.scalar(select(BrandBrainVersion.summary_sent_at))
 
 
 async def test_a_correction_makes_a_new_version_from_the_previous_one(
