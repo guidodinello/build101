@@ -1,6 +1,6 @@
 # How the system fits together
 
-As of 2026-10-19. This describes the code on `main`; [overview.md](overview.md), [integrations.md](integrations.md) and [agents.md](agents.md) describe the intended design and may be ahead of it.
+As of 2026-10-28. This describes the code on `main`; [overview.md](overview.md), [integrations.md](integrations.md) and [agents.md](agents.md) describe the intended design and may be ahead of it.
 
 ## Big picture
 
@@ -54,7 +54,7 @@ We never call Meta directly: Kapso sits in between and exposes a Meta-compatible
 2. The `X-Webhook-Signature` header is checked: an HMAC-SHA256 of the raw body with `KAPSO_WEBHOOK_SECRET`. A bad signature gets a 401.
 3. Events other than `whatsapp.message.received` get a 200 and are ignored. A 4xx would make Kapso retry.
 4. `kapso_webhook.py` turns the payload into an `InboundMessage` of kind text, button, image, audio, album or other. Voice notes arrive already transcribed by Kapso.
-5. Duplicates are dropped by WhatsApp message id (an in-memory store).
+5. Duplicates are dropped by WhatsApp message id: in the `inbound_deliveries` table with the database, in memory without it.
 6. The backend answers 200 at once and handles the message in a background task, so Kapso never waits for the AI.
 
 **Outbound, us to Owner** (`channels/kapso.py`): `KapsoChannel` POSTs to `{KAPSO_BASE_URL}/{phone_number_id}/messages` with an `X-API-Key` header. It can send text, an image by URL, up to 3 reply buttons, mark a message read (which also shows the typing indicator), and download media the Owner sent.
@@ -98,14 +98,27 @@ Timeouts are 60 s for chat and 90 s for structured calls. Server errors are retr
 
 | Agent | Where | Call | What it does |
 |---|---|---|---|
-| orchestrator | `conversation/turns.py` | `reply` with tools | Talks with the Owner; decides when to call `create_post` or `approve_post` |
+| orchestrator | `conversation/turns.py` | `reply` with tools | Talks with the Owner; decides when to call its tools (below) |
 | post_drafter | `posts/drafts.py` | `structured` | Brief, photos and Brand Brain become caption, hashtags and, for a design, each slide's headline and scene prompt |
 | asset_analyst | `agents/asset_analyst.py` | `structured` | Analyzes each photo uploaded in the wizard (background job) and each photo the Owner sends in the chat (`PhotoKeeper`), both through `assets/analysis.py` |
 | brand_strategist | `agents/brand_strategist.py` | `structured`, high thinking | Writes the Brand Brain: voice, audience, pillars, visual identity (background job) |
 | niche_analyst | `agents/niche_analyst.py` | `grounded` (URL context and Google Search) | Writes the weekly Niche Report of a niche: what its stores and articles show this week, each point with a checked source (background job) |
 | image generation | `imagegen/gemini.py`, `carousel/generator.py` | `generate_content` | Makes 4:5 slide images from scene prompts and the product photos |
 
-**The orchestrator's tool loop** (`turns.py`, `_converse`; Owner turns and event turns share one pipeline, `_run`): for up to 5 steps, send the system prompt, the history and the current message with the two tools. If Gemini answers with text, that text goes to WhatsApp. If it asks for a tool, code runs it, appends the result, and loops. Tools are declared in `conversation/tools.py` and run by `Toolbox` (`toolbox.py`), and both return at once (`{"post_id": ..., "status": "generating"}`); the slow work runs in the background, on `BackgroundWork` (`app/background.py`).
+**The orchestrator's tool loop** (`turns.py`, `_converse`; Owner turns and event turns share one pipeline, `_run`): for up to 5 steps, send the system prompt, the history and the current message with the tools. If Gemini answers with text, that text goes to WhatsApp. If it asks for a tool, code runs it, appends the result, and loops. Tools are declared in `conversation/tools.py` and run by `Toolbox` (`toolbox.py`):
+
+| Tool | What it does |
+|---|---|
+| `create_post` | Starts a Post from the Owner's photos, as they are or as a design |
+| `revise_post` | Remakes a Post the Owner already got, changing only what they asked |
+| `approve_post` | Publishes a Post, only if the Owner's own words approve it (below) |
+| `list_posts` | The Owner's Posts and their status |
+| `remember` | Saves an Owner note |
+| `forget` | Drops an Owner note |
+| `update_brand` | Changes the Brand Brain |
+| `create_video` | Makes a Reel from a Post's product photo; declared only when `VIDEO_GEN_ENABLED` is on ([ADR 0033](../decisions/0033-ai-generated-reels-veo.md)) |
+
+Tools that act on the Owner's words (all but `approve_post` and `list_posts`) are refused in an event turn. The ones that make something return at once (`{"post_id": ..., "status": "generating"}`); the slow work runs in the background, on `BackgroundWork` (`app/background.py`). A test (`tests/test_how_it_works_tools.py`) fails if a tool is missing from this table.
 
 **Code reports events, the model writes the message** ([ADR 0026](../decisions/0026-owner-messages-from-the-orchestrator.md)). When background work ends, code emits a typed event from `conversation/events.py`, such as `PostSent` or `Published`; the makers receive `notify` with each call, so none can be built without a way to tell the Owner. `Turns.notify` gives that event's note to the orchestrator as if the Owner had sent it, and the model writes the reply. Buttons are attached in code. If the model fails, a fixed Spanish fallback from `copy/messages_es.py` goes out instead. Every event reaches WhatsApp through `conversation/outbound.py`, which owns the buttons, the 1024-character body limit and the text/buttons split. Jobs and the onboarding API use the same `notify`; their three events (`BrandSummaryReady`, `JobFailed`, `BrandGenerating`) are verbatim: fixed text, no model turn.
 
@@ -174,17 +187,20 @@ If the Owner taps Corregir algo, their next message is the correction, and `gene
 
 ## What survives a restart
 
-Only onboarding data is stored for good; the conversation and the posts live in memory and are lost on every restart or redeploy.
+With the database configured (`DATABASE_URL`, as in production), the onboarding data, the conversation and what the Agency learned in it survive a deploy; the Posts don't ([ADR 0030](../decisions/0030-orchestrator-memory-and-context.md)). The wiring is in `build_conversation` (`conversation/factory.py`).
 
 | Stored in Supabase (Postgres and Storage) | In memory only, lost on restart |
 |---|---|
-| Businesses, onboarding state, magic links | Conversation history (`InMemoryHistory`) |
-| Products and brand assets (wizard photos, logo) | Photos sent on WhatsApp (`InMemoryPhotos`) |
-| Brand Brain versions, Niche Reports | Posts and their status (`PostLifecycle`, over `InMemoryPosts`) |
-| Jobs | Generated JPEGs (`PublicImages`, newest 200) |
-| | Webhook dedupe store, only without `DATABASE_URL` (with it, `inbound_deliveries`) |
+| Businesses, onboarding state, magic links | Posts and their status (`PostLifecycle`, over `InMemoryPosts`) |
+| Products and Brand assets: wizard photos, the logo, and photos the Owner sent in the chat once `PhotoKeeper` keeps them | Generated JPEGs (`PublicImages`, newest 200) |
+| Brand Brain versions, Niche Reports | The short list of photos the Owner just sent (`InMemoryPhotos`) |
+| Conversation history and its Conversation summary (`DbHistory`) | The Approval inputs: the numbered list and the offered Post (`PostLifecycle`) |
+| Owner notes (`DbNotes`) | The guards and caps: `generation_in_progress`, the daily limits, the per-sender rate limit |
+| Jobs, the webhook dedupe store (`inbound_deliveries`), the pilot list (`pilot_senders`) | |
 
-A redeploy while a post is waiting means it can no longer be approved or published, and its image links return 404. The code comments point to tasks T17 and T19 to move this into the database and Storage. The guards that stop a second generation (`generation_in_progress`, the daily limits) are in memory for the same reason.
+Without the database (local development), the conversation, its summary and the Owner notes live in memory too (`InMemoryHistory`, `InMemoryNotes`), and so does the webhook dedupe store.
+
+A redeploy while a Post is waiting means it can no longer be approved or published, and its image links return 404. Tasks T17 and T19 move Posts into the database and Storage ([#181](https://github.com/guidodinello/build101/issues/181)).
 
 ## Where to read next
 
