@@ -11,8 +11,10 @@ from app.channels.base import ChannelPort, InboundMessage
 from app.channels.kapso_webhook import parse_message
 from app.conversation import onboarding
 from app.conversation.onboarding import OnboardingGate
+from app.conversation.voice_notes import VoiceNotes
 from app.copy import messages_es
 from app.db.models import Business, MagicLink
+from app.transcription.mock import MockTranscriber
 from tests.conftest import FIXTURES, requires_db
 from tests.fakes import FakeChannel
 
@@ -203,3 +205,30 @@ async def test_the_per_sender_state_stays_bounded_under_many_numbers(
     assert len(gate._welcomed_at) == 3
     assert len(gate._last_prompt) == 3
     assert len(gate._locks) == 0  # no lock outlives its turn
+
+
+async def test_a_name_said_in_a_voice_note_without_kapsos_transcript_moves_forward(
+    rig: Rig,
+) -> None:
+    await rig.gate.handle(text("Hola"), rig.channel)
+    untranscribed = message("audio", timestamp=after_the_welcome())
+    untranscribed.audio.transcript = None
+    voice_notes = VoiceNotes(rig.gate, MockTranscriber("Muebles Ramírez"), 3, rig.sessions)
+
+    await voice_notes.handle(untranscribed, rig.channel)
+
+    business = await rig.business()
+    assert business.name == "Muebles Ramírez"
+    assert business.onboarding_state == "awaiting_web_form"
+
+
+async def test_a_voice_note_too_long_for_the_name_says_so(rig: Rig) -> None:
+    await add_business(rig, "awaiting_name")
+    too_long = message("audio")
+    too_long.audio.transcript = None
+    too_long.audio.too_long = True
+
+    await rig.gate.handle(too_long, rig.channel)
+
+    assert rig.replies() == [messages_es.AUDIO_TOO_LONG]
+    assert (await rig.business()).onboarding_state == "awaiting_name"

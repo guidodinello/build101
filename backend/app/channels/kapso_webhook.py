@@ -162,7 +162,7 @@ def _to_inbound(webhook: _Webhook, raw: dict[str, Any], fallback_id: str | None)
                     media_id=audio.id,
                     mime_type=audio.mime_type,
                     byte_size=(kapso.media_data or _MediaData()).byte_size,
-                    provider_transcript=transcript or None,
+                    transcript=transcript or None,
                 ),
                 media=_media(audio.mime_type, kapso, audio.id),
                 **common,

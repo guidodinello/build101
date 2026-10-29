@@ -368,16 +368,16 @@ resp = await client.aio.models.generate_content(
 
 Voice notes are Must (F1.7, [ADR 0021](../decisions/0021-voice-notes-kapso-transcript-gemini-fallback.md)). Claude takes no audio, so the inbound handler turns each voice note into text before routing; after that it is handled exactly like a text message. Facts and alternatives: [research/voice-notes.md](../research/voice-notes.md) (read 2026-10-17).
 
-Order, in the inbound handler after dedupe:
+Order, in `VoiceNotes` (`app/conversation/voice_notes.py`), which sits after the pilot list and the rate limit and in front of the onboarding gate and the chat, so a Business name said in a voice note counts too:
 
-1. **Kapso's transcript.** If `InboundMessage.provider_transcript` (from `message.kapso.transcript.text`) is non-empty, use it. When Kapso fills it in, and how well it handles Rioplatense Spanish, are to confirm in the first-hour test.
-2. **Gemini fallback** (`TranscriberPort`, `app/transcription/`, selected by `TRANSCRIBE_FALLBACK`): if the audio is over `MAX_AUDIO_MB`, send `audio_too_long` and stop. Otherwise `ChannelPort.download_media(media_id)`, then one `google-genai` call to `TRANSCRIBE_MODEL` with the audio inline (`audio/ogg` and `audio/opus` are accepted, 20 MB per request; [Gemini audio](https://ai.google.dev/gemini-api/docs/audio)) and a fixed prompt: verbatim transcription in Rioplatense Spanish, no summary, no answer to what is said, empty output if there is no speech. Log the call's usage in `agent_runs` (`agent = 'transcribe'`; 32 tokens per second of audio).
-3. **Nothing usable** (both empty, or the call failed): send `audio_unclear` and don't run the orchestrator.
+1. **Kapso's transcript.** If `InboundAudio.transcript` (from `message.kapso.transcript.text`) is non-empty, use it, with no download and no call. When Kapso fills it in, and how well it handles Rioplatense Spanish, are to confirm in the first-hour test.
+2. **Gemini fallback** (`TranscriberPort`, `app/transcription/`, selected by `TRANSCRIBE_FALLBACK`): if the audio is over `MAX_AUDIO_MB` (Kapso's `byte_size`, or the downloaded bytes when Kapso doesn't say), mark it `too_long`: the chat answers the `AudioTooLong` event and the onboarding name step answers `audio_too_long`, with no transcription call. Otherwise `ChannelPort.download_media(media_id)`, then one structured call through `app/llm/client.py` to `TRANSCRIBE_MODEL` with the audio inline (`audio/ogg` and `audio/opus` are accepted, 20 MB per request; [Gemini audio](https://ai.google.dev/gemini-api/docs/audio)) and a fixed prompt (`app/transcription/prompts/transcribe.md`): verbatim transcription in Rioplatense Spanish, no summary, no answer to what is said, empty output if there is no speech. The Business name and its Catalog's Product names go along as an escaped `<vocabulary>` data block, so a Product name can't instruct the transcriber. The transcript then fills `InboundAudio.transcript`, so everything behind reads it like Kapso's. Each call logs the audio's bytes and seconds (from the Ogg granule position), the latency and an estimated cost (32 tokens per second of audio at the model's input price); it goes to `agent_runs` (`agent = 'transcribe'`) once that table is written.
+3. **Nothing usable** (both empty, or the download or the call failed): send `audio_unclear` and don't run the orchestrator.
 
 | Adapter | When |
 |---|---|
-| `gemini` | Default fallback, and the only path on plan B (Meta sends no transcript) |
-| `none` | Only Kapso's transcript; a voice note without one gets `audio_unclear` |
+| `gemini` | The planned fallback, and the only path on plan B (Meta sends no transcript). Turn it on only with a `GEMINI_API_KEY` from a billed project |
+| `none` | The default: only Kapso's transcript; a voice note without one gets `audio_unclear` |
 | `mock` | Local dev and tests: returns a fixed transcript |
 
 - Store the message as `type = 'audio'` with the transcript in `messages.text` ([data-model.md](data-model.md)); don't keep the audio bytes.

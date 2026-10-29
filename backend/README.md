@@ -118,6 +118,7 @@ Set on the service (`railway variable set KEY --stdin --service backend`, value 
 | `INSTAGRAM`, `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | `off` until our Meta app exists: the wizard skips Instagram and the id and secret aren't needed. Then `meta` and the Meta app's id and secret ([ADR 0028](../docs/decisions/0028-read-instagram-with-our-meta-app.md)). Unset is `mock`, which production refuses |
 | `INBOUND_HANDLER` | `chat` |
 | `VIDEO_GEN_ENABLED`, `VIDEO_GEN` | `false` while AI Reels are off ([ADR 0033](../docs/decisions/0033-ai-generated-reels-veo.md)); once on, `true` and `gemini`, with `GEMINI_VIDEO_API_KEY` |
+| `TRANSCRIBE_FALLBACK` | `none` (voice notes without Kapso's transcript get `audio_unclear`) until `GEMINI_API_KEY` is confirmed on a billed project, then `gemini` ([ADR 0021](../docs/decisions/0021-voice-notes-kapso-transcript-gemini-fallback.md)); `mock` is refused |
 | `WHATSAPP_CHANNEL` | `kapso` |
 | `KAPSO_API_KEY`, `KAPSO_WEBHOOK_SECRET`, `KAPSO_PHONE_NUMBER_ID` | the Kapso project key, the signing secret of the Railway webhook (see [below](#switching-whatsapp-between-railway-and-local-development)) and the number we send from |
 | `GEMINI_API_KEY` | a key of the Google project with billing linked |

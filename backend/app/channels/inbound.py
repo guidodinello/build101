@@ -267,8 +267,8 @@ def describe(message: InboundMessage) -> str:
         case "image":
             caption = f" ({message.text})" if message.text else ""
             return f"Recibí una foto{caption}"
-        case "audio" if message.audio and message.audio.provider_transcript:
-            return f'Recibí un audio: "{message.audio.provider_transcript}"'
+        case "audio" if message.audio and message.audio.transcript:
+            return f'Recibí un audio: "{message.audio.transcript}"'
         case "audio":
             return "Recibí un audio sin transcripción"
         case _:
