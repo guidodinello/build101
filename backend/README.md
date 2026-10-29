@@ -51,6 +51,8 @@ It needs `GEMINI_API_KEY` from a project with billing (Google Search grounding i
 
 ## Deploy
 
+When something breaks for an Owner (the bot goes quiet, a Post doesn't arrive, a deploy fails), start from the [pilot support runbook](../docs/operations/runbook.md).
+
 The backend runs on Railway ([ADR 0017](../docs/decisions/0017-backend-host-railway.md)): project `build101`, service `backend`, environment `production`, one replica in `us-east4-eqdc4a` (Virginia; Railway has no South America region). The image is built from [`Dockerfile`](Dockerfile): two stages, uv with `--frozen`, non-root, one uvicorn worker on `0.0.0.0:$PORT` ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)).
 
 ### How it deploys

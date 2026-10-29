@@ -27,6 +27,7 @@ Everything needed to build the MVP: an AI marketing agency for small business ow
 - **[architecture/](architecture/README.md)**: components, agents, data model, API and integrations.
 - **[design/](design/README.md)**: web app design (the post templates are superseded by AI-generated images, [ADR 0018](decisions/0018-ai-image-generation-service.md)).
 - **[implementation/](implementation/README.md)**: 24h plan, tasks and setup.
+- **[operations/](operations/README.md)**: keeping production working for pilot Owners: the support runbook.
 - **[research/](research/README.md)**: investigations behind the decisions.
 - **[decisions/](decisions/README.md)**: ADRs.
 
