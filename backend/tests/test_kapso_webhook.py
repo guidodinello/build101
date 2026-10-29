@@ -52,13 +52,13 @@ def test_image_prefers_metas_own_caption_field() -> None:
     assert parse_message(payload).text == "meta caption"
 
 
-def test_audio_carries_provider_transcript() -> None:
+def test_audio_carries_transcript() -> None:
     message = parse_message(body("audio"))
 
     assert message.kind == "audio"
     assert message.text is None
     assert message.audio is not None
-    assert message.audio.provider_transcript == "Quiero un post para la promo del sábado"
+    assert message.audio.transcript == "Quiero un post para la promo del sábado"
     assert message.audio.mime_type == "audio/ogg; codecs=opus"
     assert message.audio.byte_size == 5153
     assert message.audio.media_id == "wamid.FAKE0000000000000000000001"
@@ -68,7 +68,7 @@ def test_audio_without_transcript_has_none() -> None:
     payload = body("audio")
     payload["message"]["kapso"]["transcript"] = {"text": "  "}
 
-    assert parse_message(payload).audio.provider_transcript is None
+    assert parse_message(payload).audio.transcript is None
 
 
 def test_unknown_type_is_other() -> None:

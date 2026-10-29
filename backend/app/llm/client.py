@@ -119,6 +119,10 @@ def image_content(data: bytes, mime_type: interactions.ImageContentMimeType) -> 
     return {"type": "image", "data": base64.b64encode(data).decode(), "mime_type": mime_type}
 
 
+def audio_content(data: bytes, mime_type: interactions.AudioContentMimeType) -> Content:
+    return {"type": "audio", "data": base64.b64encode(data).decode(), "mime_type": mime_type}
+
+
 def user_step(text: str, *extra: Content) -> Step:
     return {"type": "user_input", "content": [text_content(text), *extra]}
 

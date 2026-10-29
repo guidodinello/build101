@@ -31,6 +31,7 @@ from app.publishing.mock import MOCK_ACCOUNT_ID
 from app.rendering.base import RendererPort
 from app.rendering.factory import build_renderer
 from app.storage import get_storage
+from app.transcription.factory import build_transcriber
 from app.videogen.base import VideoGenPort
 from app.videogen.factory import build_video_gen
 
@@ -48,6 +49,7 @@ from .photo_keeper import PhotoKeeper
 from .photos import InMemoryPhotos, local_now
 from .toolbox import Toolbox
 from .turns import KEEP_ALIVE_S, Turns
+from .voice_notes import VoiceNotes
 
 logger = logging.getLogger(__name__)
 
@@ -288,12 +290,18 @@ def build_conversation(
                     critic=design_critic(settings, model),
                 )
             )
-            if sessions is None:
-                return Conversation(chat.handler, chat.notify)
-            gate = OnboardingGate(
-                chat.handler, sessions, settings.frontend_url, settings.assistant_name
+            handler: InboundHandler = (
+                OnboardingGate(
+                    chat.handler, sessions, settings.frontend_url, settings.assistant_name
+                )
+                if sessions
+                else chat.handler
             )
-            return Conversation(gate, chat.notify)
+            # In front of the onboarding gate: a Business name said in a voice note counts too.
+            transcriber = build_transcriber(settings)
+            if transcriber:
+                handler = VoiceNotes(handler, transcriber, settings.max_audio_mb, sessions)
+            return Conversation(handler, chat.notify)
         case "echo":
             # No chat handler: events still reach the Owner, as their fixed text.
             history = DbHistory(get_sessionmaker()) if settings.database_url else InMemoryHistory()

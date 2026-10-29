@@ -16,6 +16,7 @@ from app.config import Settings
 from app.conversation.chat import ChatHandler
 from app.conversation.events import (
     ActionFailed,
+    AudioTooLong,
     AudioUnclear,
     BrandConfirmed,
     BrandFixAsked,
@@ -47,6 +48,7 @@ from app.conversation.history import InMemoryHistory
 from app.conversation.outbound import FixedReplies
 from app.conversation.photos import Photo, local_now
 from app.conversation.turns import MAX_STEPS
+from app.conversation.voice_notes import VoiceNotes
 from app.copy import messages_es
 from app.llm.client import Step, user_step
 from app.media.public import PublicImages, PublicVideos
@@ -55,6 +57,7 @@ from app.posts.store import Post, PostImage
 from app.publishing.mock import MOCK_ACCOUNT_ID, MockPublisher
 from app.rendering.mock import MockRenderer
 from app.storage import StorageError
+from app.transcription.mock import MockTranscriber
 from tests.conftest import FIXTURES, make_image
 from tests.fakes import (
     PERMALINK,
@@ -249,13 +252,37 @@ async def test_voice_note_is_answered_from_its_transcript() -> None:
 async def test_voice_note_without_transcript_is_an_event_the_model_answers() -> None:
     model, channel = ScriptedModel(replies=[text_reply(EVENT_REPLY)]), FakeChannel()
     incoming = message("audio")
-    incoming.audio.provider_transcript = None
+    incoming.audio.transcript = None
 
     await build(model)[0].handler.handle(incoming, channel)
 
     assert channel.sent == [(SENDER, EVENT_REPLY)]
     assert len(model.calls) == 1
     assert step_text(model.calls[0][-1]) == AudioUnclear().note()
+
+
+async def test_a_voice_note_we_transcribe_reaches_the_model_like_kapsos() -> None:
+    model, channel = ScriptedModel(), FakeChannel()
+    incoming = message("audio")
+    incoming.audio.transcript = None
+    voice_notes = VoiceNotes(build(model)[0].handler, MockTranscriber("Armame un post"), 3)
+
+    await voice_notes.handle(incoming, channel)
+
+    assert channel.sent == [(SENDER, REPLY_TEXT)]
+    assert last_user_text(model.calls[0]) == "[audio] Armame un post"
+
+
+async def test_a_voice_note_too_long_to_transcribe_is_an_event_the_model_answers() -> None:
+    model, channel = ScriptedModel(replies=[text_reply(EVENT_REPLY)]), FakeChannel()
+    incoming = message("audio")
+    incoming.audio.transcript = None
+    incoming.audio.too_long = True
+
+    await build(model)[0].handler.handle(incoming, channel)
+
+    assert channel.sent == [(SENDER, EVENT_REPLY)]
+    assert step_text(model.calls[0][-1]) == AudioTooLong().note()
 
 
 async def test_a_button_is_a_stale_button_event() -> None:
@@ -618,6 +645,22 @@ def test_factory_builds_each_handler() -> None:
     assert isinstance(echo.notify, FixedReplies)
 
 
+def test_factory_puts_the_fallback_transcriber_in_front_of_the_chat() -> None:
+    conversation = build_conversation(
+        Settings(
+            inbound_handler="chat",
+            gemini_api_key="key",
+            public_backend_url="https://backend.test",
+            transcribe_fallback="mock",
+        ),
+        PublicImages(),
+        MockPublisher(),
+        PublicVideos(),
+    )
+
+    assert isinstance(conversation.handler, VoiceNotes)
+
+
 POST_ID = "abcdef12"
 JOB_UUID = uuid.UUID("22222222-2222-2222-2222-222222222222")
 CREATE = call_reply("create_post", brief="mesa", asset_ids=["f1"], style="design")
@@ -796,6 +839,7 @@ EVENTS: list[Event] = [
     PublishFailed(POST_ID),
     PhotosReceived(("f1",)),
     AudioUnclear(),
+    AudioTooLong(),
     UnsupportedMedia(),
     PhotoUnreadable(),
     PhotoTooBig(MAX_PHOTO_MB),
@@ -954,6 +998,7 @@ FALLBACKS = [
     (PhotosReceived(("f1",)), messages_es.PHOTO_KEPT),
     (PhotosReceived(("f1", "f2")), messages_es.PHOTOS_KEPT),
     (AudioUnclear(), messages_es.AUDIO_UNCLEAR),
+    (AudioTooLong(), messages_es.AUDIO_TOO_LONG),
     (UnsupportedMedia(), messages_es.UNSUPPORTED_MEDIA),
     (PhotoUnreadable(), messages_es.PHOTO_UNREADABLE),
     (PhotoTooBig(MAX_PHOTO_MB), messages_es.photo_too_big(MAX_PHOTO_MB)),

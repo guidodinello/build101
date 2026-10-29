@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     # Videos are billed per second (ADR 0033), so they have their own cap, apart from designs
     max_videos_per_day: int = 2
     max_photo_mb: int = 10
+    # Voice notes Kapso sent without a transcript (ADR 0021). TRANSCRIBE_FALLBACK = gemini | none |
+    # mock; none answers them as unclear. Gemini only on a billed key: unpaid use trains on inputs
+    transcribe_fallback: Literal["gemini", "none", "mock"] = "none"
+    transcribe_model: str = "gemini-3.8-flash"
+    max_audio_mb: int = 3
     # A Niche Report saved by `python -m app.agents.niche_cli` (ADR 0025): its insights are the
     # trend notes of every sender, only when there is no database. With DATABASE_URL, the weekly
     # generate_niche_report job saves them in niche_reports, per niche, and this is ignored
@@ -126,6 +131,7 @@ def adapters_in_use(settings: Settings) -> dict[str, str]:
         "PUBLISHER": settings.publisher,
         "INSTAGRAM": settings.instagram,
         "VIDEO_GEN": settings.video_gen if settings.video_gen_enabled else "off",
+        "TRANSCRIBE_FALLBACK": settings.transcribe_fallback,
         "INBOUND_HANDLER": settings.inbound_handler,
         "WHATSAPP_CHANNEL": settings.whatsapp_channel,
     }

@@ -311,7 +311,7 @@ async def test_a_voice_note_transcript_counts_as_the_owners_words() -> None:
     rig.add_post("p1")
     audio = message("audio")
     assert audio.audio
-    audio.audio.provider_transcript = "subilo"
+    audio.audio.transcript = "subilo"
 
     await rig.chat.handler.handle(audio, rig.channel)
     await rig.finish()

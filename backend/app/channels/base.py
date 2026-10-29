@@ -39,7 +39,10 @@ class InboundAudio(BaseModel):
     media_id: str
     mime_type: str
     byte_size: int | None = None
-    provider_transcript: str | None = None
+    # Kapso's transcript or, when it sent none, the fallback transcriber's (ADR 0021)
+    transcript: str | None = None
+    # Over MAX_AUDIO_MB with no transcript of Kapso's: never sent to the transcriber
+    too_long: bool = False
 
 
 class InboundMessage(BaseModel):

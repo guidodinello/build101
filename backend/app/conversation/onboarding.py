@@ -94,6 +94,9 @@ class OnboardingGate:
                 reply = messages_es.name_ack_link(name, self._new_link(db, business))
             elif self._prompted_recently(message.sender):
                 return ""
+            elif state == OnboardingState.AWAITING_NAME and too_long(message):
+                self._last_prompt.set(message.sender, time.monotonic())
+                reply = messages_es.AUDIO_TOO_LONG
             elif state == OnboardingState.AWAITING_NAME:
                 reply = self._welcome(message.sender)
             else:
@@ -128,6 +131,10 @@ def business_name(message: InboundMessage) -> str | None:
     """The name as the Owner wrote or said it; the wizard's first step lets them fix it."""
     words = message.text if message.kind == "text" else None
     if message.kind == "audio" and message.audio:
-        words = message.audio.provider_transcript
+        words = message.audio.transcript
     words = (words or "").strip()
     return words[:MAX_NAME_CHARS] or None
+
+
+def too_long(message: InboundMessage) -> bool:
+    return message.kind == "audio" and message.audio is not None and message.audio.too_long

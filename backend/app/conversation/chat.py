@@ -8,6 +8,7 @@ from app.copy import messages_es
 
 from .button_router import ButtonRouter
 from .events import (
+    AudioTooLong,
     AudioUnclear,
     Event,
     PhotosReceived,
@@ -70,20 +71,21 @@ class ChatHandler:
                     words=message.text,
                     attached=bool(photos),
                 )
-            case "audio" if message.audio and message.audio.provider_transcript:
-                # ADR 0021: a voice note is handled as its transcript. The Gemini fallback
-                # transcriber (TranscriberPort) isn't built yet, so no transcript = unclear.
-                transcript = f"[audio] {message.audio.provider_transcript}"
+            case "audio" if message.audio and message.audio.transcript:
+                # ADR 0021: a voice note is handled as its transcript, Kapso's or ours.
+                transcript = f"[audio] {message.audio.transcript}"
                 return await self._turns.owner_turn(
                     message.sender,
                     message.message_id,
                     request(photos, transcript),
                     channel,
-                    words=message.audio.provider_transcript,
+                    words=message.audio.transcript,
                     attached=bool(photos),
                 )
+            case "audio" if message.audio and message.audio.too_long:
+                event: Event = AudioTooLong()
             case "audio":
-                event: Event = AudioUnclear()
+                event = AudioUnclear()
             case "button" if message.button:
                 tapped = await self._buttons.handle(
                     message.sender, message.button.id, channel, self._turns.notify
