@@ -6,6 +6,7 @@ One read answers for the orchestrator's context and for the posts made in the ch
 
 import uuid
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Protocol
 
 from app.agents.schemas import BrandBrain
@@ -42,6 +43,7 @@ class BusinessFacts:
     website: str | None
     instagram_handle: str | None
     current_offer: str | None
+    current_offer_since: date | None  # None for a promo saved before the wizard dated it
     onboarding_state: str
     awaiting: str | None  # conversation_state["awaiting"], e.g. "brand_correction"
 

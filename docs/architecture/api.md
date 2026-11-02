@@ -111,7 +111,7 @@ type Questionnaire = {
   posts_per_week: 2 | 3 | 5 | null;      // not asked by the wizard (no scheduler yet, T30); 3 when null
   emoji_policy: "many" | "few" | "none" | null;
   avoid: string | null;
-  current_offer: string | null;
+  current_offer: string | null;     // the backend also stores the date it was given (not returned)
 };
 ```
 

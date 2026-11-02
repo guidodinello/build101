@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -73,6 +74,11 @@ async def latest_trend_notes(db: AsyncSession, business: Business) -> str | None
     return trend_notes(report) if report else None
 
 
+def offer_since(preferences: dict[str, object]) -> date | None:
+    since = preferences.get("current_offer_since")
+    return date.fromisoformat(since) if isinstance(since, str) else None
+
+
 class DbKnowledge:
     """Knowledge read fresh from Postgres on every call, in one session."""
 
@@ -112,6 +118,7 @@ class DbKnowledge:
             website=business.website,
             instagram_handle=business.instagram_handle,
             current_offer=preferences.get("current_offer"),
+            current_offer_since=offer_since(preferences),
             onboarding_state=state_of(business),
             awaiting=awaiting(business),
         )

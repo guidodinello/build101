@@ -3,6 +3,7 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -422,6 +423,37 @@ async def test_preferences_round_trip(client: httpx.AsyncClient) -> None:
     response = await client.get(f"/api/o/{token}")
 
     assert response.json()["preferences"] == PREFERENCES
+
+
+async def test_the_promo_keeps_the_date_it_was_first_given(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    today = datetime.now(ZoneInfo("America/Montevideo")).date().isoformat()
+
+    async def saved_since(preferences: dict[str, Any]) -> str | None:
+        await client.put(f"/api/o/{token}/preferences", json=preferences)
+        async with sessions() as db:
+            business = await db.scalar(select(Business))
+            assert business
+            return business.onboarding_data["preferences"]["current_offer_since"]
+
+    assert await saved_since(PREFERENCES) == today
+    async with sessions() as db:
+        business = await db.scalar(select(Business))
+        assert business
+        saved = business.onboarding_data["preferences"]
+        business.onboarding_data = {
+            **business.onboarding_data,
+            "preferences": saved | {"current_offer_since": "2026-10-01"},
+        }
+        await db.commit()
+
+    assert await saved_since(PREFERENCES) == "2026-10-01"
+    assert await saved_since(PREFERENCES | {"current_offer": "20% en mesas"}) == today
+    assert await saved_since(PREFERENCES | {"current_offer": None}) is None
+    response = await client.get(f"/api/o/{token}")
+    assert "current_offer_since" not in response.json()["preferences"]
 
 
 @pytest.mark.parametrize(

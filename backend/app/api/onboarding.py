@@ -9,7 +9,8 @@ import uuid
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy import delete, func, select
@@ -342,9 +343,22 @@ async def save_preferences(
     settings: SettingsDep,
 ) -> schemas.OnboardingState:
     business = onboarding.business
-    business.onboarding_data = {**business.onboarding_data, "preferences": body.model_dump()}
+    preferences = body.model_dump() | {
+        "current_offer_since": _offer_since(business, body.current_offer)
+    }
+    business.onboarding_data = {**business.onboarding_data, "preferences": preferences}
     await session.commit()
     return await _state(onboarding, session, storage, settings)
+
+
+def _offer_since(business: Business, offer: str | None) -> str | None:
+    """The local date the Owner gave the promo, kept while its text stays the same (#194)."""
+    if not offer:
+        return None
+    saved: dict[str, Any] = business.onboarding_data.get("preferences") or {}
+    if saved.get("current_offer") == offer and saved.get("current_offer_since"):
+        return saved["current_offer_since"]
+    return datetime.now(ZoneInfo(business.timezone)).date().isoformat()
 
 
 @router.post("/uploads")

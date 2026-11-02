@@ -95,7 +95,7 @@ Priorities: `reel_preview`, `reel_preview_link`, `reel_change_prompt`, `video_sa
 • *Para quién:* parejas y familias que arman su casa
 • *De qué hablamos:* 1) piezas a medida 2) el taller por dentro 3) ideas para tu living
 • *Colores:* verde oliva y madera natural
-• *Promo:* 15% en sillas este finde (la activo cuando me confirmes)
+• *Promo:* 15% en sillas este finde (te pregunto antes de usarla)
 ```
 
 The *Promo* line appears only when the owner answered the onboarding promo question; once Offers exist (F8.6, Could) it is a draft Offer that `brand_ok` activates.

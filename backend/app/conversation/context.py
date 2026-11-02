@@ -4,15 +4,20 @@ It changes only when the Brand Brain, the Catalog, the notes or the summary chan
 system prompt stays a stable prefix across turns and Gemini's implicit caching can hit.
 """
 
+from datetime import date, timedelta
+
 from app.knowledge.base import BusinessFacts, BusinessKnowledge, CatalogItem
 from app.prompts import tagged as escaped
 
+# A promo older than this may be over: the orchestrator asks before using it in a post (#194).
+OFFER_FRESH_FOR = timedelta(days=7)
 
-def render(context: BusinessKnowledge) -> str:
+
+def render(context: BusinessKnowledge, today: date) -> str:
     """The blocks the prompt's "What you know" section describes; empty ones are left out."""
     blocks: list[str] = []
     if context.business:
-        blocks.append(tagged("business", business_lines(context.business)))
+        blocks.append(tagged("business", business_lines(context.business, today)))
     if context.brand:
         brand = context.brand.model_dump_json(exclude={"whatsapp_summary"})
         blocks.append(tagged("brand_brain", brand))
@@ -30,7 +35,7 @@ def render(context: BusinessKnowledge) -> str:
     return "\n".join(blocks)
 
 
-def business_lines(facts: BusinessFacts) -> str:
+def business_lines(facts: BusinessFacts, today: date) -> str:
     fields = {
         "name": facts.name,
         "owner_name": facts.owner_name,
@@ -39,11 +44,25 @@ def business_lines(facts: BusinessFacts) -> str:
         "location": facts.location,
         "website": facts.website,
         "instagram": facts.instagram_handle,
-        "current_offer": facts.current_offer,
+        "current_offer": offer_line(facts, today),
         "onboarding_state": facts.onboarding_state,
         "awaiting": facts.awaiting,
     }
     return "\n".join(f"{key}: {value}" for key, value in fields.items() if value)
+
+
+def offer_line(facts: BusinessFacts, today: date) -> str | None:
+    """The onboarding promo with its date, flagged when the Owner must confirm it first."""
+    if not facts.current_offer:
+        return None
+    since = facts.current_offer_since
+    if since is None:
+        status = "date unknown: confirm with the Owner before using it in a post"
+    elif today - since > OFFER_FRESH_FOR:
+        status = f"given {since:%d/%m/%Y}, over 7 days ago: confirm with the Owner first"
+    else:
+        status = f"given {since:%d/%m/%Y}"
+    return f"{facts.current_offer} ({status})"
 
 
 def catalog_line(item: CatalogItem) -> str:
