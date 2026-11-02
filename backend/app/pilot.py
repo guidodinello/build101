@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.channels.base import ChannelError, ChannelPort, InboundMessage
-from app.channels.inbound import InboundHandler, mark_read, mask, phone_digits
+from app.channels.inbound import InboundHandler, mask, phone_digits
 from app.config import Settings, get_settings
 from app.db.models import PilotSender
 from app.db.session import get_sessionmaker
@@ -164,8 +164,6 @@ class PilotGate:
         if allowed:
             await self._inner.handle(message, channel)
             return
-        if message.kind == "reaction":
-            await mark_read(message.message_id, channel, typing=False)
         number = phone_digits(message.sender)
         if self._replied.get(number):
             logger.info("%s from %s dropped: not on the pilot list", message.kind, mask(number))
