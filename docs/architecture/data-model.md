@@ -54,7 +54,7 @@ create table businesses (
   instagram_handle   text,
   timezone           text not null default 'America/Montevideo',
   onboarding_state   text not null default 'new',     -- values and moves: backend/app/onboarding/state.py, the only writer
-  onboarding_data    jsonb not null default '{}',    -- raw wizard answers: questionnaire, 3 words, colors (products live in `products`); "instagram": the import (see Notes)
+  onboarding_data    jsonb not null default '{}',    -- raw wizard answers: questionnaire ("preferences", with "current_offer_since": the local date the promo was given), 3 words, colors (products live in `products`); "instagram": the import (see Notes)
   conversation_state jsonb not null default '{}',    -- {"awaiting": "post_feedback", "post_id": "..."}; the onboarding keys ("awaiting": "brand_correction", "resume_state") are written only by backend/app/onboarding/state.py
   conversation_summary text,                         -- the orchestrator's summary of the steps compacted out of conversation_steps (ADR 0030, migration 0003)
   channel            text not null default 'whatsapp',

@@ -41,7 +41,7 @@ At most 600 characters, for WhatsApp, in this exact format (one bullet per line,
 • *De qué hablamos:* 1) first pillar 2) second pillar 3) third pillar
 • *Colores:* the colors named in plain words ("verde oliva y madera natural"), never hex codes
 
-Add a fifth bullet only when the questionnaire has a current promo: • *Promo:* the promo in a few words (la activo cuando me confirmes).
+Add a fifth bullet only when the questionnaire has a current promo: • *Promo:* the promo in a few words (te pregunto antes de usarla).
 
 When the Owner has no colors yet, the *Colores* bullet says that we choose them together later in the chat.
 

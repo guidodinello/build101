@@ -313,7 +313,7 @@ class Turns:
 
     async def _system_for(self, sender: str) -> str:
         """The instructions, then what the model knows about this Business (ADR 0030)."""
-        known = render(await self._knowledge.of(sender))
+        known = render(await self._knowledge.of(sender), self._now().date())
         return f"{self._system}\n\n{known}" if known else self._system
 
     async def _remember(

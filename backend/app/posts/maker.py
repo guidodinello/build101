@@ -227,6 +227,7 @@ class PostMaker:
                 [note.text for note in known.notes],
                 remake,
                 known.trend_notes,
+                [item.price for item in known.catalog if item.price],
             )
             paths = await self._send(sender, post.images, post.text, channel)
             self._keep(sender, post_id, args, photos, paths, post)
@@ -271,6 +272,7 @@ class PostMaker:
         notes: list[str] | None = None,
         remake: Remake | None = None,
         trend_notes: str | None = None,
+        prices: list[str] | None = None,
     ) -> RenderedPost:
         """The post's images in order (one per photo, unless a design asks for a slide count).
 
@@ -280,7 +282,7 @@ class PostMaker:
         references = [photo.data for photo in photos]
         previous = remake.previous if remake else None
         if remake is not None and remake.images is not None:
-            copy = await self._drafter.recaption(references, remake.previous, brand, notes)
+            copy = await self._drafter.recaption(references, remake.previous, brand, notes, prices)
             return RenderedPost(
                 remake.images,
                 post_text(copy.caption, copy.hashtags),
@@ -289,7 +291,7 @@ class PostMaker:
             )
         if args.style == "photos":
             copy = await self._drafter.copy(
-                args.brief, references, brand, notes, previous, trend_notes
+                args.brief, references, brand, notes, previous, trend_notes, prices
             )
             images = [await decode(to_post_image, data) for data in references]
             return RenderedPost(
@@ -306,6 +308,7 @@ class PostMaker:
             notes,
             previous,
             trend_notes,
+            prices,
         )
         style_prompt = brief.style_prompt
         one_per_photo = len(photos) == count
