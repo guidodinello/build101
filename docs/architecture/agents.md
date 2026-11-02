@@ -93,7 +93,7 @@ class BrandBrain(BaseModel):
     pillars: list[ContentPillar]      # 3–5
     featured_products: list[FeaturedProduct]   # ≤ 5, chosen from the Catalog; the full Catalog lives in `products`
     ctas: list[str]                   # "Escribinos por WhatsApp", "Visitá el showroom"
-    hashtags: list[str]               # 10–20, mix of niche + local
+    hashtags: list[str]               # 10–20, mix of niche + local: a pool each Post picks 3–5 from
     posting: PostingPrefs             # posts_per_week, preferred_days, preferred_time ("19:00")
     constraints: list[str]            # hard "never" rules from the owner
     visual_identity: VisualIdentity   # Owner colors win; neutral palette when they have none
@@ -223,7 +223,7 @@ A prompt can be composed from several files: a line that is only `{{include <pat
       title: str                       # internal title, ≤ 40 chars
       caption: str                     # 150–900 chars, Instagram-ready, line breaks allowed
       cta: str                         # included at the end of the caption too
-      hashtags: list[str]              # 5–10, without '#' duplicates, lowercase, no spaces
+      hashtags: list[str]              # 3–5; code keeps at most 5: '#' + one word, no case-insensitive duplicates
   ```
 
 - Rules: voice from the Brand Brain; first line must hook (≤ 80 chars); no invented facts (prices, discounts, dates only if in a referenced Product or Offer, or in an ad-hoc brief from the Owner); respect emoji policy; Rioplatense *vos*; never mention AI. Keep the angle and the concrete details the Owner asked for in `owner_words` ("que se luzca la madera", "que se note que es a medida", "sin nombrar al cliente"); the caption's voice still comes from the Brand Brain, not from how the Owner writes in the chat. In revise mode, apply the feedback literally and change as little else as possible.
@@ -511,10 +511,18 @@ Posts from an approved plan are generated **sequentially** in plan order, so pre
 
 Run after every agent call, before saving:
 
-- Caption length 150–900 chars for images, 80–400 for Reels; hashtags 5–10, no duplicates.
+- Caption length 150–900 chars for images, 80–400 for Reels; hashtags 3–5, no duplicates.
 - Carousels: 3–10 slides (the Owner's number when given), `slides[0].role == "cover"`, headline ≤ 6 words, body ≤ 20 words; the price/discount rule below applies to slide text too.
 - No phrase from `constraints` appears in the caption (case-insensitive substring).
 - No price/discount numbers in copy unless they appear in a referenced Product or active Offer, or in the Owner's own ad-hoc brief (regex for `%`, `$`, `USD`, `UYU`).
 - Referenced asset, Product and Offer IDs belong to the business and are not archived; a Reel's video is `reel_suitable`.
 
 On failure: one retry with the violations listed; then accept and log a warning (demo shouldn't block).
+
+**Enforced in code today** ([#194](https://github.com/guidodinello/build101/issues/194), `backend/app/posts/checks.py`), on every image Post, design and caption-only change, before the Owner sees it:
+
+- **Hashtags**: each becomes `#` plus one word (letters, digits, `_`), number-only tags and case-insensitive repeats are dropped, and at most 5 are kept (Instagram's limit since December 2025). The drafter is asked for 3–5 and a first line with the Product and the place; the Brand Brain's `hashtags` are a pool.
+- **Invented figures**: a price (`$`, `$U`, `U$S`, `US$`, pesos, dólares, USD, UYU), a percentage (`%`, "por ciento") or a date (`20/11`, "8 de diciembre") whose digits appear in no valid source is removed with its sentence, from the caption and from each Slide's kicker, headline, body and checklist items. Valid sources: the brief, the Brand Brain (not its numeric settings, nor the brand summary, which repeats the onboarding promo), the Catalog Products' prices, the Owner notes, and on a remake the earlier brief and the Owner's change. Digits are compared, so "$4.900" matches "4900". A headline can't be empty, so only the figure is cut from it, and the kicker or the business name stands in for a headline that was only a figure. When every caption sentence is removed, the Brand Brain's first CTA stands in (an empty caption without a Brand Brain), so the figure still doesn't go out. Each removal is logged at INFO with the field and a count, never the text.
+- **Onboarding promo**: the wizard stores the date the Owner gave the promo (`preferences.current_offer_since`, kept while its text is unchanged). The Orchestrator's `<business>` shows it, and flags a promo older than 7 days, or one saved before the date was stored, so the Orchestrator asks the Owner whether it's still on before putting it in a brief.
+
+Not enforced yet (AIQ-3 follow-ups): the `constraints` phrases, caption length, a retry listing the violations, and checking the brief's numbers against the Owner's own messages.

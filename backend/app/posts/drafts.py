@@ -23,6 +23,8 @@ from app.carousel.schemas import (
 from app.llm.client import Content, StructuredModel, image_content, text_content
 from app.prompts import tagged
 
+from .checks import clean_hashtags, cut_unsourced, drop_unsourced, known_figures
+
 logger = logging.getLogger(__name__)
 
 AGENT = "post_drafter"
@@ -93,19 +95,21 @@ class PostDrafter:
         notes: list[str] | None = None,
         previous: PreviousPost | None = None,
         trend_notes: str | None = None,
+        prices: list[str] | None = None,
     ) -> PostCopy:
         request = (
             f"Write the caption for a post of {len(photos)} photo(s), posted as they are, "
             f"without a design.\n\nBrief: {brief}{revision_section(previous)}"
             f"{trend_section(trend_notes)}"
         )
-        return await self._model.structured(
+        copy = await self._model.structured(
             AGENT,
             system_prompt(brand, notes),
             request_content(request, photos),
             PostCopy,
             "medium",
         )
+        return checked_copy(copy, figure_sources(brief, brand, notes, prices, previous), brand)
 
     async def recaption(
         self,
@@ -113,19 +117,22 @@ class PostDrafter:
         previous: PreviousPost,
         brand: BrandBrain | None = None,
         notes: list[str] | None = None,
+        prices: list[str] | None = None,
     ) -> PostCopy:
         """New caption and hashtags for a post whose images stay exactly as they are."""
         request = (
             "Rewrite only the caption and the hashtags of this post: its images stay exactly as "
             f"they are.\n\nBrief: {previous.brief}{revision_section(previous)}"
         )
-        return await self._model.structured(
+        copy = await self._model.structured(
             AGENT,
             system_prompt(brand, notes),
             request_content(request, photos),
             PostCopy,
             "medium",
         )
+        known = figure_sources(previous.brief, brand, notes, prices, previous)
+        return checked_copy(copy, known, brand)
 
     async def design(
         self,
@@ -137,6 +144,7 @@ class PostDrafter:
         notes: list[str] | None = None,
         previous: PreviousPost | None = None,
         trend_notes: str | None = None,
+        prices: list[str] | None = None,
     ) -> tuple[CarouselCopy, CarouselBrief]:
         one_per_photo = (
             " Each slide is built from its own photo, in order."
@@ -154,14 +162,17 @@ class PostDrafter:
             CarouselDraft,
             "medium",
         )
-        slides = fit_slides(draft.slides, slide_count)
+        known = figure_sources(brief, brand, notes, prices, previous)
+        slides = [
+            checked_slide(slide, known, brand) for slide in fit_slides(draft.slides, slide_count)
+        ]
         family = draft.family
         if family == "panorama" and (one_per_photo or len(slides) == 1):
             logger.info("panorama doesn't fit this design, using editorial")
             family = "editorial"
         copy = CarouselCopy(
-            caption=draft.caption,
-            hashtags=draft.hashtags,
+            caption=checked_caption(draft.caption, known, brand),
+            hashtags=clean_hashtags(draft.hashtags),
             slides=[
                 SlideCopy(
                     role=slide.role,
@@ -208,6 +219,71 @@ def system_prompt(brand: BrandBrain | None, notes: list[str] | None = None) -> s
         listed = "\n".join(f"- {note}" for note in notes)
         prompt += f"\n<owner_notes>\n{listed}\n</owner_notes>\n"
     return prompt
+
+
+def figure_sources(
+    brief: str,
+    brand: BrandBrain | None,
+    notes: list[str] | None,
+    prices: list[str] | None,
+    previous: PreviousPost | None,
+) -> set[str]:
+    """The numbers a Post may state: the brief, the Brand Brain, the Owner notes, the Catalog
+    prices, and on a remake the earlier brief and the Owner's change."""
+    sources = [brief, *(notes or []), *(prices or [])]
+    if brand is not None:
+        # Not its numbers that are no fact a Post could state, nor the summary, which repeats
+        # the onboarding promo: the Orchestrator decides when that goes in a brief.
+        sources.append(
+            brand.model_dump_json(
+                exclude={
+                    "whatsapp_summary": True,
+                    "posting": True,
+                    "visual_identity": True,
+                    "voice": {"formality", "humor"},
+                }
+            )
+        )
+    if previous is not None:
+        sources += [previous.brief, previous.change or ""]
+    return known_figures(sources)
+
+
+def checked_caption(caption: str, known: set[str], brand: BrandBrain | None) -> str:
+    """The caption without unsourced figures. When no sentence is left, the Brand Brain's first
+    call to action stands in, so the figure still doesn't go out."""
+    checked = drop_unsourced(caption, known, "caption")
+    if checked or not caption.strip():
+        return checked
+    logger.info("every caption sentence had an unsourced figure: the brand's CTA stands in")
+    return brand.ctas[0] if brand and brand.ctas else ""
+
+
+def checked_copy(copy: PostCopy, known: set[str], brand: BrandBrain | None) -> PostCopy:
+    return PostCopy(
+        caption=checked_caption(copy.caption, known, brand),
+        hashtags=clean_hashtags(copy.hashtags),
+    )
+
+
+def checked_slide(slide: SlideDraft, known: set[str], brand: BrandBrain | None) -> SlideDraft:
+    """The slide's text without unsourced figures. The headline can't be empty, so only the
+    figure is cut from it, and the kicker or the business name stands in for a bare figure."""
+    kicker = drop_unsourced(slide.kicker, known, "slide kicker")
+    headline = drop_unsourced(slide.headline, known, "slide headline") or cut_unsourced(
+        slide.headline, known, "slide headline"
+    )
+    if not headline:
+        headline = kicker or (brand.business_name if brand else "")
+    items = [drop_unsourced(item, known, "slide item") for item in slide.items]
+    return slide.model_copy(
+        update={
+            "kicker": kicker,
+            "headline": headline,
+            "body": drop_unsourced(slide.body, known, "slide body"),
+            "items": [item for item in items if item],
+        }
+    )
 
 
 def trend_section(trend_notes: str | None) -> str:
