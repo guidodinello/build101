@@ -267,6 +267,38 @@ async def test_the_log_lines_mask_the_number(caplog: pytest.LogCaptureFixture) -
     assert STRANGER not in caplog.text
 
 
+async def test_an_off_list_reaction_gets_only_the_waitlist_reply() -> None:
+    gate, inner = gated(PILOT)
+    channel = FakeChannel()
+    reaction = inbound("text", message_id="wamid.reaction").model_copy(
+        update={
+            "kind": "reaction",
+            "reaction_emoji": "👍",
+            "reaction_message_id": "wamid.target",
+        }
+    )
+
+    await gate.handle(reaction, channel)
+
+    assert inner.handled == []
+    assert channel.read == []
+    assert channel.sent == [(STRANGER, WAITLIST)]
+
+
+async def test_off_list_reactions_get_no_read_receipt_and_one_waitlist_reply() -> None:
+    gate, inner = gated(PILOT)
+    channel = FakeChannel()
+    first = inbound("text", message_id="wamid.first").model_copy(update={"kind": "reaction"})
+    second = inbound("text", message_id="wamid.second").model_copy(update={"kind": "reaction"})
+
+    await gate.handle(first, channel)
+    await gate.handle(second, channel)
+
+    assert inner.handled == []
+    assert channel.read == []
+    assert channel.sent == [(STRANGER, WAITLIST)]
+
+
 class BrokenSessions:
     def __call__(self) -> AsyncSession:
         raise OperationalError("select", {}, Exception("database down"))

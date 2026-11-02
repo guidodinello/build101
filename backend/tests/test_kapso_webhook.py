@@ -34,6 +34,22 @@ def test_button_reply_keeps_our_button_id() -> None:
     assert message.text is None
 
 
+def test_reaction_carries_emoji_and_target_message_id() -> None:
+    payload = body("text")
+    payload["message"] = {
+        "id": "wamid.REACTION",
+        "from": "59899000001",
+        "type": "reaction",
+        "reaction": {"message_id": "wamid.TARGET", "emoji": "👍"},
+    }
+
+    message = parse_message(payload)
+
+    assert message.kind == "reaction"
+    assert message.reaction_emoji == "👍"
+    assert message.reaction_message_id == "wamid.TARGET"
+
+
 def test_image_carries_caption_from_kapso_and_media_url() -> None:
     message = parse_message(body("image"))
 

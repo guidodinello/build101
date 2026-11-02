@@ -13,10 +13,10 @@ this module mints. The Approval inputs (`listed`, `offered`, `has_photos`) live 
 chat asks "what may this message publish?" instead of computing it.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
-from app.conversation.approval import Approval, Offer, decide, publish_offer
+from app.conversation.approval import YES_EMOJI, Approval, Offer, decide, publish_offer
 from app.conversation.photos import Photo
 
 from .store import APPROVABLE, InMemoryPosts, Post
@@ -212,6 +212,37 @@ class PostLifecycle:
             self._offered[sender] = Offer(target, later=offer == "approve_later")
         else:
             self._offered.pop(sender, None)
+
+    def note_sent(self, sender: str, message_id: str) -> None:
+        """Bind the publish question to the exact WhatsApp message that was delivered."""
+        if offer := self._offered.get(sender):
+            self._offered[sender] = replace(offer, message_id=message_id)
+
+    def reaction_approval(
+        self,
+        sender: str,
+        emoji: str | None,
+        target_message_id: str | None,
+        recent_photos: list[Photo],
+    ) -> Approval:
+        """A yes reaction approves only the Post asked about in that exact delivered message."""
+        offer = self._offered.get(sender)
+        if (
+            offer is None
+            or emoji not in YES_EMOJI
+            or not target_message_id
+            or target_message_id != offer.message_id
+        ):
+            return Approval()
+        if offer.later:
+            # Same answer as a typed "sí" to "¿Lo subo mañana?": scheduling isn't built.
+            return Approval(reason="scheduling_not_available")
+        pending = self.pending(sender)
+        if offer.post_id not in {post.id for post in pending} or photos_after(
+            recent_photos, pending
+        ):
+            return Approval()
+        return Approval(post_id=offer.post_id)
 
 
 def photos_after(photos: list[Photo], pending: list[Post]) -> list[Photo]:

@@ -54,6 +54,9 @@ class OnboardingGate:
         self._last_prompt = TtlMap[float](ttl_s, MAX_TRACKED_KEYS)
 
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
+        if message.kind == "reaction":
+            await self._chat.handle(message, channel)
+            return
         async with self._locks.hold(message.sender):
             try:
                 reply = await self._onboard(message)

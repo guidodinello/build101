@@ -84,6 +84,18 @@ class Toolbox:
         logger.debug("tool %s result: %s", call.name, result)
         return result
 
+    def approve_reaction(
+        self, sender: str, post_id: str, approval: Approval, channel: ChannelPort, notify: Notify
+    ) -> dict[str, Any]:
+        """Use the same code-enforced publish guard for a qualifying WhatsApp reaction."""
+        return self._publisher.approve(
+            sender,
+            {"post_id": post_id, "next": "publish_now"},
+            approval,
+            channel,
+            notify,
+        )
+
     async def _dispatch(
         self,
         call: FunctionCall,

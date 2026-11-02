@@ -40,6 +40,16 @@ class ChatHandler:
 
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None:
         match message.kind:
+            case "reaction":
+                await mark_read(message.message_id, channel, typing=False)
+                async with self._history.lock(message.sender):
+                    await self._turns.reaction(
+                        message.sender,
+                        message.reaction_emoji,
+                        message.reaction_message_id,
+                        channel,
+                    )
+                return
             case "album":
                 return
             case "image" if message.media:
@@ -54,7 +64,8 @@ class ChatHandler:
                 logger.warning("database failed for %s", mask(message.sender), exc_info=True)
                 reply = messages_es.REPLY_FAILED
             if reply is not None:
-                await channel.send_text(message.sender, reply)
+                sent_id = await channel.send_text(message.sender, reply)
+                self._turns.note_sent(message.sender, sent_id)
 
     async def _answer(
         self, message: InboundMessage, photos: list[Photo], channel: ChannelPort
@@ -115,7 +126,8 @@ class ChatHandler:
                     words=captions,
                     attached=True,
                 )
-                await channel.send_text(sender, reply)
+                sent_id = await channel.send_text(sender, reply)
+                self._turns.note_sent(sender, sent_id)
             else:
                 event = PhotosReceived(tuple(photo.id for photo in photos))
                 await self._turns.event_turn(sender, event, channel, last_message_id)

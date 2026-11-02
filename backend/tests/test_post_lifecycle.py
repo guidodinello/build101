@@ -46,6 +46,48 @@ def test_a_new_post_waits_for_the_owner_and_is_pending() -> None:
     assert lifecycle.pending(SENDER) == [post]
 
 
+def test_yes_reaction_approves_only_the_exact_message_that_asked_to_publish() -> None:
+    lifecycle, [post] = lifecycle_with("p1")
+    lifecycle.note_reply(SENDER, "¡Listo! ¿Lo subo?", post.id)
+    lifecycle.note_sent(SENDER, "wamid.OUT")
+
+    assert lifecycle.reaction_approval(SENDER, "👍", "wamid.OTHER", []) == Approval()
+    assert lifecycle.reaction_approval(SENDER, "❤️", "wamid.OUT", []) == Approval()
+    assert lifecycle.reaction_approval(SENDER, "👍", "wamid.OUT", []).post_id == post.id
+
+
+def test_yes_reaction_cannot_approve_after_new_photos_arrive() -> None:
+    lifecycle, [post] = lifecycle_with("p1")
+    lifecycle.note_reply(SENDER, "¡Listo! ¿Lo subo?", post.id)
+    lifecycle.note_sent(SENDER, "wamid.OUT")
+
+    approval = lifecycle.reaction_approval(SENDER, "👍", "wamid.OUT", [photo(timedelta(seconds=1))])
+
+    assert approval == Approval()
+    assert post.status == "pending_approval"
+
+
+def test_yes_reaction_to_a_later_question_gets_the_scheduling_answer() -> None:
+    lifecycle, [post] = lifecycle_with("p1")
+    lifecycle.note_reply(SENDER, "¿Te parece si lo subo mañana?", post.id)
+    lifecycle.note_sent(SENDER, "wamid.OUT")
+
+    approval = lifecycle.reaction_approval(SENDER, "👍", "wamid.OUT", [])
+
+    assert approval == Approval(reason="scheduling_not_available")
+    assert post.status == "pending_approval"
+
+
+def test_yes_reaction_to_an_earlier_question_approves_nothing() -> None:
+    lifecycle, [post] = lifecycle_with("p1")
+    lifecycle.note_reply(SENDER, "¡Listo! ¿Lo subo?", post.id)
+    lifecycle.note_sent(SENDER, "wamid.FIRST")
+    lifecycle.note_reply(SENDER, "¡Listo! ¿Lo subo?", post.id)
+    lifecycle.note_sent(SENDER, "wamid.SECOND")
+
+    assert lifecycle.reaction_approval(SENDER, "👍", "wamid.FIRST", []) == Approval()
+
+
 def test_the_tap_approves_only_a_post_still_waiting_for_it() -> None:
     lifecycle, [post] = lifecycle_with("p1")
 

@@ -148,10 +148,15 @@ class Approval:
 
 @dataclass(frozen=True, slots=True)
 class Offer:
-    """The post the assistant's last message asked to publish, and whether it asked about later."""
+    """The post the assistant's last message asked to publish, and whether it asked about later.
+
+    `message_id`: the WhatsApp message that carried the question, once it was delivered; a yes
+    reaction approves only when it targets this message.
+    """
 
     post_id: str
     later: bool = False
+    message_id: str | None = None
 
 
 def decide(

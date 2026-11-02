@@ -61,6 +61,11 @@ class _Audio(BaseModel):
     mime_type: str
 
 
+class _Reaction(BaseModel):
+    message_id: _OptStr = None
+    emoji: _OptStr = None
+
+
 class _Unsupported(BaseModel):
     type: object = None
 
@@ -93,6 +98,7 @@ class _Message(BaseModel):
     interactive: _Block = None
     image: _Block = None
     audio: _Block = None
+    reaction: _Optional[_Reaction] = None
     unsupported: _Optional[_Unsupported] = None
     kapso: _Optional[_Kapso] = None
 
@@ -165,6 +171,14 @@ def _to_inbound(webhook: _Webhook, raw: dict[str, Any], fallback_id: str | None)
                     provider_transcript=transcript or None,
                 ),
                 media=_media(audio.mime_type, kapso, audio.id),
+                **common,
+            )
+        case "reaction":
+            reaction = message.reaction or _Reaction()
+            return InboundMessage(
+                kind="reaction",
+                reaction_emoji=reaction.emoji,
+                reaction_message_id=reaction.message_id,
                 **common,
             )
         # WhatsApp announces an album with this message, then sends each photo on its own.
