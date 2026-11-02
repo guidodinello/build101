@@ -2,7 +2,8 @@
 
 Hashtags are cleaned and capped at Instagram's limit. A price, percentage or date the drafter
 wrote is kept only when its digits appear in a valid source: the brief, the Brand Brain, the
-Catalog prices or the Owner notes (AGENTS.md: agents never invent facts).
+Catalog prices or the Owner notes, as the same kind of figure (AGENTS.md: agents never
+invent facts).
 """
 
 import logging
@@ -14,19 +15,37 @@ logger = logging.getLogger(__name__)
 MAX_HASHTAGS = 5
 
 _NUMBER = r"\d+(?:[.,]\d+)*"
-_MONTHS = (
-    "enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|"
-    "noviembre|diciembre"
+MONTHS = {
+    name: number
+    for number, names in enumerate(
+        [
+            ["enero"],
+            ["febrero"],
+            ["marzo"],
+            ["abril"],
+            ["mayo"],
+            ["junio"],
+            ["julio"],
+            ["agosto"],
+            ["septiembre", "setiembre"],
+            ["octubre"],
+            ["noviembre"],
+            ["diciembre"],
+        ],
+        start=1,
+    )
+    for name in names
+}
+_PRICE = rf"(?:US\$|U\$S|\$U|\$)\s?{_NUMBER}|{_NUMBER}\s?(?:pesos|d[oó]lares|usd|uyu)\b"
+_PERCENT = rf"{_NUMBER}\s?(?:%|por\s?ciento\b)(?:\s?off\b|\s+de\s+descuento\b)?"
+_DATE = (
+    r"\b(?P<day>\d{1,2})/(?P<month>\d{1,2})(?:/\d{2,4})?\b"
+    rf"|\b(?P<word_day>\d{{1,2}})\s+de\s+(?P<word_month>{'|'.join(MONTHS)})\b"
 )
 FIGURE = re.compile(
-    rf"(?:US\$|U\$S|\$U|\$)\s?{_NUMBER}"
-    rf"|{_NUMBER}\s?(?:%|por\s?ciento\b)(?:\s?off\b|\s+de\s+descuento\b)?"
-    rf"|{_NUMBER}\s?(?:pesos|d[oó]lares|usd|uyu)\b"
-    rf"|\b\d{{1,2}}/\d{{1,2}}(?:/\d{{2,4}})?\b"
-    rf"|\b\d{{1,2}}\s+de\s+(?:{_MONTHS})\b",
-    re.IGNORECASE,
+    rf"(?P<price>{_PRICE})|(?P<percent>{_PERCENT})|(?P<date>{_DATE})", re.IGNORECASE
 )
-_SOURCE_NUMBER = re.compile(r"\d+(?:[.,/]\d+)*")
+_BARE_NUMBER = re.compile(_NUMBER)
 _SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
 # Words left dangling at the end of a headline once its figure is cut ("Sillas a").
 _DANGLING = {"a", "al", "con", "de", "del", "desde", "el", "en", "hasta", "la", "por", "y"}
@@ -56,16 +75,37 @@ def digits(text: str) -> str:
     return re.sub(r"\D", "", text).lstrip("0") or "0"
 
 
-def known_figures(sources: list[str]) -> set[str]:
-    """Every number in the valid sources, compared by its digits."""
-    return {digits(number) for text in sources for number in _SOURCE_NUMBER.findall(text)}
+# A figure as a fact: its kind and its value, so "$15" never passes for a source's "15%".
+type Figure = tuple[str, str]
 
 
-def unsourced(text: str, known: set[str]) -> list[str]:
-    return [match.group() for match in FIGURE.finditer(text) if digits(match.group()) not in known]
+def figure(match: re.Match[str]) -> Figure:
+    """("price" | "percent", the digits) or ("date", "day/month")."""
+    if match.group("price"):
+        return "price", digits(match.group())
+    if match.group("percent"):
+        return "percent", digits(match.group())
+    day = match.group("day") or match.group("word_day")
+    month = match.group("month") or MONTHS[match.group("word_month").casefold()]
+    return "date", f"{int(day)}/{int(month)}"
 
 
-def drop_unsourced(text: str, known: set[str], field: str) -> str:
+def known_figures(sources: list[str]) -> set[Figure]:
+    """Every figure the valid sources state. A bare number ("4900" in the Catalog) may back a
+    price or a percentage, never a date: a date is backed only by the same day and month."""
+    known: set[Figure] = set()
+    for text in sources:
+        known.update(figure(match) for match in FIGURE.finditer(text))
+        for number in _BARE_NUMBER.findall(FIGURE.sub(" ", text)):
+            known.update({("price", digits(number)), ("percent", digits(number))})
+    return known
+
+
+def unsourced(text: str, known: set[Figure]) -> list[str]:
+    return [match.group() for match in FIGURE.finditer(text) if figure(match) not in known]
+
+
+def drop_unsourced(text: str, known: set[Figure], field: str) -> str:
     """`text` without the sentences that state a figure no source has; line breaks stay."""
     removed = 0
     lines: list[str] = []
@@ -84,9 +124,9 @@ def drop_unsourced(text: str, known: set[str], field: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
-def cut_unsourced(text: str, known: set[str], field: str) -> str:
+def cut_unsourced(text: str, known: set[Figure], field: str) -> str:
     """`text` with only its unsourced figures cut, for a slot that can't be left empty."""
-    cut = FIGURE.sub(lambda m: "" if digits(m.group()) not in known else m.group(), text)
+    cut = FIGURE.sub(lambda m: "" if figure(m) not in known else m.group(), text)
     if cut == text:
         return text
     logger.info("cut an unsourced figure from the %s", field)

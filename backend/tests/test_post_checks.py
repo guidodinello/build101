@@ -188,8 +188,40 @@ def test_cutting_a_figure_drops_the_words_left_dangling() -> None:
     assert cut_unsourced("Sillas: 15% off", set(), "headline") == "Sillas"
 
 
-def test_known_figures_compare_digits() -> None:
-    assert known_figures(["$4.900", "15 %", "el 05/11"]) == {"4900", "15", "511"}
+def test_known_figures_keep_the_kind_and_compare_digits() -> None:
+    assert known_figures(["$4.900", "15 %", "el 05/11", "8 de diciembre"]) == {
+        ("price", "4900"),
+        ("percent", "15"),
+        ("date", "5/11"),
+        ("date", "8/12"),
+    }
+
+
+def test_a_bare_number_backs_a_price_or_a_percentage_but_never_a_date() -> None:
+    assert known_figures(["Mesa 4900"]) == {("price", "4900"), ("percent", "4900")}
+
+
+@pytest.mark.parametrize(
+    ("caption", "source"),
+    [
+        ("Sillas a $15.", "Sillas con 15% off"),
+        ("Hasta el 8 de diciembre.", "Mesa a $8"),
+        ("Mesa a $20.11.", "Llegan el 20/11"),
+        ("Sillas con 15% off.", "Sillas a $U 15"),
+    ],
+)
+async def test_a_figure_of_another_kind_is_no_source(caption: str, source: str) -> None:
+    copy = await PostDrafter(photo_copy(f"Mesa de roble. {caption}")).copy(source, [])
+
+    assert copy.caption == "Mesa de roble."
+
+
+async def test_a_date_matches_the_same_day_and_month_written_either_way() -> None:
+    caption = "Mesa de roble. Llega el 5 de noviembre."
+
+    copy = await PostDrafter(photo_copy(caption)).copy("Mesa, llega el 5/11", [])
+
+    assert copy.caption == caption
 
 
 async def test_removals_are_logged_without_the_owners_text(

@@ -23,7 +23,7 @@ from app.carousel.schemas import (
 from app.llm.client import Content, StructuredModel, image_content, text_content
 from app.prompts import tagged
 
-from .checks import clean_hashtags, cut_unsourced, drop_unsourced, known_figures
+from .checks import Figure, clean_hashtags, cut_unsourced, drop_unsourced, known_figures
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +227,7 @@ def figure_sources(
     notes: list[str] | None,
     prices: list[str] | None,
     previous: PreviousPost | None,
-) -> set[str]:
+) -> set[Figure]:
     """The numbers a Post may state: the brief, the Brand Brain, the Owner notes, the Catalog
     prices, and on a remake the earlier brief and the Owner's change."""
     sources = [brief, *(notes or []), *(prices or [])]
@@ -249,7 +249,7 @@ def figure_sources(
     return known_figures(sources)
 
 
-def checked_caption(caption: str, known: set[str], brand: BrandBrain | None) -> str:
+def checked_caption(caption: str, known: set[Figure], brand: BrandBrain | None) -> str:
     """The caption without unsourced figures. When no sentence is left, the Brand Brain's first
     call to action stands in, so the figure still doesn't go out."""
     checked = drop_unsourced(caption, known, "caption")
@@ -259,14 +259,14 @@ def checked_caption(caption: str, known: set[str], brand: BrandBrain | None) -> 
     return brand.ctas[0] if brand and brand.ctas else ""
 
 
-def checked_copy(copy: PostCopy, known: set[str], brand: BrandBrain | None) -> PostCopy:
+def checked_copy(copy: PostCopy, known: set[Figure], brand: BrandBrain | None) -> PostCopy:
     return PostCopy(
         caption=checked_caption(copy.caption, known, brand),
         hashtags=clean_hashtags(copy.hashtags),
     )
 
 
-def checked_slide(slide: SlideDraft, known: set[str], brand: BrandBrain | None) -> SlideDraft:
+def checked_slide(slide: SlideDraft, known: set[Figure], brand: BrandBrain | None) -> SlideDraft:
     """The slide's text without unsourced figures. The headline can't be empty, so only the
     figure is cut from it, and the kicker or the business name stands in for a bare figure."""
     kicker = drop_unsourced(slide.kicker, known, "slide kicker")
