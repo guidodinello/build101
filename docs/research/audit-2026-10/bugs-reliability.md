@@ -74,6 +74,7 @@ Effort: S is under half a day, M is 1-2 days, L is about a week, XL is more than
 ### BUG-1: Every Business's approved post is published to the one Zernio account in env
 
 - **Severity**: high · **Effort**: M · **Confidence**: high · **Verified**: adjusted
+- **Status (2026-11-02)**: fixed, by [#228](https://github.com/guidodinello/build101/pull/228); details in [status.md](status.md).
 - **Evidence**:
   - [conversation/factory.py:48-54](../../../backend/app/conversation/factory.py): one global `account_id = settings.zernio_account_id`.
   - [conversation/factory.py:72-74](../../../backend/app/conversation/factory.py): the `PostPublisher` is built once with that `account_id` for all senders.
@@ -91,6 +92,7 @@ Effort: S is under half a day, M is 1-2 days, L is about a week, XL is more than
 ### BUG-2: Deploys silently drop in-flight Owner turns, post generations and publishes (Railway gives 0 s to drain)
 
 - **Severity**: high · **Effort**: M · **Confidence**: high · **Verified**: adjusted
+- **Status (2026-11-02)**: partly fixed, by [#225](https://github.com/guidodinello/build101/pull/225), [#226](https://github.com/guidodinello/build101/pull/226); details in [status.md](status.md).
 - **Evidence**:
   - [Railway: deployments reference](https://docs.railway.com/reference/deployments) (read 2026-10-19): "By default, it is given 0 seconds to gracefully shutdown before being forcefully stopped with a SIGKILL"; old and new deployments overlap briefly.
   - [Dockerfile:34-35](../../../backend/Dockerfile): uvicorn runs as PID 1 and gets SIGTERM, with no graceful timeout configured.
@@ -109,6 +111,7 @@ Effort: S is under half a day, M is 1-2 days, L is about a week, XL is more than
 ### BUG-3: Revising a post leaves the old version approvable, so "subilo" publishes the version the Owner asked to change
 
 - **Severity**: medium · **Effort**: S · **Confidence**: high · **Verified**: adjusted
+- **Status (2026-11-02)**: in flight, by [#247](https://github.com/guidodinello/build101/pull/247) (open, draft); details in [status.md](status.md).
 - **Evidence**:
   - [posts/maker.py:131-157](../../../backend/app/posts/maker.py): `revise_post` starts the remake but never changes `old.status`.
   - [posts/maker.py:366-374](../../../backend/app/posts/maker.py): the old post is marked `replaced` only when the revision finishes, and only if it is still `APPROVABLE`.
@@ -125,6 +128,7 @@ Effort: S is under half a day, M is 1-2 days, L is about a week, XL is more than
 ### BUG-4: Jobs interrupted by a restart fail silently; an interrupted `generate_brand` leaves the Business stuck in `generating_brand`
 
 - **Severity**: medium · **Effort**: S · **Confidence**: high · **Verified**: adjusted
+- **Status (2026-11-02)**: fixed, by [#226](https://github.com/guidodinello/build101/pull/226); details in [status.md](status.md).
 - **Evidence**:
   - [jobs/runner.py:88-109](../../../backend/app/jobs/runner.py): `fail_stale` marks rows failed with no `_tell_owner` and no requeue.
   - [jobs/runner.py:162-170](../../../backend/app/jobs/runner.py): `except Exception` does not catch `CancelledError` (and a SIGKILL runs nothing).
@@ -175,6 +179,7 @@ Effort: S is under half a day, M is 1-2 days, L is about a week, XL is more than
 ### BUG-7: WhatsApp reactions get a "no te entiendo" reply, and any button, sticker or reaction swallows the pending photo batch
 
 - **Severity**: medium · **Effort**: S · **Confidence**: medium · **Verified**: adjusted
+- **Status (2026-11-02)**: partly fixed, by [#235](https://github.com/guidodinello/build101/pull/235); details in [status.md](status.md).
 - **Evidence**:
   - [channels/kapso_webhook.py:33-64](../../../backend/app/channels/kapso_webhook.py): no `reaction` case, so it falls to `kind='other'`.
   - [channels/kapso_webhook.py:21](../../../backend/app/channels/kapso_webhook.py): a Kapso batch envelope (`batch: true`, `data: [...]`) would be dropped as unparseable.
@@ -337,7 +342,7 @@ Effort: S is under half a day, M is 1-2 days, L is about a week, XL is more than
 ### BUG-18: Wizard PUT `/brand` and `/preferences` can overwrite the Instagram import's `onboarding_data` (lost update)
 
 - **Severity**: low · **Effort**: S · **Confidence**: medium · **Verified**: confirmed
-- **Status (2026-10-20)**: partly fixed, by [#129](https://github.com/guidodinello/build101/pull/129); details in [status.md](status.md).
+- **Status (2026-11-02)**: partly fixed, by [#129](https://github.com/guidodinello/build101/pull/129); details in [status.md](status.md).
 - **Evidence**:
   - [api/onboarding.py:234-236](../../../backend/app/api/onboarding.py): a read-modify-write of the JSONB loaded at request start.
   - [api/onboarding.py:248-250](../../../backend/app/api/onboarding.py): the same for preferences.

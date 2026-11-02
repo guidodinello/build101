@@ -27,7 +27,7 @@ Start at [summary.md](summary.md): the cross-dimension synthesis with the execut
 | File | What it covers | Findings | Date |
 |---|---|---|---|
 | [summary.md](summary.md) | Cross-dimension synthesis: executive summary, P0 and P1 fix lists, a digest of each dimension, roadmap and how the audit was done. Start here | 225 (merged) | 2026-10-19 |
-| [status.md](status.md) | Which findings the PRs merged or opened after the audit fixed, partly fixed or have in flight, and what remains of each | 38 of 225 | 2026-10-20 |
+| [status.md](status.md) | Which findings the PRs merged or opened after the audit fixed, partly fixed or have in flight, and what remains of each | 55 of 225 | 2026-11-02 |
 | [unit-economics.md](unit-economics.md) | COST: cost per Owner (text models, scene images, WhatsApp messages, Zernio, platform plans), gross margin at the ADR 0031 prices, savings levers, Zernio or our own Meta app | 17 (2 high, 8 medium, 7 low) | 2026-10-19 |
 | [models.md](models.md) | MOD: the model for each agent, scene images and voice transcription, compared on price, quality, latency and migration risk | 17 (1 high, 8 medium, 8 low) | 2026-10-19 |
 | [ai-quality.md](ai-quality.md) | AIQ: the Orchestrator and its agents (prompt quality, factual guarantees, evals, traceability, latency, model cost), plus a proposed eval harness | 21 (2 high, 12 medium, 7 low) | 2026-10-19 |

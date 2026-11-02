@@ -117,6 +117,7 @@ Move to [procrastinate](https://procrastinate.readthedocs.io/en/stable/) (psycop
 ### ARCH-2: An interrupted `generate_brand` leaves the Business stuck in `generating_brand` forever, with no message to the Owner and no retry
 
 - **Severity**: high · **Effort**: M · **Confidence**: high · **Verified**: adjusted
+- **Status (2026-11-02)**: fixed, by [#226](https://github.com/guidodinello/build101/pull/226), [#225](https://github.com/guidodinello/build101/pull/225); details in [status.md](status.md).
 - **Evidence**:
   - [jobs/runner.py:81-86](../../../backend/app/jobs/runner.py): `stop()` cancels running tasks.
   - [jobs/runner.py:162-170](../../../backend/app/jobs/runner.py): `except Exception` does not catch `asyncio.CancelledError`, so the update at lines 171-183 never runs and the row stays `running`.
@@ -134,7 +135,7 @@ Move to [procrastinate](https://procrastinate.readthedocs.io/en/stable/) (psycop
 ### ARCH-3: Inbound WhatsApp messages are not persisted: acknowledged with 200, then handled in a BackgroundTask, with in-memory dedupe
 
 - **Severity**: medium · **Effort**: M · **Confidence**: high · **Verified**: adjusted
-- **Status (2026-10-20)**: partly fixed, by [#155](https://github.com/guidodinello/build101/pull/155); details in [status.md](status.md).
+- **Status (2026-11-02)**: partly fixed, by [#155](https://github.com/guidodinello/build101/pull/155), [#225](https://github.com/guidodinello/build101/pull/225); details in [status.md](status.md).
 - **Evidence**:
   - [channels/router.py:109-117](../../../backend/app/channels/router.py): in-memory dedupe, then `background_tasks.add_task` and an immediate 200.
   - [channels/inbound.py:28-43](../../../backend/app/channels/inbound.py): `InMemoryDedupeStore`, "replaced by T02", although T02 is done.
@@ -198,7 +199,7 @@ Move to [procrastinate](https://procrastinate.readthedocs.io/en/stable/) (psycop
 ### ARCH-7: No single composition root: `@cache` singletons, two lifespans and import cycles, so jobs can't reach the orchestrator (the ADR 0026 gap)
 
 - **Severity**: medium · **Effort**: M · **Confidence**: high · **Verified**: adjusted
-- **Status (2026-10-20)**: in flight, by [#81](https://github.com/guidodinello/build101/pull/81) (open, draft); details in [status.md](status.md).
+- **Status (2026-11-02)**: partly fixed, by [#81](https://github.com/guidodinello/build101/pull/81), [#225](https://github.com/guidodinello/build101/pull/225); details in [status.md](status.md).
 - **Evidence**:
   - Import cycles: [posts/maker.py:18-19](../../../backend/app/posts/maker.py) and [posts/publish.py:10-11](../../../backend/app/posts/publish.py) import `app.conversation.*`, while [conversation/chat.py:27-29](../../../backend/app/conversation/chat.py) imports `app.posts.*`; [jobs/brand.py:13-14](../../../backend/app/jobs/brand.py) imports `app.conversation.brand` and `history`, while [conversation/library.py:10](../../../backend/app/conversation/library.py) and [conversation/context.py:14](../../../backend/app/conversation/context.py) import `app.jobs.brand`.
   - [channels/router.py:11, 23-35](../../../backend/app/channels/router.py): the channel adapter module imports `conversation.factory` and owns the `@cache` singletons for the channel, the dedupe store and the handler.
@@ -216,7 +217,7 @@ Move to [procrastinate](https://procrastinate.readthedocs.io/en/stable/) (psycop
 ### ARCH-8: A durable-queue path for the job runner: per-kind slots, `run_after`, retries, heartbeats and periodic jobs, plus when to split web and worker
 
 - **Severity**: medium · **Effort**: M · **Confidence**: high · **Verified**: adjusted
-- **Status (2026-10-20)**: partly fixed, by [#63](https://github.com/guidodinello/build101/pull/63); details in [status.md](status.md).
+- **Status (2026-11-02)**: partly fixed, by [#63](https://github.com/guidodinello/build101/pull/63), [#226](https://github.com/guidodinello/build101/pull/226), [#219](https://github.com/guidodinello/build101/pull/219); details in [status.md](status.md).
 - **Evidence**:
   - [jobs/runner.py:26, 111-135](../../../backend/app/jobs/runner.py): one pool of 4 slots shared by every kind; claims have no `run_after` or priority.
   - [jobs/brand.py:117-137](../../../backend/app/jobs/brand.py): `generate_brand` sleeps in a slot for up to 60 s waiting for `analyze_asset` jobs that need slots.
@@ -234,6 +235,7 @@ Move to [procrastinate](https://procrastinate.readthedocs.io/en/stable/) (psycop
 ### ARCH-9: Config falls back to mocks in production: a missing env var makes the bot tell an Owner a post is live, with a MOCK permalink
 
 - **Severity**: medium · **Effort**: S · **Confidence**: high · **Verified**: adjusted
+- **Status (2026-11-02)**: partly fixed, by [#227](https://github.com/guidodinello/build101/pull/227); details in [status.md](status.md).
 - **Evidence**:
   - [config.py:11](../../../backend/app/config.py): `env: Literal["local", "prod"]` is never read anywhere in `app/`.
   - [config.py:26, 34, 58, 65](../../../backend/app/config.py): `IMAGE_GEN`, `RENDERER`, `PUBLISHER` and `INSTAGRAM` all default to `mock`.
@@ -312,7 +314,7 @@ Move to [procrastinate](https://procrastinate.readthedocs.io/en/stable/) (psycop
 ### ARCH-14: `chat.py` (702 lines) is a god class, and the posts layer is typed on concrete in-memory stores
 
 - **Severity**: low · **Effort**: M · **Confidence**: high · **Verified**: adjusted
-- **Status (2026-10-20)**: in flight, by [#81](https://github.com/guidodinello/build101/pull/81) (open, draft); details in [status.md](status.md).
+- **Status (2026-11-02)**: partly fixed, by [#81](https://github.com/guidodinello/build101/pull/81); details in [status.md](status.md).
 - **Evidence**:
   - [conversation/chat.py:89-580](../../../backend/app/conversation/chat.py): `ChatHandler` does photo debounce, keep-alive and typing, the LLM tool loop, tool dispatch, approval offer tracking, context assembly, fallbacks and compaction scheduling.
   - [conversation/chat.py:276-309 and 334-386](../../../backend/app/conversation/chat.py): `_llm_turn` and `_event_turn` duplicate the refresh-library, recent/unseen, `step_with_photos`, keep-alive, converse, mark-seen, remember and offer sequence.
@@ -346,7 +348,7 @@ Move to [procrastinate](https://procrastinate.readthedocs.io/en/stable/) (psycop
 ### ARCH-16: RLS is disabled on 18 of 19 public tables, including `conversation_steps`, `owner_notes` and `magic_links`
 
 - **Severity**: low · **Effort**: S · **Confidence**: high · **Verified**: adjusted
-- **Status (2026-10-20)**: fixed, by [#158](https://github.com/guidodinello/build101/pull/158); details in [status.md](status.md).
+- **Status (2026-11-02)**: fixed, by [#158](https://github.com/guidodinello/build101/pull/158); details in [status.md](status.md).
 - **Evidence**:
   - [ADR 0003](../../decisions/0003-database-supabase-sqlalchemy.md), lines 13 and 19: "RLS off for the demo"; "turn RLS on first".
   - [0002_instagram_import.sql:11-13](../../../backend/migrations/versions/0002_instagram_import.sql): RLS is enabled only on `social_accounts`.
