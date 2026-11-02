@@ -64,3 +64,17 @@ export function palette(colors: BrandColors): Palette {
     accentOnPaper: contrast(colors.accent, paper) >= 3 ? colors.accent : block,
   };
 }
+
+function hex([r, g, b]: Rgb): string {
+  return `#${[r, g, b].map((value) => Math.round(value).toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+}
+
+export function mix(first: string, second: string, amount: number): string {
+  const [a, b] = [rgb(first), rgb(second)];
+  return hex([0, 1, 2].map((i) => (a[i] ?? 0) * (1 - amount) + (b[i] ?? 0) * amount) as Rgb);
+}
+
+export function deepest(colors: BrandColors): string {
+  const candidates = [colors.text, colors.primary, colors.secondary, INK];
+  return candidates.reduce((darkest, color) => (luminance(color) < luminance(darkest) ? color : darkest));
+}

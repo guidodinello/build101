@@ -52,10 +52,19 @@ BINDING_COOKIE_PATH = CALLBACK_PATH.rsplit("/", 1)[0]
 # Signs the OAuth state when there is no app secret, i.e. INSTAGRAM=mock
 DEV_STATE_SECRET = secrets.token_hex(32)
 CONNECT_EXPIRED = "Se venció la conexión con Instagram. Volvé al formulario y probá de nuevo."
+INSTAGRAM_UNAVAILABLE = "Por ahora no podemos conectar tu Instagram. Seguí con el formulario."
 
 InstagramDep = Annotated[InstagramPort, Depends(get_instagram)]
 
-router = APIRouter()
+
+async def require_instagram(settings: SettingsDep) -> None:
+    """With INSTAGRAM=off there is no connect: nothing reaches Meta and no mock data is made."""
+    if settings.instagram == "off":
+        raise ApiError(404, "instagram_unavailable", INSTAGRAM_UNAVAILABLE)
+
+
+# First in every route: it runs before `InstagramDep`, which has no adapter to build when off
+router = APIRouter(dependencies=[Depends(require_instagram)])
 
 
 class ConnectResponse(BaseModel):

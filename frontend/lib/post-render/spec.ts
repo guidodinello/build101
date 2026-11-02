@@ -1,13 +1,32 @@
+import { DEFAULT_FONT_PAIR, FONT_PAIRS, type FontPair } from "./fonts";
 import { readImageSize } from "./image-size";
 
-export const FAMILIES = ["editorial", "numbers", "panorama"] as const;
+export const FAMILIES = ["editorial", "numbers", "panorama", "minimal", "notes", "scrapbook"] as const;
 export const ROLES = ["cover", "content", "cta"] as const;
 export const TONES = ["light", "dark"] as const;
+export const EMPHASES = ["standard", "statement"] as const;
+export const FOCUSES = ["center", "top", "bottom", "left", "right"] as const;
+export const SURFACES = ["auto", "paper", "brand", "dark"] as const;
 export const MAX_SLIDES = 10;
+export const MAX_ITEMS = 5;
 
 export type Family = (typeof FAMILIES)[number];
 export type SlideRole = (typeof ROLES)[number];
 export type Tone = (typeof TONES)[number];
+export type Emphasis = (typeof EMPHASES)[number];
+export type Focus = (typeof FOCUSES)[number];
+export type Surface = (typeof SURFACES)[number];
+
+export const LAYOUTS = {
+  editorial: ["overlay", "frame", "photo-top", "full-bleed", "quote"],
+  numbers: ["poster", "band", "split"],
+  panorama: [],
+  minimal: ["window", "type", "side"],
+  notes: ["card", "checklist"],
+  scrapbook: ["polaroid", "taped"],
+} as const satisfies Record<Family, readonly string[]>;
+
+export type Layout = (typeof LAYOUTS)[Family][number] | "auto";
 
 export type BrandColors = {
   primary: string;
@@ -20,6 +39,7 @@ export type BrandColors = {
 export type Brand = {
   name: string | null;
   colors: BrandColors;
+  fonts: FontPair;
 };
 
 export type Logo = {
@@ -32,17 +52,28 @@ export type SlideSpec = {
   index: number;
   count: number;
   role: SlideRole;
+  layout: Layout;
+  emphasis: Emphasis;
+  focus: Focus;
+  surface: Surface;
   kicker: string | null;
   headline: string;
   body: string | null;
+  items: string[];
   image: string;
   logo: Logo | null;
   brand: Brand;
 };
 
+// The backend sends a scene and a logo as data URIs, at most about 3.1 MB together; Vercel itself
+// rejects bodies over 4.5 MB.
+export const MAX_BODY_BYTES = 4_000_000;
+// Everything but the two images: the text fields at their limits, even fully \u-escaped, take a few KB.
+const SPEC_OVERHEAD_BYTES = 64_000;
 // A scene is 1080×1350 and its logo at most 600 px (backend `media/images.py`); a worst-case noise
-// JPEG is a 1.25 MB data URI and a noise PNG logo 1.8 MB, so 2.5 MB leaves headroom.
-export const MAX_DATA_URI_CHARS = 2_500_000;
+// JPEG is a 1.25 MB data URI and a noise PNG logo 1.8 MB. A slide carries up to two images, so both at
+// this cap still fit the body cap, and an oversized image gets 422 rather than 413.
+export const MAX_DATA_URI_CHARS = Math.floor((MAX_BODY_BYTES - SPEC_OVERHEAD_BYTES) / 2);
 export const MAX_IMAGE_SIDE = 4096;
 const HEADER_BASE64_CHARS = 65_536;
 
@@ -60,8 +91,7 @@ export class ImageRejectedError extends SpecError {
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const IMAGE_DATA_URI = /^data:image\/(jpeg|png|webp);base64,/;
-const COLOR_KEYS = ["primary", "secondary", "accent", "background", "text"] as const;
-const LIMITS = { kicker: 40, headline: 120, body: 320, name: 80 };
+const LIMITS = { kicker: 40, headline: 120, body: 320, item: 80, name: 80 };
 
 type Json = Record<string, unknown>;
 
@@ -78,6 +108,21 @@ function text(value: unknown, field: string, max: number): string {
   if (typeof value !== "string" || !value.trim()) throw new SpecError(`${field} must be a non-empty string`);
   if (value.length > max) throw new SpecError(`${field} is longer than ${max} characters`);
   return value.trim();
+}
+
+function knob<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
+  return typeof value === "string" && (options as readonly string[]).includes(value) ? (value as T) : fallback;
+}
+
+function layout(value: unknown, family: Family): Layout {
+  return knob<Layout>(value, LAYOUTS[family], "auto");
+}
+
+function items(value: unknown): string[] {
+  if (value === null || value === undefined) return [];
+  if (!Array.isArray(value)) throw new SpecError("items must be a list of strings");
+  if (value.length > MAX_ITEMS) throw new SpecError(`items has more than ${MAX_ITEMS} entries`);
+  return value.map((item, index) => text(item, `items[${index}]`, LIMITS.item));
 }
 
 function optionalText(value: unknown, field: string, max: number): string | null {
@@ -121,13 +166,18 @@ function headerBytes(dataUri: string): Uint8Array {
 
 function colors(value: unknown): BrandColors {
   if (!isObject(value)) throw new SpecError("brand.colors must be an object");
-  const parsed = {} as BrandColors;
-  for (const key of COLOR_KEYS) {
-    const color = value[key];
-    if (typeof color !== "string" || !HEX.test(color)) throw new SpecError(`brand.colors.${key} must be #RRGGBB`);
-    parsed[key] = color.toUpperCase();
-  }
-  return parsed;
+  return {
+    primary: hexColor(value.primary, "primary"),
+    secondary: hexColor(value.secondary, "secondary"),
+    accent: hexColor(value.accent, "accent"),
+    background: hexColor(value.background, "background"),
+    text: hexColor(value.text, "text"),
+  };
+}
+
+function hexColor(value: unknown, key: keyof BrandColors): string {
+  if (typeof value !== "string" || !HEX.test(value)) throw new SpecError(`brand.colors.${key} must be #RRGGBB`);
+  return value.toUpperCase();
 }
 
 function logo(value: unknown): Logo | null {
@@ -140,19 +190,26 @@ export function parseSlideSpec(value: unknown): SlideSpec {
   if (!isObject(value)) throw new SpecError("the body must be a JSON object");
   if (!isObject(value.brand)) throw new SpecError("brand must be an object");
   const count = integer(value.count, "count", 1, MAX_SLIDES);
+  const family = oneOf(value.family, FAMILIES, "family");
   return {
-    family: oneOf(value.family, FAMILIES, "family"),
+    family,
     index: integer(value.index, "index", 1, count),
     count,
     role: oneOf(value.role, ROLES, "role"),
+    layout: layout(value.layout, family),
+    emphasis: knob(value.emphasis, EMPHASES, "standard"),
+    focus: knob(value.focus, FOCUSES, "center"),
+    surface: knob(value.surface, SURFACES, "auto"),
     kicker: optionalText(value.kicker, "kicker", LIMITS.kicker),
     headline: text(value.headline, "headline", LIMITS.headline),
     body: optionalText(value.body, "body", LIMITS.body),
+    items: items(value.items),
     image: image(value.image, "image"),
     logo: logo(value.logo),
     brand: {
       name: optionalText(value.brand.name, "brand.name", LIMITS.name),
       colors: colors(value.brand.colors),
+      fonts: knob(value.brand.fonts, FONT_PAIRS, DEFAULT_FONT_PAIR),
     },
   };
 }

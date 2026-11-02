@@ -489,7 +489,11 @@ async def test_a_check_with_no_period_runs_until_it_succeeds_once(
         checks=(PeriodicCheck("flaky", None, flaky),),
     )
     await jobs.start()
-    await asyncio.sleep(0.1)
+    # Until the second run, not a fixed wait: a slow first round (a CI runner) can take 0.1 s
+    async with asyncio.timeout(2):
+        while len(runs) < 2:
+            await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)  # a few more rounds, to see the check is not run a third time
     jobs.stop()
     await background.drain(timeout_s=1)
 

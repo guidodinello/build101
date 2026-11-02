@@ -67,6 +67,7 @@ def get_conversation() -> Conversation:
         conversation.handler,
         RateLimiter(TURNS_BURST, TURNS_PER_MINUTE),
         messages_es.RATE_LIMITED,
+        background=get_background_work(),
     )
     gate = PilotGate(limited, get_pilot_list(), messages_es.waitlist(settings.assistant_name))
     return replace(conversation, handler=gate)

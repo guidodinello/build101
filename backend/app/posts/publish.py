@@ -59,13 +59,13 @@ class PostPublisher:
         sleep: Sleep = asyncio.sleep,
         *,
         background: BackgroundWork,
-        videos: PublicVideos | None = None,
+        videos: PublicVideos,
         shared_account: SharedAccountGuard | None = None,
     ) -> None:
         self._publisher = publisher
         self._posts = posts
         self._images = images
-        self._videos = videos or PublicVideos()
+        self._videos = videos
         self._public_base_url = public_base_url.rstrip("/")
         self._account_id = account_id
         self._sleep = sleep

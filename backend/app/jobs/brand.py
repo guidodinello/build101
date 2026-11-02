@@ -50,7 +50,7 @@ async def generate_brand(context: JobContext, payload: dict[str, Any]) -> dict[s
     brain = await write_brand_brain(context.model, inputs)
 
     async with context.sessions() as db:
-        business = await db.get_one(Business, business_id)
+        business = await db.get_one(Business, business_id, with_for_update=True)
         version = (
             await db.scalar(
                 select(func.max(BrandBrainVersion.version)).where(

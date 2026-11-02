@@ -39,3 +39,6 @@ supabase/.temp/
 
 # Vercel CLI link state (vercel link)
 .vercel/
+
+# Design eval renders (app.posts.design_eval)
+.design-eval/

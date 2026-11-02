@@ -8,8 +8,9 @@ from app.carousel.prompts import (
     build_panorama_prompt,
     build_slide_prompt,
     panorama_ratio,
+    resolved_layout,
 )
-from app.carousel.schemas import CarouselBrief, CarouselCopy
+from app.carousel.schemas import CarouselBrief, CarouselCopy, Layout, SlideRole, TemplateFamily
 
 
 def test_slide_prompt_has_style_scene_framing_and_rules_but_none_of_the_text(
@@ -21,7 +22,7 @@ def test_slide_prompt_has_style_scene_framing_and_rules_but_none_of_the_text(
 
     assert brief.style_prompt in prompt
     assert brief.slides[2].scene_prompt in prompt
-    assert FRAMING[("editorial", "content")] in prompt
+    assert FRAMING[("editorial", "photo-top")] in prompt
     assert "Photo 3 of 4" in prompt
     assert ANCHOR_INSTRUCTION in prompt
     assert prompt.endswith(FIXED_RULES)
@@ -37,8 +38,48 @@ def test_cover_prompt_is_not_anchored_and_framed_for_its_family(
 
     prompt = build_slide_prompt(brief, copy, 1, anchored=False)
 
-    assert FRAMING[("numbers", "cover")] in prompt
+    assert FRAMING[("numbers", "poster")] in prompt
     assert ANCHOR_INSTRUCTION not in prompt
+
+
+def test_a_slide_is_framed_for_the_layout_the_art_director_picked(
+    carousel_spec: tuple[CarouselCopy, CarouselBrief],
+) -> None:
+    copy, brief = carousel_spec
+    slides = [
+        scene.model_copy(update={"layout": "quote"}) if scene.index == 3 else scene
+        for scene in brief.slides
+    ]
+    brief = brief.model_copy(update={"slides": slides})
+
+    prompt = build_slide_prompt(brief, copy, 3, anchored=True)
+
+    assert FRAMING[("editorial", "quote")] in prompt
+    assert FRAMING[("editorial", "photo-top")] not in prompt
+
+
+@pytest.mark.parametrize(
+    ("family", "role", "layout", "items", "drawn"),
+    [
+        ("editorial", "cover", "auto", [], "overlay"),
+        ("editorial", "cover", "frame", [], "frame"),
+        ("editorial", "content", "frame", [], "photo-top"),
+        ("editorial", "cta", "quote", [], "card"),
+        ("numbers", "content", "split", [], "split"),
+        ("numbers", "cta", "auto", [], "circle"),
+        ("minimal", "cover", "type", [], "type"),
+        ("minimal", "content", "auto", [], "window-content"),
+        ("notes", "content", "auto", ["Secado natural"], "checklist"),
+        ("notes", "content", "card", ["Secado natural"], "card"),
+        ("scrapbook", "content", "taped", [], "taped"),
+        ("scrapbook", "cover", "taped", [], "polaroid"),
+        ("panorama", "content", "auto", [], "content"),
+    ],
+)
+def test_resolved_layout_matches_what_the_renderer_draws(
+    family: TemplateFamily, role: SlideRole, layout: Layout, items: list[str], drawn: str
+) -> None:
+    assert resolved_layout(family, role, layout, items) == drawn
 
 
 def test_slide_prompt_fails_when_the_brief_has_no_scene_for_the_slide(

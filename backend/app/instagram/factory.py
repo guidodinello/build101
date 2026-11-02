@@ -19,6 +19,8 @@ def build_instagram(settings: Settings) -> InstagramPort:
             )
         case "mock":
             return MockInstagram()
+        case "off":
+            raise ValueError("INSTAGRAM=off has no adapter: the connect and the import are off")
 
 
 @cache

@@ -5,6 +5,7 @@ description = "build101 backend: WhatsApp agent, jobs, image generation and publ
 requires-python = ">=3.13"
 dependencies = [
     "alembic>=1.20.0",
+    "anthropic>=2.3.0",
     "asyncpg>=0.32.0",
     "fastapi>=0.143.3",
     "google-genai>=2.31.0",

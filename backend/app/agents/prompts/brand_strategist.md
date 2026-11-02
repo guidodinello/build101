@@ -30,7 +30,7 @@ Return JSON matching the schema. All text in Rioplatense Spanish with "vos", exc
 - hashtags: 10 to 20, without spaces, mixing the niche and the location.
 - posting: posts_per_week from the questionnaire, or 3 when it is null; 2 to 5 preferred_days; preferred_time as HH:MM.
 - constraints: every "what to avoid" answer, word for word, plus any hard rule the Owner stated.
-- visual_identity: when the Owner gave colors, primary_color is the first of them and the others come from their colors and the logo palette; when they have no colors yet, use {neutral_palette} (primary, secondary, accent, background and text). photo_style describes the look of their photos for image prompts ("luz natural, madera, ambientes cálidos"). Leave logo_asset_id null: the system fills it.
+- visual_identity: when the Owner gave colors, primary_color is the first of them and the others come from their colors and the logo palette; when they have no colors yet, use {neutral_palette} (primary, secondary, accent, background and text). photo_style describes the look of their photos for image prompts ("luz natural, madera, ambientes cálidos"). font_pair is the type of every designed post, the one that matches the brand words, the audience and the logo: "serif-classic" (elegant, editorial serif; refined and premium brands), "grotesk" (bold, contemporary sans; young, energetic brands), "soft-serif" (warm, rounded serif; cafés, food, home and lifestyle), "condensed" (tall uppercase poster type; promotions, sports, urban and loud brands), "geometric" (clean, modern sans; tech, studios, minimal brands), "friendly-serif" (soft, approachable serif; family businesses, kids, crafts). Leave logo_asset_id null: the system fills it.
 
 ## whatsapp_summary
 

@@ -55,14 +55,16 @@ def build_job_runner(
     model = GeminiChat.from_api_key(settings.gemini_api_key or "", settings.gemini_chat_model)
     jobs = {
         **JOBS,
-        "import_instagram": import_instagram_job(
-            build_instagram(settings),
-            settings.instagram_import_max_posts,
-            settings.instagram_import_max_images,
-        ),
         # Silent and per niche: no Owner to notify when it fails (ADR 0025).
         "generate_niche_report": niche_report_job(model),
     }
+    # With INSTAGRAM=off the kind isn't registered: a queued import stays queued, unclaimed (#117)
+    if settings.instagram != "off":
+        jobs["import_instagram"] = import_instagram_job(
+            build_instagram(settings),
+            settings.instagram_import_max_posts,
+            settings.instagram_import_max_images,
+        )
     storage = get_storage()
     return JobRunner(
         get_sessionmaker(),

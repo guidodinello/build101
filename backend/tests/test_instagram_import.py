@@ -143,7 +143,7 @@ async def test_connecting_keeps_the_token_queues_the_import_and_returns_to_the_w
     assert jobs == ["import_instagram"]
     assert business.instagram_handle == "tunegocio"
     state = (await client.get(f"/api/o/{token}")).json()
-    assert state["instagram"] == {"status": "connected", "handle": "tunegocio"}
+    assert state["instagram"] == {"status": "connected", "handle": "tunegocio", "available": True}
 
 
 async def test_connecting_twice_updates_the_same_account(
@@ -322,6 +322,34 @@ async def test_a_forged_cookie_is_refused(client: httpx.AsyncClient) -> None:
 
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "invalid_state"
+
+
+def no_adapter() -> MockInstagram:
+    raise AssertionError("INSTAGRAM=off must not build an Instagram adapter")
+
+
+async def test_with_instagram_off_every_route_answers_unavailable_and_reads_nothing(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    token = await new_link(client)
+    off = Settings(frontend_url=FRONTEND, public_backend_url="https://api.test", instagram="off")
+    app.dependency_overrides[get_settings] = lambda: off
+    app.dependency_overrides[get_instagram] = no_adapter
+    ticket = sign_ticket(token, DEV_STATE_SECRET)
+
+    responses = [
+        await client.post(f"/api/o/{token}/instagram/connect"),
+        await client.get(f"/api/o/{token}/instagram/start", params={"ticket": ticket}),
+        await client.get("/oauth/instagram/callback", params={"code": "c", "state": "s"}),
+    ]
+
+    for response in responses:
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "instagram_unavailable"
+        assert "set-cookie" not in response.headers
+    async with sessions() as db:
+        assert (await db.scalars(select(SocialAccount))).all() == []
+        assert (await db.scalars(select(Job))).all() == []
 
 
 async def test_an_expired_or_forged_ticket_does_not_start_a_connect(

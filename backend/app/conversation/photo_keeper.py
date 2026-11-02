@@ -1,4 +1,3 @@
-import asyncio
 import uuid
 from io import BytesIO
 
@@ -10,6 +9,7 @@ from app.assets.analysis import analyze_brand_photo
 from app.db.models import AssetProduct, BrandAsset
 from app.knowledge.db import business_of
 from app.llm.client import ChatModel
+from app.media.images import decode
 from app.onboarding.uploads import asset_path, llm_copy_path
 from app.storage import ASSETS_BUCKET, StoragePort
 
@@ -68,7 +68,7 @@ async def store_photo(
     # The photo is already the agents' JPEG (prepare_reference): it is both copies.
     await storage.upload(ASSETS_BUCKET, path, photo.data, JPEG)
     await storage.upload(ASSETS_BUCKET, llm_copy_path(business_id, asset_id), photo.data, JPEG)
-    width, height = await asyncio.to_thread(image_size, photo.data)
+    width, height = await decode(image_size, photo.data)
     async with sessions() as db:
         db.add(
             BrandAsset(

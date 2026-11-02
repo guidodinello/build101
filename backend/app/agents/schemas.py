@@ -9,6 +9,10 @@ from typing import Literal
 from pydantic import BaseModel
 
 Goal = Literal["sales", "awareness", "launch", "loyalty"]
+# The renderer's curated font pairs (ADR 0035); frontend/lib/post-render/fonts.ts lists the same
+FontPair = Literal[
+    "serif-classic", "grotesk", "soft-serif", "condensed", "geometric", "friendly-serif"
+]
 Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
@@ -63,6 +67,7 @@ class VisualIdentity(BaseModel):
     text_color: str
     logo_asset_id: str | None
     photo_style: str
+    font_pair: FontPair = "serif-classic"
 
 
 class PostingPrefs(BaseModel):

@@ -39,7 +39,7 @@ export function SiteFooter() {
           </nav>
           <nav aria-label="Contacto" className="flex flex-[1_1_160px] flex-col gap-3">
             <span className="mb-1 text-xs font-semibold tracking-[0.06em] text-[#7f9a8d] uppercase">Contacto</span>
-            <a href={WHATSAPP_START_URL} className={linkClass}>
+            <a href={WHATSAPP_START_URL} target="_blank" rel="noopener noreferrer" className={linkClass}>
               WhatsApp
             </a>
           </nav>
@@ -52,16 +52,6 @@ export function SiteFooter() {
         </p>
         <div className="mt-7 flex flex-wrap gap-x-7 gap-y-2.5 border-t border-white/10 pt-5.5 text-[13px] text-[#7f9a8d]">
           <span>© 2026 Neitor AI</span>
-          <span className="sm:ml-auto">
-            El negocio y los posts de ejemplo son ilustrativos. Fotos de Shixart1985 en{" "}
-            <a
-              href="https://commons.wikimedia.org/wiki/User:Shixart1985"
-              className="underline underline-offset-2 hover:text-white"
-            >
-              Wikimedia Commons
-            </a>
-            , <a href="https://creativecommons.org/licenses/by/2.0/" className="underline underline-offset-2 hover:text-white">CC BY 2.0</a>.
-          </span>
         </div>
       </div>
     </footer>

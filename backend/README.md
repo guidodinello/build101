@@ -30,6 +30,17 @@ uv run python -m app.carousel.cli --spec tests/fixtures/carousel_spec.json \
 
 With `RENDERER=takumi` and the frontend running (`RENDERER_URL=http://localhost:3000`, `RENDERER_SECRET` = its `RENDER_SECRET`), it writes the designed `slide-N.jpg` next to each `scene-N.jpg`; with `RENDERER=mock` both are the bare scene. It also writes each slide's prompt and a `report.json` with latency, raw size and token usage per call. Live tests run with `uv run pytest -m live` (skipped without `GEMINI_API_KEY`).
 
+Compare Art Director and Design Critic models on fixed briefs, end to end, with a blind A/B page ([research/post-design/designer-agent.md](../docs/research/post-design/designer-agent.md)):
+
+```bash
+uv run python -m app.posts.design_eval run --label flash --out ../.design-eval
+uv run python -m app.posts.design_eval run --label opus --art-director claude-opus-5-5 \
+  --critic claude-opus-5-5 --out ../.design-eval
+uv run python -m app.posts.design_eval compare ../.design-eval/flash ../.design-eval/opus
+```
+
+It needs `IMAGE_GEN=gemini`, `RENDERER=takumi` with the frontend running, and `ANTHROPIC_API_KEY` for a Claude model.
+
 With the database, the job runner writes each niche's weekly Niche Report to `niche_reports` on its own ([ADR 0025](../docs/decisions/0025-weekly-niche-report.md), `app/jobs/niche.py`): it checks at start and every 15 minutes. Without the database, write this week's report of a niche to a file by hand; set `NICHE_REPORT_PATH=out/niche-report.json` and post generation gets its insights as trend notes:
 
 ```bash
@@ -104,7 +115,7 @@ Set on the service (`railway variable set KEY --stdin --service backend`, value 
 | `IMAGE_GEN` | `gemini` |
 | `PUBLISHER` | `zernio` (`mock` tells the Owner a Post is live when nothing reached Instagram) |
 | `ZERNIO_API_KEY`, `ZERNIO_ACCOUNT_ID` | the Zernio API key and the demo account every Post goes to ([ADR 0024](../docs/decisions/0024-mvp-single-demo-instagram-account.md)) |
-| `INSTAGRAM`, `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | `meta` and our Meta app's id and secret ([ADR 0028](../docs/decisions/0028-read-instagram-with-our-meta-app.md)) |
+| `INSTAGRAM`, `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` | `off` until our Meta app exists: the wizard skips Instagram and the id and secret aren't needed. Then `meta` and the Meta app's id and secret ([ADR 0028](../docs/decisions/0028-read-instagram-with-our-meta-app.md)). Unset is `mock`, which production refuses |
 | `INBOUND_HANDLER` | `chat` |
 | `VIDEO_GEN_ENABLED`, `VIDEO_GEN` | `false` while AI Reels are off ([ADR 0033](../docs/decisions/0033-ai-generated-reels-veo.md)); once on, `true` and `gemini`, with `GEMINI_VIDEO_API_KEY` |
 | `WHATSAPP_CHANNEL` | `kapso` |
@@ -114,7 +125,7 @@ Set on the service (`railway variable set KEY --stdin --service backend`, value 
 
 Settings not listed (model names, limits, base URLs) can keep their defaults.
 
-With `ENV=prod` the app refuses to start when an adapter is a demo fallback (`mock`, `INBOUND_HANDLER=echo`, `WHATSAPP_CHANNEL=simulator`) or when a key, id, number or URL of this table is unset (`GEMINI_VIDEO_API_KEY` only while `VIDEO_GEN_ENABLED=true`); `FRONTEND_URL`, `FRONTEND_ORIGINS`, `PUBLIC_BACKEND_URL` and `RENDERER_URL` must also be public URLs: not `localhost` (or a `*.localhost` name), nor a loopback or private IP address. One error names every such setting and never prints a value (`check_production` in `app/config.py`). Every start logs the adapters in use, by name only: `adapters in use: IMAGE_GEN=gemini RENDERER=takumi PUBLISHER=zernio ...`. With `ENV=local` this check is skipped and the mocks stay the defaults. `INBOUND_HANDLER=chat` still needs `GEMINI_API_KEY` and `PUBLIC_BACKEND_URL` to boot, in any environment; without `DATABASE_URL`, `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` the app boots with the job runner off (the startup log says so).
+With `ENV=prod` the app refuses to start when an adapter is a demo fallback (`mock`, `INBOUND_HANDLER=echo`, `WHATSAPP_CHANNEL=simulator`) or when a key, id, number or URL of this table is unset (`GEMINI_VIDEO_API_KEY` only while `VIDEO_GEN_ENABLED=true`, `INSTAGRAM_APP_ID` and `INSTAGRAM_APP_SECRET` only with `INSTAGRAM=meta`; `INSTAGRAM=off` is not a demo fallback); `FRONTEND_URL`, `FRONTEND_ORIGINS`, `PUBLIC_BACKEND_URL` and `RENDERER_URL` must also be public URLs: not `localhost` (or a `*.localhost` name), nor a loopback or private IP address. One error names every such setting and never prints a value (`check_production` in `app/config.py`). Every start logs the adapters in use, by name only: `adapters in use: IMAGE_GEN=gemini RENDERER=takumi PUBLISHER=zernio ...`. With `ENV=local` this check is skipped and the mocks stay the defaults. `INBOUND_HANDLER=chat` still needs `GEMINI_API_KEY` and `PUBLIC_BACKEND_URL` to boot, in any environment; without `DATABASE_URL`, `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` the app boots with the job runner off (the startup log says so).
 
 ### Migrations
 

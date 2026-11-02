@@ -3,7 +3,7 @@ from io import BytesIO
 
 from PIL import Image, ImageOps
 
-from app.media.images import POST_SIZE
+from app.media.images import POST_SIZE, decode
 
 from .base import GeneratedImage
 
@@ -29,7 +29,7 @@ class MockImageGen:
         await asyncio.sleep(self._delay_s)
         source = reference_images[0] if reference_images else style_image
         size = ratio_size(aspect_ratio) if aspect_ratio else POST_SIZE
-        data = await asyncio.to_thread(_fitted_image, source, size)
+        data = await decode(_fitted_image, source, size)
         return GeneratedImage(data=data, mime="image/jpeg", provider=PROVIDER, model=None, usage={})
 
 

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { ScreenLayout } from "@/components/onboarding/screen-layout";
 import { useWizard } from "@/components/onboarding/wizard-context";
-import { STEPS, type WizardStepId } from "@/lib/onboarding";
+import { wizardSteps, type WizardStepId } from "@/lib/onboarding";
 import { cn } from "@/lib/utils";
 
 type WizardStepProps = {
@@ -32,8 +32,9 @@ export function WizardStep({
   footer,
 }: WizardStepProps) {
   const { state, goTo } = useWizard();
-  const index = STEPS.indexOf(step);
-  const previous = STEPS[index - 1];
+  const steps = wizardSteps(state);
+  const index = steps.indexOf(step);
+  const previous = steps[index - 1];
 
   return (
     <ScreenLayout
@@ -62,7 +63,7 @@ export function WizardStep({
                 Neitor AI
               </span>
               <span className="truncate text-[13px] leading-tight font-medium text-ld-subtle">
-                Paso {index + 1} de {STEPS.length}
+                Paso {index + 1} de {steps.length}
               </span>
             </div>
             <a
@@ -75,13 +76,13 @@ export function WizardStep({
           </div>
           <div
             role="progressbar"
-            aria-label={`Paso ${index + 1} de ${STEPS.length}`}
+            aria-label={`Paso ${index + 1} de ${steps.length}`}
             aria-valuemin={1}
-            aria-valuemax={STEPS.length}
+            aria-valuemax={steps.length}
             aria-valuenow={index + 1}
             className="mt-3 flex gap-1.5 px-5"
           >
-            {STEPS.map((id, position) => (
+            {steps.map((id, position) => (
               <span
                 key={id}
                 className={cn(

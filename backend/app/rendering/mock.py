@@ -1,6 +1,6 @@
 import base64
 
-from .base import SlideRender
+from .base import RenderedSlide, SlideRender
 
 
 class MockRenderer:
@@ -9,6 +9,6 @@ class MockRenderer:
     def __init__(self) -> None:
         self.slides: list[SlideRender] = []
 
-    async def render(self, slide: SlideRender) -> bytes:
+    async def render(self, slide: SlideRender) -> RenderedSlide:
         self.slides.append(slide)
-        return base64.b64decode(slide.image.split(",", 1)[1])
+        return RenderedSlide(image=base64.b64decode(slide.image.split(",", 1)[1]))

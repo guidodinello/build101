@@ -21,7 +21,7 @@ function jpeg(bytes: Uint8Array, view: DataView): Dimensions | null {
   let offset = 2;
   while (offset + 4 <= bytes.length) {
     if (bytes[offset] !== 0xff) return null;
-    const marker = bytes[offset + 1]!;
+    const marker = view.getUint8(offset + 1);
     if (marker === 0xff) {
       offset += 1; // fill byte
       continue;

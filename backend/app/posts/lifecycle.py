@@ -13,10 +13,10 @@ this module mints. The Approval inputs (`listed`, `offered`, `has_photos`) live 
 chat asks "what may this message publish?" instead of computing it.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
-from app.conversation.approval import YES_EMOJI, Approval, asks_to_publish, decide
+from app.conversation.approval import YES_EMOJI, Approval, Offer, decide, publish_offer
 from app.conversation.photos import Photo
 
 from .store import APPROVABLE, InMemoryPosts, Post
@@ -52,8 +52,7 @@ class PostLifecycle:
         # shown, which the next turn may name by number.
         self._listed: dict[str, list[str]] = {}
         # The post the assistant's last message asked to publish, which a bare "sí" approves.
-        self._offered: dict[str, str] = {}
-        self._offered_message: dict[str, str] = {}
+        self._offered: dict[str, Offer] = {}
 
     # Reading
 
@@ -208,17 +207,16 @@ class PostLifecycle:
         """
         pending = [post.id for post in self.pending(sender)]
         target = post_id or (pending[0] if len(pending) == 1 else None)
-        if target in pending and asks_to_publish(text):
-            self._offered[sender] = target
-            self._offered_message.pop(sender, None)
+        offer = publish_offer(text)
+        if target in pending and offer != "none":
+            self._offered[sender] = Offer(target, later=offer == "approve_later")
         else:
             self._offered.pop(sender, None)
-            self._offered_message.pop(sender, None)
 
     def note_sent(self, sender: str, message_id: str) -> None:
         """Bind the publish question to the exact WhatsApp message that was delivered."""
-        if sender in self._offered:
-            self._offered_message[sender] = message_id
+        if offer := self._offered.get(sender):
+            self._offered[sender] = replace(offer, message_id=message_id)
 
     def reaction_approval(
         self,
@@ -228,18 +226,23 @@ class PostLifecycle:
         recent_photos: list[Photo],
     ) -> Approval:
         """A yes reaction approves only the Post asked about in that exact delivered message."""
-        post_id = self._offered.get(sender)
+        offer = self._offered.get(sender)
         if (
-            emoji not in YES_EMOJI
+            offer is None
+            or emoji not in YES_EMOJI
             or not target_message_id
-            or target_message_id != self._offered_message.get(sender)
-            or post_id is None
+            or target_message_id != offer.message_id
         ):
             return Approval()
+        if offer.later:
+            # Same answer as a typed "sí" to "¿Lo subo mañana?": scheduling isn't built.
+            return Approval(reason="scheduling_not_available")
         pending = self.pending(sender)
-        if post_id not in {post.id for post in pending} or photos_after(recent_photos, pending):
+        if offer.post_id not in {post.id for post in pending} or photos_after(
+            recent_photos, pending
+        ):
             return Approval()
-        return Approval(post_id=post_id)
+        return Approval(post_id=offer.post_id)
 
 
 def photos_after(photos: list[Photo], pending: list[Post]) -> list[Photo]:

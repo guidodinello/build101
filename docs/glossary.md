@@ -63,6 +63,21 @@ What the Orchestrator keeps of the older part of its conversation with the Owner
 _Avoid_: Memory, recap, context
 _Status_: draft
 
+**Template family**:
+One of the renderer's designed looks for a Post (editorial, numbers, panorama, minimal, notes, scrapbook), each with its own layouts per slide; the Art Director picks one per Post. See [ADR 0035](decisions/0035-art-director-design-rules-and-design-critic.md).
+_Avoid_: Template, theme, style
+_Status_: draft
+
+**Font pair**:
+The two typefaces every designed Post of a Business uses (one for headlines, one for text), chosen from a curated list and kept in the Brand Brain. See [ADR 0035](decisions/0035-art-director-design-rules-and-design-critic.md).
+_Avoid_: Font, typography (for the stored choice)
+_Status_: draft
+
+**Design Critic**:
+The Specialist that looks at a rendered carousel before the Owner does and asks for layout fixes or a new photo. See [ADR 0035](decisions/0035-art-director-design-rules-and-design-critic.md).
+_Avoid_: Reviewer, QA, checker
+_Status_: draft
+
 **Niche Report**:
 A weekly summary of what is working on social media in the Business's niche (themes, formats, hooks), with sources; it shapes the angle and look of Posts, never their facts. See [ADR 0025](decisions/0025-weekly-niche-report.md).
 _Avoid_: Trend report, market research, insights

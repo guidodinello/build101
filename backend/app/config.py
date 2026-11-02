@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     # Replies to the Owner (ADR 0023). INBOUND_HANDLER = chat (Gemini) | echo (no LLM)
     inbound_handler: Literal["chat", "echo"] = "chat"
     gemini_chat_model: str = "gemini-3.8-flash"
+    # The Art Director and the Design Critic (ADR 0035). Unset, they use GEMINI_CHAT_MODEL; a
+    # "claude-*" model needs ANTHROPIC_API_KEY. The critic reviews only RENDERER=takumi slides
+    art_director_model: str | None = None
+    design_critic: bool = True
+    design_critic_model: str | None = None
+    anthropic_api_key: str | None = None
     assistant_name: str = "Neitor"
     # Post images are served from here until Supabase Storage (T17); in local dev, the tunnel URL
     public_backend_url: str | None = None
@@ -89,8 +95,9 @@ class Settings(BaseSettings):
     # #185). Unset, nobody publishes with ENV=prod and everyone does elsewhere
     zernio_owner_phone: str | None = None
 
-    # Reading the Owner's Instagram through our own Meta app (ADR 0028). INSTAGRAM = meta | mock
-    instagram: Literal["meta", "mock"] = "mock"
+    # Reading the Owner's Instagram through our own Meta app (ADR 0028). INSTAGRAM = meta | mock |
+    # off; `off` turns the connect and the import off, for a deploy without a Meta app yet
+    instagram: Literal["meta", "mock", "off"] = "mock"
     instagram_app_id: str | None = None
     instagram_app_secret: str | None = None
     instagram_graph_version: str = "v24.0"
@@ -143,10 +150,11 @@ def production_problems(settings: Settings) -> dict[str, str]:
         "ZERNIO_API_KEY": settings.zernio_api_key,
         # Every Post goes to the one demo account (ADR 0024)
         "ZERNIO_ACCOUNT_ID": settings.zernio_account_id,
-        "INSTAGRAM_APP_ID": settings.instagram_app_id,
-        "INSTAGRAM_APP_SECRET": settings.instagram_app_secret,
         "WHATSAPP_BOT_NUMBER": settings.whatsapp_bot_number,
     }
+    if settings.instagram == "meta":
+        required["INSTAGRAM_APP_ID"] = settings.instagram_app_id
+        required["INSTAGRAM_APP_SECRET"] = settings.instagram_app_secret
     if settings.video_gen_enabled:
         required["GEMINI_VIDEO_API_KEY"] = settings.gemini_video_api_key
     problems |= {name: "not set" for name, value in required.items() if not (value or "").strip()}

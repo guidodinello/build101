@@ -46,3 +46,17 @@ async def test_a_reply_ending_with_the_publish_question_arms_a_bare_yes() -> Non
 
     assert "error" not in result
     assert status != "pending_approval"
+
+
+async def test_a_yes_to_publishing_later_gets_the_typed_form_s_answer() -> None:
+    result, status = await answer_with_a_yes("Quedó lindo. ¿Te parece si lo subo mañana?", "sí")
+
+    assert result == {"error": "scheduling_not_available"}
+    assert status == "pending_approval"
+
+
+async def test_a_yes_to_publishing_now_still_approves() -> None:
+    result, status = await answer_with_a_yes("¿Lo publico ya?", "sí")
+
+    assert "error" not in result
+    assert status != "pending_approval"

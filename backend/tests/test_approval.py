@@ -1,6 +1,14 @@
 import pytest
 
-from app.conversation.approval import Approval, asks_to_publish, classify, decide, is_yes, ordinal
+from app.conversation.approval import (
+    Approval,
+    Offer,
+    classify,
+    decide,
+    is_yes,
+    ordinal,
+    publish_offer,
+)
 from app.copy import messages_es
 from app.posts.store import Post, PostImage
 
@@ -214,8 +222,26 @@ def test_a_yes_with_anything_else_is_not(text: str) -> None:
         ("¿Lo subo? 👍🏽", True),
     ],
 )
-def test_asks_to_publish_spots_the_publish_question(text: str, asks: bool) -> None:
-    assert asks_to_publish(text) is asks
+def test_publish_offer_spots_the_publish_question(text: str, asks: bool) -> None:
+    assert (publish_offer(text) != "none") is asks
+
+
+@pytest.mark.parametrize(
+    ("text", "intent"),
+    [
+        ("¿Lo subo?", "approve"),
+        ("¿Lo publico ya?", "approve"),
+        ("Quedó lindo. ¿Querés subirlo ahora?", "approve"),
+        ("¿Te parece si lo subo mañana?", "approve_later"),
+        ("¿Lo subo después?", "approve_later"),
+        ("¿Lo publico el viernes?", "approve_later"),
+        ("¿Lo subo a las 8?", "approve_later"),
+        ("¿Lo subo 18:30?", "approve_later"),
+        ("Mañana tenés la feria. ¿Lo subo?", "approve"),
+    ],
+)
+def test_a_publish_question_about_later_offers_a_later_publish(text: str, intent: str) -> None:
+    assert publish_offer(text) == intent
 
 
 @pytest.mark.parametrize(
@@ -227,13 +253,13 @@ def test_asks_to_publish_spots_the_publish_question(text: str, asks: bool) -> No
     ],
 )
 def test_the_publish_questions_we_write_still_arm_a_bare_yes(text: str) -> None:
-    assert asks_to_publish(text)
+    assert publish_offer(text) == "approve"
 
 
 def test_a_yes_to_the_publish_question_approves_the_offered_post() -> None:
     pending = [pending_post("p1"), pending_post("p2")]
 
-    approval, _ = decide("dale", pending, None, has_photos=False, offered="p2")
+    approval, _ = decide("dale", pending, None, has_photos=False, offered=Offer("p2"))
 
     assert approval.post_id == "p2"
 
@@ -245,6 +271,15 @@ def test_a_yes_without_the_question_approves_nothing() -> None:
 
 
 def test_a_yes_to_a_post_no_longer_pending_is_refused() -> None:
-    approval, _ = decide("sí", [pending_post("p1")], None, has_photos=False, offered="gone")
+    approval, _ = decide("sí", [pending_post("p1")], None, has_photos=False, offered=Offer("gone"))
 
     assert approval.reason == "post_not_pending"
+
+
+def test_a_yes_to_a_later_publish_gets_the_same_answer_as_asking_for_later() -> None:
+    pending = [pending_post("p1")]
+
+    approval, _ = decide("sí", pending, None, has_photos=False, offered=Offer("p1", later=True))
+
+    assert approval == decide("subilo mañana", pending, None, has_photos=False)[0]
+    assert approval.reason == "scheduling_not_available"

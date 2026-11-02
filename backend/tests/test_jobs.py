@@ -3,6 +3,7 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -41,7 +42,7 @@ from app.jobs.queue import enqueue, retry_failed
 from app.jobs.runner import JobContext, JobRunner
 from app.jobs.setup import NOTIFY_ON_FAILURE, REQUEUE_IF_INTERRUPTED, UNDO
 from app.llm.client import Step, user_step
-from app.media.public import PublicImages
+from app.media.public import PublicImages, PublicVideos
 from app.posts.lifecycle import PostLifecycle
 from app.publishing.mock import MOCK_ACCOUNT_ID, MockPublisher
 from app.rendering.mock import MockRenderer
@@ -148,6 +149,38 @@ async def test_a_queued_job_runs_and_records_its_result(
     assert (job.status, job.result, job.error) == ("succeeded", {"done": True}, None)
     assert job.started_at and job.finished_at
     assert seen == [{"n": 1}]
+
+
+async def test_a_finalize_db_error_clears_running_id_and_marks_job_failed(
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    business = await add_business(sessions)
+    job_id = await queue(sessions, "analyze_asset", business)
+
+    async def ok(context: JobContext, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"done": True}
+
+    original_commit = AsyncSession.commit
+    commit_count = 0
+
+    async def fail_finalization_commit(self: AsyncSession) -> None:
+        nonlocal commit_count
+        commit_count += 1
+        if commit_count == 2:
+            raise SQLAlchemyError("simulated finalization commit failure")
+        await original_commit(self)
+
+    monkeypatch.setattr(AsyncSession, "commit", fail_finalization_commit)
+    jobs, background = runner(sessions, {"analyze_asset": ok}, FakeChannel())
+
+    await jobs.run_due()
+    await background.join()
+
+    job = await job_row(sessions, job_id)
+    assert jobs._running_ids == set()
+    assert job.status == "failed"
+    assert "finalization failed" in (job.error or "")
 
 
 async def test_a_failed_job_tells_the_owner_with_a_retry_button(
@@ -466,6 +499,43 @@ async def test_generate_brand_saves_a_version_and_raises_the_summary_event(
     assert events.events == [(PHONE, BrandSummaryReady("Katei", "• *Cómo hablamos:* cálidos"))]
 
 
+async def test_concurrent_brand_generations_save_distinct_versions(
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.jobs.brand as brand_job
+
+    business = await add_business(sessions)
+    both_generated = asyncio.Event()
+    generation_count = 0
+
+    async def coordinated_generation(model: Any, inputs: Any) -> Any:
+        nonlocal generation_count
+        generation_count += 1
+        if generation_count == 2:
+            both_generated.set()
+        await asyncio.wait_for(both_generated.wait(), timeout=5)
+        return brand_brain()
+
+    monkeypatch.setattr(
+        brand_job, "write_brand_brain", AsyncMock(side_effect=coordinated_generation)
+    )
+
+    first, second = await asyncio.gather(
+        generate_brand(context(sessions, business, SequenceModel([])), {}),
+        generate_brand(context(sessions, business, SequenceModel([])), {}),
+    )
+
+    assert {first["version"], second["version"]} == {1, 2}
+
+    async with sessions() as db:
+        versions = (
+            await db.scalars(select(BrandBrainVersion.version).order_by(BrandBrainVersion.version))
+        ).all()
+
+    assert versions == [1, 2]
+
+
 async def test_the_summary_reaches_the_owner_and_the_history_through_fixed_replies(
     sessions: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -520,6 +590,7 @@ async def test_a_summary_that_fails_before_the_send_fails_the_job_and_offers_a_r
             renderer=MockRenderer(),
             publisher=MockPublisher(delay_s=0),
             images=PublicImages(),
+            videos=PublicVideos(),
             background=BackgroundWork(),
             public_backend_url="https://backend.test",
             account_id=MOCK_ACCOUNT_ID,
