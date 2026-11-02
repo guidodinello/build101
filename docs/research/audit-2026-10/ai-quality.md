@@ -93,6 +93,7 @@ From the repo's own measurements: a chat turn takes 5–26 s, some over 30 s, on
 ### AIQ-4: The drafter can invent product claims and never sees the Catalog
 
 - **Severity**: high · **Effort**: S · **Confidence**: high · **Verified**: confirmed
+- **Status (2026-11-02)**: in flight, by [#284](https://github.com/guidodinello/build101/pull/284), [#246](https://github.com/guidodinello/build101/pull/246) (open, draft); details in [status.md](status.md).
 - **Evidence**:
   - [draft.md:7](../../../backend/app/posts/prompts/draft.md): the "never invent" list covers prices, discounts, dates, stock, awards and addresses, but not materials, dimensions, warranty, shipping or "hecho a mano".
   - [brand_strategist.md:20](../../../backend/app/agents/prompts/brand_strategist.md) and [asset_analyst.md:18](../../../backend/app/agents/prompts/asset_analyst.md): the other agents do forbid guessing materials.
@@ -146,6 +147,7 @@ From the repo's own measurements: a chat turn takes 5–26 s, some over 30 s, on
 ### AIQ-2: "The product is never altered" is only a prompt line: no automated QA of generated scenes
 
 - **Severity**: medium · **Effort**: M · **Confidence**: high · **Verified**: adjusted
+- **Status (2026-11-02)**: partly fixed, by [#257](https://github.com/guidodinello/build101/pull/257); details in [status.md](status.md).
 - **Evidence**:
   - [prompts.py:3-8](../../../backend/app/carousel/prompts.py): `FIXED_RULES` ("keep its shape, color, material and proportions", "no text") are the only guarantee.
   - [generator.py:137-151](../../../backend/app/carousel/generator.py): retries only when the image is blocked or missing; the output image is never inspected.
@@ -162,7 +164,7 @@ From the repo's own measurements: a chat turn takes 5–26 s, some over 30 s, on
 ### AIQ-3: The planned deterministic copy checks (prices, hashtags, length, constraints) were never built
 
 - **Severity**: medium · **Effort**: M · **Confidence**: high · **Verified**: adjusted
-- **Status (2026-10-20)**: in flight, by [#47](https://github.com/guidodinello/build101/pull/47) (open, draft), [#42](https://github.com/guidodinello/build101/pull/42) (open); details in [status.md](status.md).
+- **Status (2026-11-02)**: partly fixed, by [#284](https://github.com/guidodinello/build101/pull/284); details in [status.md](status.md).
 - **Evidence**:
   - [agents.md:481-491](../../architecture/agents.md): "Quality checks (cheap, deterministic) — run after every agent call": a price regex, hashtag rules, constraint phrases, one retry with the violations.
   - [drafts.py:132-167](../../../backend/app/posts/drafts.py): the design output is only trimmed (`fit_slides`/`clip_slots`, lines 216-236); the caption output is returned unchecked (lines 85-91, 105-111).
@@ -209,6 +211,7 @@ From the repo's own measurements: a chat turn takes 5–26 s, some over 30 s, on
 ### AIQ-8: A compound "¿Te gusta? ¿Lo subo...?" plus praise words in `YES_WORDS` lets a "sí" or "genial" publish
 
 - **Severity**: medium · **Effort**: S · **Confidence**: high · **Verified**: adjusted
+- **Status (2026-11-02)**: in flight, by [#247](https://github.com/guidodinello/build101/pull/247) (open, draft); details in [status.md](status.md).
 - **Evidence**:
   - [events.md:5](../../../backend/app/conversation/prompts/events.md): the model is told to write "¡Listo! ¿Te gusta? ¿Lo subo, o le cambio algo?".
   - [approval.py:96-98](../../../backend/app/conversation/approval.py): `asks_to_publish` only checks that a publish question appears anywhere in a message that has a `?`.
@@ -265,7 +268,7 @@ From the repo's own measurements: a chat turn takes 5–26 s, some over 30 s, on
 ### AIQ-14: The hashtag rule contradicts Instagram's 5-hashtag cap (open question, decide now)
 
 - **Severity**: medium · **Effort**: S · **Confidence**: high · **Verified**: adjusted
-- **Status (2026-10-20)**: in flight, by [#42](https://github.com/guidodinello/build101/pull/42) (open); details in [status.md](status.md).
+- **Status (2026-11-02)**: partly fixed, by [#284](https://github.com/guidodinello/build101/pull/284); details in [status.md](status.md).
 - **Evidence**:
   - [draft.md:6, 27](../../../backend/app/posts/prompts/draft.md): "5 to 10" hashtags, and "Take hashtags from its hashtags first".
   - [brand_strategist.md:30](../../../backend/app/agents/prompts/brand_strategist.md): the Brand Brain holds 10 to 20 hashtags.
@@ -281,6 +284,7 @@ From the repo's own measurements: a chat turn takes 5–26 s, some over 30 s, on
 ### AIQ-15: The onboarding promo stays in context forever as "the current offer", and the brand summary promised to "activate" it
 
 - **Severity**: medium · **Effort**: S · **Confidence**: high · **Verified**: confirmed
+- **Status (2026-11-02)**: partly fixed, by [#284](https://github.com/guidodinello/build101/pull/284); details in [status.md](status.md).
 - **Evidence**:
   - [context.py:84, 127](../../../backend/app/conversation/context.py): `current_offer` from `onboarding_data.preferences` is rendered on every turn, with no date.
   - [knowledge.md:3](../../../backend/app/conversation/prompts/knowledge.md): it is described as "the current offer"; [rules.md:1](../../../backend/app/conversation/prompts/rules.md) lets the model use facts from these blocks.
@@ -344,7 +348,7 @@ From the repo's own measurements: a chat turn takes 5–26 s, some over 30 s, on
 ### AIQ-12: Trend notes come from one static file shared by every Business and are never refreshed
 
 - **Severity**: low · **Effort**: S · **Confidence**: high · **Verified**: adjusted
-- **Status (2026-10-20)**: partly fixed, by [#63](https://github.com/guidodinello/build101/pull/63); details in [status.md](status.md).
+- **Status (2026-11-02)**: partly fixed, by [#63](https://github.com/guidodinello/build101/pull/63), [#81](https://github.com/guidodinello/build101/pull/81); details in [status.md](status.md).
 - **Evidence**:
   - [factory.py:59, 114-120](../../../backend/app/conversation/factory.py): `load_trend_notes(settings.niche_report_path)` is read once at startup and passed to `PostDrafter` and `ChatHandler` for every sender.
   - [config.py:48](../../../backend/app/config.py): a single `NICHE_REPORT_PATH` per deployment.
@@ -360,7 +364,7 @@ From the repo's own measurements: a chat turn takes 5–26 s, some over 30 s, on
 ### AIQ-13: Unescaped context blocks in the Orchestrator and drafter; third-party web text (trend notes) is the real injection path
 
 - **Severity**: low · **Effort**: S · **Confidence**: high · **Verified**: adjusted
-- **Status (2026-10-20)**: partly fixed, by [#63](https://github.com/guidodinello/build101/pull/63); details in [status.md](status.md).
+- **Status (2026-11-02)**: partly fixed, by [#63](https://github.com/guidodinello/build101/pull/63), [#231](https://github.com/guidodinello/build101/pull/231); details in [status.md](status.md).
 - **Evidence**:
   - [context.py:140-141](../../../backend/app/conversation/context.py): a local `tagged()` without escaping is used for `<business>`, `<brand_brain>`, `<catalog>`, `<owner_notes>`, `<trend_notes>` and `<conversation_summary>` (`render`, lines 97-115); the escaping version is in [prompts/\_\_init\_\_.py:10-15](../../../backend/app/prompts/__init__.py).
   - [drafts.py:183-189, 192-209](../../../backend/app/posts/drafts.py): the `brand_brain`, `owner_notes` and `<previous_version>` (brief, change) are interpolated raw into the drafter prompt.
