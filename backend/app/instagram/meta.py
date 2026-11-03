@@ -294,4 +294,6 @@ def _parse[M: BaseModel](response: httpx.Response, model: type[M]) -> M:
         if not first["loc"]:
             raise InstagramError("instagram returned an unexpected body") from exc
         field = ".".join(str(part) for part in first["loc"])
-        raise InstagramError(f"instagram response has no {field}") from exc
+        if first["type"] == "missing":
+            raise InstagramError(f"instagram response has no {field}") from exc
+        raise InstagramError(f"instagram response has an invalid {field}") from exc

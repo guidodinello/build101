@@ -24,11 +24,15 @@ def _str_or_none(value: object) -> str | None:
 
 
 def _int_or_none(value: object) -> int | None:
-    if not isinstance(value, str | int | float):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if not isinstance(value, str | int):
         return None
     try:
         return int(value)
-    except (ValueError, OverflowError):
+    except ValueError:
         return None
 
 
