@@ -172,3 +172,26 @@ def test_a_block_that_does_not_belong_to_the_kind_is_never_validated() -> None:
     payload["message"]["interactive"] = {"button_reply": {"id": 1}}
 
     assert parse_message(payload).kind == "text"
+
+
+@pytest.mark.parametrize("byte_size", [True, False, 12.7])
+def test_a_bool_or_fractional_byte_size_degrades_to_absent(byte_size: object) -> None:
+    payload = body("audio")
+    payload["message"]["kapso"]["media_data"] = {"byte_size": byte_size}
+
+    message = parse_message(payload)
+
+    assert message.audio is not None
+    assert message.audio.byte_size is None
+
+
+@pytest.mark.parametrize(
+    ("timestamp", "expected"), [("1792270000", 1792270000), (1792270000.0, 1792270000)]
+)
+def test_a_whole_timestamp_is_read_as_a_string_or_a_number(
+    timestamp: object, expected: int
+) -> None:
+    payload = body("text")
+    payload["message"]["timestamp"] = timestamp
+
+    assert parse_message(payload).timestamp == expected

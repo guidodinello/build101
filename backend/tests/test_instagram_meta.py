@@ -169,6 +169,13 @@ async def test_a_token_answer_without_an_access_token_is_an_instagram_error() ->
         await client.exchange_code("code", REDIRECT_URI)
 
 
+async def test_a_field_of_the_wrong_type_is_reported_as_invalid_not_missing() -> None:
+    client, _ = instagram(lambda request: httpx.Response(200, json={"access_token": 42}))
+
+    with pytest.raises(InstagramError, match="invalid access_token"):
+        await client.exchange_code("code", REDIRECT_URI)
+
+
 async def test_null_and_odd_optional_fields_degrade_instead_of_failing() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "api.instagram.com":
