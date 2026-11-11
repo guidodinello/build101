@@ -246,7 +246,9 @@ class InboundAudio(BaseModel):         # InboundMessage kind "audio" (voice note
     media_id: str
     mime_type: str                     # audio/ogg; codecs=opus
     byte_size: int | None
-    provider_transcript: str | None    # Kapso's message.kapso.transcript.text; None if empty or on plan B
+    transcript: str | None             # Kapso's message.kapso.transcript.text or, without it, the
+                                       # fallback transcriber's (VoiceNotes); None if neither has words
+    too_long: bool                     # over MAX_AUDIO_MB with no Kapso transcript: never transcribed
 
 class InboundMessage(BaseModel):       # app/channels/base.py; one per webhook delivery
     kind: Literal["text", "button", "image", "audio", "other"]
@@ -269,14 +271,19 @@ class DedupeStore(Protocol):
 class InboundHandler(Protocol):
     async def handle(self, message: InboundMessage, channel: ChannelPort) -> None: ...
 
-# app/transcription/base.py  (ADR 0021; TRANSCRIBE_FALLBACK = gemini | none | mock)
-class Transcript(BaseModel):
-    text: str                          # empty when there is no speech
-    source: Literal["kapso", "gemini", "mock"]
-    usage: dict                        # provider usage, logged to agent_runs (agent = "transcribe")
+# app/transcription/base.py  (ADR 0021; TRANSCRIBE_FALLBACK = gemini | none | mock; none builds no
+# transcriber). Used by app/conversation/voice_notes.py:VoiceNotes, the InboundHandler in front of
+# the onboarding gate and the chat.
+@dataclass(frozen=True, slots=True)
+class Vocabulary:                      # sent as data, so names are spelled right
+    business_name: str | None
+    products: tuple[str, ...]          # the Catalog's Product names, up to 100
 
 class TranscriberPort(Protocol):
-    async def transcribe(self, audio: bytes, mime: str) -> Transcript: ...
+    # the verbatim transcript, empty when nothing is said; raises TranscriptionError on failure.
+    # GeminiTranscriber logs bytes, audio seconds, latency and an estimated cost; agent_runs
+    # (agent = "transcribe") once that table is written
+    async def transcribe(self, audio: bytes, mime_type: str, vocabulary: Vocabulary) -> str: ...
 
 # app/publishing/base.py
 class PublishResult(BaseModel):

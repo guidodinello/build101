@@ -50,7 +50,7 @@ async def test_echo_replies_per_kind(fixture: str, reply: str) -> None:
 
 async def test_audio_without_transcript_says_so() -> None:
     incoming = message("audio")
-    incoming.audio.provider_transcript = None
+    incoming.audio.transcript = None
     channel = FakeChannel()
 
     await EchoHandler().handle(incoming, channel)

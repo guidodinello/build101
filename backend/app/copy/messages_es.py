@@ -20,6 +20,7 @@ UNSUPPORTED_MEDIA = (
     "Por ahora solo entiendo texto, audios, fotos y videos 🙏 ¿Me lo escribís o me mandás un audio?"
 )
 AUDIO_UNCLEAR = "No te llegué a entender el audio 🙈 ¿Me lo mandás de nuevo o me lo escribís?"
+AUDIO_TOO_LONG = "Ese audio es muy largo para mí 🙈 ¿Me mandás uno más corto o me lo escribís?"
 REPLY_FAILED = "Uy, se me trabó algo. ¿Me lo mandás de nuevo en un ratito?"
 STILL_WORKING = "Un segundo, ya te respondo ⏳"
 RATE_LIMITED = "Me llegaron muchos mensajes juntos 🙈 Dame un minuto y seguimos."

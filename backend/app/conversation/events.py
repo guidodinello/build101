@@ -139,6 +139,12 @@ class AudioUnclear:
 
 
 @dataclass(frozen=True, slots=True)
+class AudioTooLong:
+    def note(self) -> str:
+        return "[voice note too long] It is over the size limit, so it was not transcribed."
+
+
+@dataclass(frozen=True, slots=True)
 class UnsupportedMedia:
     def note(self) -> str:
         return "[unsupported message] The Owner sent something that is not text, audio or a photo."
@@ -309,6 +315,7 @@ Event = (
     | PublishNotConnected
     | PhotosReceived
     | AudioUnclear
+    | AudioTooLong
     | UnsupportedMedia
     | PhotoUnreadable
     | PhotoTooBig
@@ -381,6 +388,8 @@ def fallback(event: Event) -> str | None:
             return messages_es.PHOTOS_KEPT if len(ids) > 1 else messages_es.PHOTO_KEPT
         case AudioUnclear():
             return messages_es.AUDIO_UNCLEAR
+        case AudioTooLong():
+            return messages_es.AUDIO_TOO_LONG
         case UnsupportedMedia():
             return messages_es.UNSUPPORTED_MEDIA
         case PhotoUnreadable():

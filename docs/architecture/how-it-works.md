@@ -53,7 +53,7 @@ We never call Meta directly: Kapso sits in between and exposes a Meta-compatible
 1. Kapso POSTs the message. The body is capped at 256 KiB before anything else.
 2. The `X-Webhook-Signature` header is checked: an HMAC-SHA256 of the raw body with `KAPSO_WEBHOOK_SECRET`. A bad signature gets a 401.
 3. Events other than `whatsapp.message.received` get a 200 and are ignored. A 4xx would make Kapso retry.
-4. `kapso_webhook.py` turns the payload into an `InboundMessage` of kind text, button, image, audio, album or other. Voice notes arrive already transcribed by Kapso.
+4. `kapso_webhook.py` turns the payload into an `InboundMessage` of kind text, button, image, audio, album or other. Voice notes usually arrive already transcribed by Kapso.
 5. Duplicates are dropped by WhatsApp message id (an in-memory store).
 6. The backend answers 200 at once and handles the message in a background task, so Kapso never waits for the AI.
 
@@ -77,7 +77,7 @@ The states and the moves between them live in one module, `onboarding/state.py`:
 **`ChatHandler`** (`conversation/chat.py`) routes each kind of message and holds the Owner's lock; the work is in three modules it calls: `PhotoBatches` (`photo_batches.py`, the photo debounce), `Turns` (`turns.py`, one orchestrator turn) and `Toolbox` (`toolbox.py`, the tools). It treats each kind of message differently:
 
 - **Photos** are downloaded, resized, and held in a 5-second batch, because WhatsApp sends an album as one message per photo. The batch is answered when the timer fires, or together with a text that arrives meanwhile.
-- **Text and voice notes** start an LLM turn. A voice note is handled as its Kapso transcript.
+- **Text and voice notes** start an LLM turn. A voice note is handled as its Kapso transcript or, when Kapso sent none and `TRANSCRIBE_FALLBACK` is on, as the transcript `VoiceNotes` gets from Gemini before the message reaches the onboarding gate and the chat ([integrations.md § Speech-to-text](integrations.md#speech-to-text)). One over `MAX_AUDIO_MB` is an event and is never transcribed.
 - **Button taps** go to `ButtonRouter` (`conversation/button_router.py`), which acts in code (approve, discard, publish, retry) and returns an event.
 - **Anything else** (stickers, stale buttons, unreadable photos) also becomes an event.
 

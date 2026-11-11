@@ -81,6 +81,7 @@ def test_prod_refuses_to_start_on_the_mock_publisher(publisher: str | None) -> N
         ("image_gen", "mock", "IMAGE_GEN"),
         ("renderer", "mock", "RENDERER"),
         ("instagram", "mock", "INSTAGRAM"),
+        ("transcribe_fallback", "mock", "TRANSCRIBE_FALLBACK"),
         ("inbound_handler", "echo", "INBOUND_HANDLER"),
         ("whatsapp_channel", "simulator", "WHATSAPP_CHANNEL"),
     ],
@@ -274,7 +275,7 @@ def test_a_complete_production_config_starts_and_logs_the_adapters_by_name_only(
     lines = [record.getMessage() for record in caplog.records if record.name == "app.main"]
     assert (
         "adapters in use: IMAGE_GEN=gemini RENDERER=takumi PUBLISHER=zernio INSTAGRAM=meta "
-        "VIDEO_GEN=off INBOUND_HANDLER=chat WHATSAPP_CHANNEL=kapso"
+        "VIDEO_GEN=off TRANSCRIBE_FALLBACK=none INBOUND_HANDLER=chat WHATSAPP_CHANNEL=kapso"
     ) in lines
     for value in SECRETS.values():
         assert value not in caplog.text
@@ -296,7 +297,7 @@ def test_the_app_starts_locally_on_mocks_and_logs_the_adapters_by_name_only(
     lines = [record.getMessage() for record in caplog.records if record.name == "app.main"]
     assert (
         "adapters in use: IMAGE_GEN=mock RENDERER=mock PUBLISHER=mock INSTAGRAM=mock "
-        "VIDEO_GEN=off INBOUND_HANDLER=chat WHATSAPP_CHANNEL=kapso"
+        "VIDEO_GEN=off TRANSCRIBE_FALLBACK=none INBOUND_HANDLER=chat WHATSAPP_CHANNEL=kapso"
     ) in lines
     for value in SECRETS.values():
         assert value not in caplog.text
@@ -311,6 +312,7 @@ def test_the_adapters_are_named_never_their_keys() -> None:
         "PUBLISHER": "zernio",
         "INSTAGRAM": "meta",
         "VIDEO_GEN": "gemini",
+        "TRANSCRIBE_FALLBACK": "none",
         "INBOUND_HANDLER": "chat",
         "WHATSAPP_CHANNEL": "kapso",
     }
