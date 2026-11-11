@@ -8,6 +8,7 @@ from anthropic.types.beta import BetaMessageParam
 from pydantic import BaseModel, ValidationError
 
 from .client import STRUCTURED_TIMEOUT_S, Content, LLMError, ThinkingLevel
+from .usage import Usage, report_usage
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,18 @@ class ClaudeStructured:
             # `stop_reason` can be read
             raise LLMError(f"{agent}: output doesn't match {schema.__name__}: {exc}") from exc
         usage = response.usage
+        # Claude's `input_tokens` excludes the cache reads and writes, Gemini's includes them
+        cached = usage.cache_read_input_tokens or 0
+        written = usage.cache_creation_input_tokens or 0
+        report_usage(
+            Usage(
+                input_tokens=usage.input_tokens + cached + written,
+                cached_tokens=cached,
+                output_tokens=usage.output_tokens,
+                service_tier=usage.service_tier,
+                stop_reason=response.stop_reason,
+            )
+        )
         logger.info(
             "llm agent=%s model=%s stop=%s in=%s out=%s cache_read=%s latency_ms=%d",
             agent,

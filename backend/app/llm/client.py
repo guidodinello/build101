@@ -16,6 +16,8 @@ from google.genai._gaos.lib.compat_errors import GeminiNextGenAPIClientError
 from google.genai._gaos.types.basemodel import UnrecognizedStr
 from pydantic import BaseModel, ValidationError
 
+from .usage import Usage, report_usage
+
 logger = logging.getLogger(__name__)
 
 ThinkingLevel = Literal["low", "medium", "high"]
@@ -250,18 +252,34 @@ class GeminiChat:
         except (GeminiNextGenAPIClientError, errors.APIError, httpx.HTTPError) as exc:
             raise LLMError(f"{agent}: {exc}") from exc
 
-        usage = interaction.usage
+        usage = interaction_usage(interaction)
+        report_usage(usage)
         logger.info(
-            "llm agent=%s model=%s status=%s in=%s out=%s thought=%s latency_ms=%d",
+            "llm agent=%s model=%s status=%s in=%s cached=%s out=%s thought=%s tier=%s"
+            " latency_ms=%d",
             agent,
             self._model,
             interaction.status,
-            usage.total_input_tokens if usage else None,
-            usage.total_output_tokens if usage else None,
-            usage.total_thought_tokens if usage else None,
+            usage.input_tokens,
+            usage.cached_tokens,
+            usage.output_tokens,
+            usage.thought_tokens,
+            usage.service_tier,
             (time.monotonic() - started) * 1000,
         )
         return interaction
+
+
+def interaction_usage(interaction: interactions.Interaction) -> Usage:
+    usage = interaction.usage
+    return Usage(
+        input_tokens=usage.total_input_tokens if usage else None,
+        cached_tokens=usage.total_cached_tokens if usage else None,
+        thought_tokens=usage.total_thought_tokens if usage else None,
+        output_tokens=usage.total_output_tokens if usage else None,
+        service_tier=interaction.service_tier,
+        stop_reason=interaction.status,
+    )
 
 
 def response_format(schema: type[BaseModel]) -> interactions.TextResponseFormatParam:

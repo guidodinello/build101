@@ -414,15 +414,26 @@ create table agent_runs (
   input             jsonb,
   output            jsonb,
   stop_reason       text,
-  input_tokens      int,
-  output_tokens     int,
+  input_tokens      int,                              -- includes cache_read_tokens
+  output_tokens     int,                              -- excludes thought_tokens
   cache_read_tokens int,
   latency_ms        int,
   error             text,
-  created_at        timestamptz not null default now()
+  created_at        timestamptz not null default now(),
+  -- migration 0010 (#205)
+  post_id           text,                             -- no foreign key: Posts live in memory until #181
+  service_tier      text,                             -- standard | flex | priority, as the provider reported it
+  thought_tokens    int,
+  image_size        text,                             -- 1K | 2K | 4K (image_gen)
+  image_count       int,
+  video_seconds     int,                              -- Veo bills per second
+  cost_usd          numeric(12, 6)                    -- estimate at the day's price (app/llm/prices.py); null on error or with no known price
 );
 create index ix_agent_runs_business_id_created_at on agent_runs (business_id, created_at desc);
 create index ix_agent_runs_job_id on agent_runs (job_id);
+create index ix_agent_runs_created_at on agent_runs (created_at);
+-- Views (migration 0010, security_invoker): agent_run_costs_daily, agent_run_costs_monthly,
+-- agent_run_costs_by_agent, agent_run_cache_hits; see "Reading the cost views" below
 ```
 
 `updated_at` is set by the application on update (no triggers).
@@ -434,6 +445,8 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 - **Row Level Security**: on for every table in `public`, with no policies, and Supabase's `anon` and `authenticated` roles hold no grants on its tables, sequences or functions, including the ones later migrations create (migration `0007`). Supabase serves `public` through its Data API to anyone with the project's publishable key, so leaving RLS off exposed every row even though no client uses that API (2026-10-19 audit, finding SEC-1). The backend is still the only database client: it connects as `postgres`, the table owner, which RLS does not restrict. Enable RLS in the migration that creates a table, as `social_accounts` (0002) does; `tests/test_data_api_closed.py` fails otherwise. The closing covers objects `postgres` creates: Supabase's own `supabase_admin` default privileges still grant those roles anything it creates in `public`, so keep extensions in the `extensions` schema. Browser uploads don't touch `public`: the browser only writes to Storage, through a signed upload URL the backend issues for one path ([ADR 0012](../decisions/0012-catalog-content-dashboard-reels.md)).
 - **Products and Offers**: the Catalog lives in `products`, not in `onboarding_data` or the Brand Brain. The Brand Brain keeps only a featured summary that references product ids; agents read the full Catalog and the `active` Offers (not past `ends_on`) from these tables. `current_offers` no longer exists.
 - **Archiving, not deleting**: Owners archive Products, Brand assets and Offers (`archived_at`, or `status = 'archived'` for Offers). Archived rows are hidden from agents and the dashboard. Published and scheduled Posts keep their generated image or video; draft Posts (`pending_approval`, `revising`) that use archived material are flagged for review.
+- **Agent runs** (T10, [#205](https://github.com/guidodinello/build101/issues/205)): every text call (Orchestrator, post drafter, Art Director, Design Critic, Asset Analyst, Brand Strategist, Conversation summarizer, Niche Analyst), every image call (`agent = 'image_gen'`) and every Veo clip (`agent = 'video_gen'`) writes one row, failed calls included (with `error` and no cost). `app/llm/ledger.py` wraps the ports where they are built, keeps the rows in memory and writes them in batches every 5 s, so an Owner's turn pays no database time; a failed write is logged and the batch dropped. The Business, job and Post come from where the work started (the Owner's message, the job, the Post), and an Orchestrator turn's Business is looked up from the sender's phone when the batch is written. Niche Report rows have no Business. `input` and `output` stay empty unless `AGENT_RUNS_CONTENT=true` (debug only: it copies the Owner's words and the model's answers). `cost_usd` is an estimate from the dated price table in `app/llm/prices.py`; a model or image size without a price there leaves it null, never 0.
+- **Reading the cost views**: `agent_run_costs_daily` and `agent_run_costs_monthly` give each Business's runs, failed runs, unpriced runs and `cost_usd` per day or month in the Business's `timezone` (Niche Report runs are not in them). `agent_run_costs_by_agent` gives runs, failures, cost and average latency per agent and model per UTC day. `agent_run_cache_hits` gives the share of input tokens Gemini served from its implicit cache per agent and model per UTC day. What a Business cost yesterday: `select cost_usd from agent_run_costs_daily where business_id = '...' and day = current_date - 1`. The Orchestrator's cache hit rate: `select day, cache_hit_rate from agent_run_cache_hits where agent = 'orchestrator' order by day desc`. Run them in the Supabase SQL editor; an `unpriced_runs` above 0 means a model is missing from the price table.
 - **Variations**: `generate_post` writes one `post_variations` row per generated image; picking one copies its path and URL to `posts.image_path` / `image_url` and sets `variation_n`. Approval ([ADR 0007](../decisions/0007-approve-every-post.md)) applies to the picked variation; for an image Post the publisher only ever reads `posts.image_url`. Image-service cost is logged in `agent_runs` with `agent = 'image_gen'`.
 - **Carousel slides** ([ADR 0022](../decisions/0022-carousels-in-mvp.md)): a carousel (`posts.format = 'carousel'`) has no Variations and leaves `posts.image_path` / `image_url` / `variation_n` null. `generate_post` writes one `post_slides` row per slide at `posts.revision`; `redo_slides` bumps the revision, writes the redone slides and copies the unchanged rows, so each revision is a complete carousel. The publisher reads the current revision's rows in `idx` order. Images are stored at `renders/{business_id}/{post_id}-r{revision}-s{idx}.jpg`. `text_check` stays null: since [ADR 0029](../decisions/0029-designed-slides-ai-scene-code-layout.md) the templates set the text, so there is nothing to check.
 - **Video frames**: the Asset Analyst saves the best frames of a video as `photo` assets with `derived_from_asset_id` and `frame_offset_ms` set, so the Art Director can use them like any photo.
@@ -455,3 +468,4 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 | `0007` | The Data API is closed (2026-10-19 audit, finding SEC-1): RLS on every table in `public`, `alembic_version` included; every grant of `anon` and `authenticated` on tables, sequences and functions in `public` revoked, along with the default privileges `postgres` gives them there (skipped where those roles don't exist, as in CI); `PUBLIC`'s `EXECUTE` on functions in `public` revoked, and on functions `postgres` creates later. Sets a 5 s `lock_timeout`. The downgrade turns RLS off again but leaves every grant revoked |
 | `0008` | Recovering interrupted jobs ([#178](https://github.com/guidodinello/build101/issues/178), [overview.md § Background jobs](overview.md#background-jobs)): `jobs.attempts` (set to 1 on every job already started) and `jobs.retry_offered_at` (left empty on every existing job: whether its failure message reached the Owner went unrecorded, so the startup check gives a Business still stuck one more brand run rather than leave it stuck), with `ck_jobs_attempts_not_negative`. Sets a 5 s `lock_timeout` |
 | `0009` | The closed pilot (#186, audit SEC-4): `pilot_senders(phone pk, created_at)`, digits only (8 to 15), RLS on. The downgrade drops it |
+| `0010` | The agent run ledger ([#205](https://github.com/guidodinello/build101/issues/205), T10): `agent_runs.post_id`, `service_tier`, `thought_tokens`, `image_size`, `image_count`, `video_seconds` and `cost_usd`, an index on `created_at`, and the four cost views (`security_invoker`, so RLS still closes them to the Data API). Sets a 5 s `lock_timeout`. The downgrade drops the views, the index and the columns |

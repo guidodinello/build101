@@ -1,6 +1,7 @@
 import pytest
 
 from app.config import Settings
+from app.llm.ledger import MeteredVideoGen
 from app.videogen import factory
 from app.videogen.factory import build_video_gen
 from app.videogen.gemini import GeminiVideoGen
@@ -43,10 +44,14 @@ def test_gemini_with_its_own_key_builds_the_adapter() -> None:
         _env_file=None, video_gen_enabled=True, video_gen="gemini", gemini_video_api_key="k"
     )
 
-    assert isinstance(build_video_gen(settings), GeminiVideoGen)
+    video_gen = build_video_gen(settings)
+
+    assert isinstance(video_gen, MeteredVideoGen) and isinstance(video_gen.inner, GeminiVideoGen)
 
 
 def test_the_mock_is_built_when_enabled() -> None:
     settings = Settings(_env_file=None, video_gen_enabled=True, video_gen="mock")
 
-    assert isinstance(build_video_gen(settings), MockVideoGen)
+    video_gen = build_video_gen(settings)
+
+    assert isinstance(video_gen, MeteredVideoGen) and isinstance(video_gen.inner, MockVideoGen)

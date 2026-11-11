@@ -83,7 +83,14 @@ class GeminiImageGen:
                 )
             except errors.APIError as exc:
                 raise ImageGenUnavailable(f"gemini {exc.code} {exc.status}: {exc.message}") from exc
-        return parse_response(response, self._model)
+        image = parse_response(response, self._model)
+        logger.info(
+            "image model=%s size=%s usage=%s",
+            self._model,
+            image_size or self._image_size,
+            image.usage,
+        )
+        return image
 
 
 def build_contents(

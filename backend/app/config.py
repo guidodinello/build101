@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     design_critic: bool = True
     design_critic_model: str | None = None
     anthropic_api_key: str | None = None
+    # Debug only: copies the Owner's text and the model's answers into agent_runs.input/output
+    agent_runs_content: bool = False
     assistant_name: str = "Neitor"
     # Post images are served from here until Supabase Storage (T17); in local dev, the tunnel URL
     public_backend_url: str | None = None

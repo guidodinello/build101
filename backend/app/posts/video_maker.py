@@ -12,6 +12,7 @@ from app.channels.base import ChannelPort
 from app.channels.inbound import mask
 from app.conversation.events import Event, Notify, VideoFailed, VideoSent
 from app.conversation.photos import Photo, local_now
+from app.llm.ledger import scoped
 from app.media.public import PublicVideos
 from app.videogen.base import (
     VideoGenBlocked,
@@ -114,10 +115,13 @@ class VideoMaker:
         self._generating.add(sender)
         self._videos_today[sender] = (today, self._count_today(sender) + 1)
         post_id = uuid.uuid4().hex[:8]
-        self._background.start(
-            self._generate(sender, post_id, photos, caption, direction.strip(), channel, notify),
-            f"video {post_id} for {mask(sender)}",
-        )
+        with scoped(post_id=post_id):
+            self._background.start(
+                self._generate(
+                    sender, post_id, photos, caption, direction.strip(), channel, notify
+                ),
+                f"video {post_id} for {mask(sender)}",
+            )
         return {"post_id": post_id, "status": "generating"}
 
     def _count_today(self, sender: str) -> int:

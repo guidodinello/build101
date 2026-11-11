@@ -2,6 +2,7 @@ from app.config import Settings
 
 from .anthropic import ClaudeStructured
 from .client import ChatModel, GeminiChat, StructuredModel
+from .ledger import MeteredStructured, get_ledger
 
 CLAUDE_PREFIX = "claude-"
 
@@ -13,7 +14,10 @@ def build_structured(settings: Settings, model: str | None, chat: ChatModel) -> 
     if model.startswith(CLAUDE_PREFIX):
         if not settings.anthropic_api_key:
             raise ValueError(f"{model} needs ANTHROPIC_API_KEY")
-        return ClaudeStructured.from_api_key(settings.anthropic_api_key, model)
+        claude = ClaudeStructured.from_api_key(settings.anthropic_api_key, model)
+        return MeteredStructured(claude, model, get_ledger())
     if not settings.gemini_api_key:
         raise ValueError(f"{model} needs GEMINI_API_KEY")
-    return GeminiChat.from_api_key(settings.gemini_api_key, model)
+    return MeteredStructured(
+        GeminiChat.from_api_key(settings.gemini_api_key, model), model, get_ledger()
+    )

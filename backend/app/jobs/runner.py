@@ -21,6 +21,7 @@ from app.channels.base import ChannelPort
 from app.conversation.events import JobFailed, Notify
 from app.db.models import Business, Job
 from app.llm.client import ChatModel
+from app.llm.ledger import scoped
 from app.storage import StoragePort
 
 logger = logging.getLogger(__name__)
@@ -255,7 +256,8 @@ class JobRunner:
             function = self._jobs.get(kind)
             if function is None:
                 raise LookupError(f"no function for job kind {kind!r}")
-            result = await function(context, payload)
+            with scoped(job_id=job_id, business_id=business_id):
+                result = await function(context, payload)
         except asyncio.CancelledError:
             await self._interrupted(job_id, attempt)
             raise

@@ -8,6 +8,7 @@ from app.conversation.events import Notify
 from app.db.session import get_sessionmaker
 from app.instagram.factory import build_instagram
 from app.llm.client import GeminiChat
+from app.llm.ledger import MeteredChat, MeteredGrounded, get_ledger
 from app.storage import get_storage
 
 from .asset import analyze_asset
@@ -52,11 +53,14 @@ def build_job_runner(
     if missing:
         logger.warning("job runner is off: %s not set", ", ".join(missing))
         return None
-    model = GeminiChat.from_api_key(settings.gemini_api_key or "", settings.gemini_chat_model)
+    gemini = GeminiChat.from_api_key(settings.gemini_api_key or "", settings.gemini_chat_model)
+    model = MeteredChat(gemini, settings.gemini_chat_model, get_ledger())
     jobs = {
         **JOBS,
         # Silent and per niche: no Owner to notify when it fails (ADR 0025).
-        "generate_niche_report": niche_report_job(model),
+        "generate_niche_report": niche_report_job(
+            MeteredGrounded(gemini, settings.gemini_chat_model, get_ledger())
+        ),
     }
     # With INSTAGRAM=off the kind isn't registered: a queued import stays queued, unclaimed (#117)
     if settings.instagram != "off":
