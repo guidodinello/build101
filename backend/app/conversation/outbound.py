@@ -28,6 +28,7 @@ from .history import History
 logger = logging.getLogger(__name__)
 
 WHATSAPP_BODY_MAX = 1024
+WHATSAPP_CAPTION_MAX = 1024
 # What the buttons message says when the text before it already went out alone.
 POINTS_UP = "👆"
 BRAND_QUESTION = "¿Es así?"

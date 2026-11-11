@@ -15,6 +15,7 @@ from app.carousel.schemas import MAX_SLIDES, CarouselBrief, CarouselCopy
 from app.channels.base import ChannelPort
 from app.channels.inbound import mask
 from app.conversation.events import Event, Notify, PostFailed, PostSent
+from app.conversation.outbound import WHATSAPP_CAPTION_MAX
 from app.conversation.photos import InMemoryPhotos, Photo, local_now
 from app.copy import messages_es
 from app.imagegen.base import ImageGenError, ImageGenPort
@@ -33,7 +34,6 @@ from .store import Post, PostImage
 logger = logging.getLogger(__name__)
 
 MIN_SLIDES = 2
-WHATSAPP_CAPTION_MAX = 1024
 
 
 class CreatePostArgs(BaseModel):

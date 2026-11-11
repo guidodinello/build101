@@ -9,6 +9,7 @@ from PIL import Image
 from app.agents.schemas import BrandBrain
 from app.background import BackgroundWork
 from app.conversation.events import Event, Notify, PostFailed, PostSent
+from app.conversation.outbound import WHATSAPP_CAPTION_MAX
 from app.conversation.photos import LOCAL_TZ, InMemoryPhotos
 from app.imagegen.base import GeneratedImage, ImageGenBlocked
 from app.knowledge.base import BusinessKnowledge, Note
@@ -17,7 +18,7 @@ from app.media.public import PublicImages
 from app.posts.critic import DesignCritic, DesignReview, SlideReview
 from app.posts.drafts import SYSTEM_PROMPT, CarouselDraft, PostCopy, PostDrafter, SlideDraft
 from app.posts.lifecycle import PostLifecycle
-from app.posts.maker import WHATSAPP_CAPTION_MAX, PostMaker
+from app.posts.maker import PostMaker
 from app.posts.store import InMemoryPosts, Post, PostImage
 from app.rendering.base import RenderedSlide, SlideRender
 from app.rendering.mock import MockRenderer
