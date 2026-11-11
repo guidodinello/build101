@@ -30,7 +30,15 @@ from .inbound import (
     RateLimitedHandler,
     mask,
 )
-from .kapso_webhook import MESSAGE_RECEIVED_EVENT, is_stale, parse_message, verify_signature
+from .kapso_webhook import (
+    MESSAGE_FAILED_EVENT,
+    MESSAGE_RECEIVED_EVENT,
+    failed_message_id,
+    failure_codes,
+    is_stale,
+    parse_message,
+    verify_signature,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +146,9 @@ async def whatsapp_webhook(
     if not verify_signature(raw_body, x_webhook_signature, settings.kapso_webhook_secret or ""):
         raise HTTPException(status_code=401, detail="invalid signature")
 
+    if x_webhook_event == MESSAGE_FAILED_EVENT:
+        log_failed_delivery(raw_body)
+        return {"status": "logged"}
     # Other events (statuses, ...) are acknowledged and ignored: a 4xx would make Kapso retry.
     if x_webhook_event != MESSAGE_RECEIVED_EVENT:
         return {"status": "ignored"}
@@ -169,3 +180,17 @@ async def whatsapp_webhook(
         f"inbound {message.kind} {message.message_id} from {mask(message.sender)}",
     )
     return {"status": "ok"}
+
+
+def log_failed_delivery(raw_body: bytes) -> None:
+    """A message that never reached the Owner, logged with WhatsApp's error codes (#204)."""
+    try:
+        payload = json.loads(raw_body)
+    except ValueError:
+        logger.warning("unparseable %s payload", MESSAGE_FAILED_EVENT)
+        return
+    logger.warning(
+        "whatsapp delivery failed id=%s codes=%s",
+        failed_message_id(payload),
+        ",".join(failure_codes(payload)) or "unknown",
+    )

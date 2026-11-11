@@ -41,6 +41,8 @@ class Business(Base):
     onboarding_data: Mapped[dict[str, Any]] = mapped_column(server_default="{}")
     conversation_state: Mapped[dict[str, Any]] = mapped_column(server_default="{}")
     conversation_summary: Mapped[str | None]
+    # When the Owner last wrote: WhatsApp takes free-form messages only within 24 h of it (#204).
+    last_inbound_at: Mapped[datetime | None]
     channel: Mapped[str] = mapped_column(server_default="whatsapp")
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
@@ -112,6 +114,8 @@ class BrandBrainVersion(Base):
     version: Mapped[int]
     data: Mapped[dict[str, Any]]
     reason: Mapped[str]
+    # Empty while the summary waits for the Owner's next message (#204).
+    summary_sent_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 

@@ -110,7 +110,7 @@ Opened from the magic link on the owner's phone. Short, mobile-first wizard of 6
 | 5. Tu marca | Live post preview; logo upload (optional); brand colors (auto-detected from logo, editable as swatches); "¿Cómo te describirían tus clientes?" (1 to 3 word chips, suggested by category, or their own) | Colors are extracted server-side from the logo right after upload. "Todavía no tengo logo ni colores" skips logo and colors: the Brand Brain starts with neutral default colors, and Flow 13 (Could) builds them in the chat |
 | 6. Preferencias | Questionnaire (see below) | All taps except the two optional texts. With Instagram connected, the tone questions are hidden behind "Prefiero elegirlo yo" and sent as null, so the Brand Strategist learns the tone from the captions |
 | 6b. Trajimos tu feed | Grid of the photos and videos imported from the connected Instagram feed; the owner unticks what not to use | **Not built**: the import runs automatically after step 2 and its photos show in step 4's grid, where the owner can drop them ([ADR 0032](../decisions/0032-instagram-first-onboarding.md)) |
-| ¡Listo! | Summary (Products, colors, photos with how many came from Instagram, Instagram handle) + "Volver a WhatsApp" (wa.me deep link) | Submitting triggers Flow 3 |
+| ¡Listo! | Summary (Products, colors, photos with how many came from Instagram, Instagram handle) + "Volver a WhatsApp" (wa.me deep link with "Listo" already typed: sending it reopens WhatsApp's 24 h window for the summary, [#204](https://github.com/guidodinello/build101/issues/204); the header's WhatsApp link has no text) | Submitting triggers Flow 3 |
 
 Questionnaire (step 6):
 
@@ -131,7 +131,7 @@ On submit: `POST /api/o/{token}/complete` → state `generating_brand` → Flow 
 
 1. *System runs the Asset Analyst on each uploaded photo that doesn't have an analysis yet (parallel, max 5 concurrent).*
 2. *System runs the Brand Strategist with all onboarding data + asset descriptions → Brand Brain v1 (saved, versioned).*
-3. Bot sends `brand_generating` right after submit, then `brand_summary`: the Brand Strategist's short summary (tone in 3 words, audience, 3 content pillars, colors as text, the current promo if the owner gave one) + buttons `[Sí, es mi marca]` `[Corregir algo]`. State → `awaiting_brand_confirmation`.
+3. Bot sends `brand_generating` right after submit, then `brand_summary`: the Brand Strategist's short summary (tone in 3 words, audience, 3 content pillars, colors as text, the current promo if the owner gave one) + buttons `[Sí, es mi marca]` `[Corregir algo]`. State → `awaiting_brand_confirmation`. The summary goes out only inside WhatsApp's 24 h window (the Owner wrote less than 24 h ago). Otherwise, or when its send fails, it waits, and the Owner's next message (the "Listo" from the done screen, or anything else) gets it first, with its buttons, and is then answered as usual; it goes out once ([#204](https://github.com/guidodinello/build101/issues/204)).
 4. `[Sí, es mi marca]` → state `active` → bot sends `ready_open_chat` ("¡Listo, ya conozco tu marca! ¿En qué te puedo ayudar hoy?"), no buttons. The chat is open: the next message is a normal orchestrator turn (F1.10).
 5. `[Corregir algo]` → `awaiting = brand_correction` → owner writes the correction → *Brand Strategist runs in "revise" mode (Brand Brain v2)* → back to step 3 (F2.6, Could; without it the bot notes the correction and keeps the summary).
 

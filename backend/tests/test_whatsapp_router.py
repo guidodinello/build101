@@ -400,3 +400,25 @@ def test_a_40_photo_burst_reaches_the_handler_whole(monkeypatch: pytest.MonkeyPa
     photos = [m.message_id for m in inner.handled if m.kind == "image"]
     assert photos == [f"wamid.photo{n}" for n in range(40)]
     assert channel.sent == []
+
+
+def test_a_failed_delivery_is_logged_with_its_code_and_answered_200(
+    client: TestClient, handler: RecordingHandler, caplog: pytest.LogCaptureFixture
+) -> None:
+    raw = json.dumps(
+        {
+            "message": {
+                "id": "wamid.OUT",
+                "status": "failed",
+                "kapso": {"statuses": [{"errors": [{"code": 131047, "title": "Re-engage"}]}]},
+            },
+            "phone_number_id": "123",
+        }
+    ).encode()
+
+    with caplog.at_level(logging.WARNING):
+        response = send(client, raw, signature=sign(raw, SECRET), event="whatsapp.message.failed")
+
+    assert response.status_code == 200
+    assert "whatsapp delivery failed id=wamid.OUT codes=131047" in caplog.text
+    assert handler.handled == []

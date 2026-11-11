@@ -58,6 +58,7 @@ create table businesses (
   conversation_state jsonb not null default '{}',    -- {"awaiting": "post_feedback", "post_id": "..."}; the onboarding keys ("awaiting": "brand_correction", "resume_state") are written only by backend/app/onboarding/state.py
   conversation_summary text,                         -- the orchestrator's summary of the steps compacted out of conversation_steps (ADR 0030, migration 0003)
   channel            text not null default 'whatsapp',
+  last_inbound_at    timestamptz,                    -- when the Owner last wrote: free-form WhatsApp messages only within 24 h of it (#204, migration 0010)
   plan               text not null default 'free',   -- future billing
   monthly_post_quota int  not null default 30,       -- future billing, not enforced
   created_at         timestamptz not null default now(),
@@ -173,6 +174,7 @@ create table brand_brains (
   version      int  not null,
   data         jsonb not null,                        -- BrandBrain
   reason       text not null,
+  summary_sent_at timestamptz,                        -- when its WhatsApp summary went out; empty while it waits for the Owner's next message (#204, migration 0010)
   created_at   timestamptz not null default now(),
   constraint uq_brand_brains_business_id_version unique (business_id, version),
   constraint ck_brand_brains_reason check (reason in ('onboarding','correction','chat_update')),
@@ -455,3 +457,4 @@ create index ix_agent_runs_job_id on agent_runs (job_id);
 | `0007` | The Data API is closed (2026-10-19 audit, finding SEC-1): RLS on every table in `public`, `alembic_version` included; every grant of `anon` and `authenticated` on tables, sequences and functions in `public` revoked, along with the default privileges `postgres` gives them there (skipped where those roles don't exist, as in CI); `PUBLIC`'s `EXECUTE` on functions in `public` revoked, and on functions `postgres` creates later. Sets a 5 s `lock_timeout`. The downgrade turns RLS off again but leaves every grant revoked |
 | `0008` | Recovering interrupted jobs ([#178](https://github.com/guidodinello/build101/issues/178), [overview.md § Background jobs](overview.md#background-jobs)): `jobs.attempts` (set to 1 on every job already started) and `jobs.retry_offered_at` (left empty on every existing job: whether its failure message reached the Owner went unrecorded, so the startup check gives a Business still stuck one more brand run rather than leave it stuck), with `ck_jobs_attempts_not_negative`. Sets a 5 s `lock_timeout` |
 | `0009` | The closed pilot (#186, audit SEC-4): `pilot_senders(phone pk, created_at)`, digits only (8 to 15), RLS on. The downgrade drops it |
+| `0010` | The brand summary and WhatsApp's 24 h window ([#204](https://github.com/guidodinello/build101/issues/204), audit BUG-6): `businesses.last_inbound_at` (empty on every existing Business, which counts as outside the window until the Owner writes) and `brand_brains.summary_sent_at` (set to `created_at` on every existing version: those summaries went out when saved). Sets a 5 s `lock_timeout`. The downgrade drops both |
