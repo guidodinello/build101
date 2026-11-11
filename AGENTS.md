@@ -94,7 +94,7 @@ Not every change walks all seven steps: a typo fix goes straight to 5. Anything 
 - **When**: the branch is ready for others.
 - **Steps**:
   1. Open a PR using the [template](.github/pull_request_template.md). Link the issue (`Closes #N`) and the relevant ADR or research.
-  2. Reviewer reviews against this file, accepted ADRs and the rules; author answers every thread (fix, decline with reason, or clarify).
+  2. Reviewer reviews against this file, every ADR that isn't superseded (proposed or accepted, so [ADR 0007](docs/decisions/0007-approve-every-post.md) always counts) and the rules; author answers every thread (fix, decline with reason, or clarify).
   3. Enforced on `main` by a GitHub ruleset: the **`CI` check must pass** and **every review thread must be resolved**, so every change lands through a PR (direct pushes to `main` are rejected). Approvals are not required: authors may merge their own PRs once `CI` is green and the threads are resolved ([how to resolve them](docs/workflow.md#review-comments-step-7)). Team convention: **squash merge**.
 - **Done when**: every thread is answered and resolved, `CI` is green, step 7 done.
 - **AI review (Tenki)**: requested automatically, once per PR, only when the PR changes code (`.py`, `.ts`, `.tsx`, `.js`, `.jsx`; see [`tenki-review.yml`](.github/workflows/tenki-review.yml)). Docs-only PRs get no AI review, to save credits; comment `@tenki-reviewer` to ask for one anyway, or to re-review after pushes.

@@ -145,7 +145,7 @@ Redeploy the previous deployment from the Railway dashboard (service, Deployment
 
 ### One instance
 
-State kept in memory is lost on every deploy or restart: the progress of jobs still running at the shutdown deadline, or when the process dies (the brand job and photo analyses start over once, [#178](https://github.com/guidodinello/build101/issues/178)), the webhook dedupe store when there is no `DATABASE_URL` (with one it is the `inbound_deliveries` table), served post images (`/media/*.jpg`) and the in-memory photo and post stores. The orchestrator's history, its conversation summary and the Owner's notes are in Postgres ([ADR 0028](../docs/decisions/0030-orchestrator-memory-and-context.md)), and so are the chat photos once kept as Brand assets. Keep one replica ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)).
+State kept in memory is lost on every deploy or restart: the progress of jobs still running at the shutdown deadline, or when the process dies (the brand job and photo analyses start over once, [#178](https://github.com/guidodinello/build101/issues/178)), the webhook dedupe store when there is no `DATABASE_URL` (with one it is the `inbound_deliveries` table), served post images (`/media/*.jpg`) and the in-memory photo and post stores. The orchestrator's history, its conversation summary and the Owner's notes are in Postgres ([ADR 0030](../docs/decisions/0030-orchestrator-memory-and-context.md)), and so are the chat photos once kept as Brand assets. Keep one replica ([ADR 0005](../docs/decisions/0005-single-instance-in-process-jobs.md)).
 
 ### Switching WhatsApp between Railway and local development
 
