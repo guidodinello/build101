@@ -1,10 +1,16 @@
 import asyncio
 import logging
 import time
-from typing import Any, Self
+from typing import Literal, Self, TypeGuard, get_args
 
 import anthropic
-from anthropic.types.beta import BetaMessageParam
+from anthropic.types.beta import (
+    BetaBase64ImageSourceParam,
+    BetaImageBlockParam,
+    BetaMessageParam,
+    BetaTextBlockParam,
+)
+from google.genai import interactions
 from pydantic import BaseModel, ValidationError
 
 from .client import STRUCTURED_TIMEOUT_S, Content, LLMError, ThinkingLevel
@@ -15,16 +21,31 @@ MAX_TOKENS = 16_000
 # Server-side refusal fallbacks ("default" routes by refusal category); Haiku has none
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 NO_FALLBACK_PREFIX = "claude-haiku"
+# The image types the SDK's BetaBase64ImageSourceParam accepts
+ClaudeMediaType = Literal["image/jpeg", "image/png", "image/gif", "image/webp"]
+CLAUDE_MEDIA_TYPES = frozenset(get_args(ClaudeMediaType))
 
 
-def claude_content(block: Content) -> dict[str, Any]:
+def claude_content(block: Content) -> BetaImageBlockParam | BetaTextBlockParam:
     """A Gemini-shaped content block (app/llm/client.py) as a Messages API block."""
     if block["type"] == "image":
-        source = {"type": "base64", "media_type": block.get("mime_type"), "data": block.get("data")}
-        return {"type": "image", "source": source}
+        return {"type": "image", "source": image_source(block)}
     if block["type"] == "text":
         return {"type": "text", "text": block["text"]}
     raise ValueError(f"unsupported content block for Claude: {block['type']}")
+
+
+def image_source(block: interactions.ImageContentParam) -> BetaBase64ImageSourceParam:
+    media_type, data = block.get("mime_type"), block.get("data")
+    if not is_claude_media_type(media_type) or data is None:
+        raise ValueError(f"unsupported image for Claude: {media_type}")
+    return {"type": "base64", "media_type": media_type, "data": data}
+
+
+# TypeGuard, not TypeIs: Gemini's mime type includes UnrecognizedStr, a str subclass that TypeIs
+# keeps, and that would hide a typo in ClaudeMediaType from pyright.
+def is_claude_media_type(mime_type: str | None) -> TypeGuard[ClaudeMediaType]:
+    return mime_type in CLAUDE_MEDIA_TYPES
 
 
 class ClaudeStructured:
@@ -50,7 +71,7 @@ class ClaudeStructured:
         schema: type[T],
         thinking_level: ThinkingLevel,
     ) -> T:
-        blocks: list[Any] = [claude_content(block) for block in content]
+        blocks = [claude_content(block) for block in content]
         messages: list[BetaMessageParam] = [{"role": "user", "content": blocks}]
         fallback = not self._model.startswith(NO_FALLBACK_PREFIX)
         started = time.monotonic()

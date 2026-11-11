@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.background import BackgroundWork
 from app.channels.base import ChannelPort
 from app.channels.inbound import mask
-from app.conversation.events import Event, Notify, VideoFailed, VideoSent
+from app.conversation.events import Event, Notify, VideoFailed, VideoFailureReason, VideoSent
 from app.conversation.photos import Photo, local_now
 from app.media.public import PublicVideos
 from app.videogen.base import (
@@ -179,7 +179,7 @@ class VideoMaker:
         await notify(sender, event, channel)
 
 
-def failure_reason(error: Exception) -> str:
+def failure_reason(error: Exception) -> VideoFailureReason:
     match error:
         case VideoGenBlocked():
             return "blocked"

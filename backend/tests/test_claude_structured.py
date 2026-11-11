@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from app.config import Settings
 from app.conversation.factory import design_critic
 from app.llm.anthropic import FALLBACK_BETA, ClaudeStructured, claude_content
-from app.llm.client import GeminiChat, LLMError, image_content, text_content
+from app.llm.client import Content, GeminiChat, LLMError, image_content, text_content
 from app.llm.factory import build_structured
 from app.posts.critic import DesignCritic
 from tests.fakes import ScriptedModel
@@ -46,6 +46,16 @@ def test_content_blocks_become_messages_api_blocks() -> None:
     assert image["type"] == "image"
     assert image["source"]["type"] == "base64"
     assert image["source"]["media_type"] == "image/jpeg"
+
+
+@pytest.mark.parametrize(
+    "block",
+    [image_content(b"tiff", "image/tiff"), {"type": "image", "mime_type": "image/png"}],
+    ids=["unsupported_type", "no_data"],
+)
+def test_an_image_claude_cannot_read_is_refused_before_the_call(block: Content) -> None:
+    with pytest.raises(ValueError, match="unsupported image"):
+        claude_content(block)
 
 
 async def test_a_structured_call_sends_the_effort_and_server_side_fallbacks() -> None:

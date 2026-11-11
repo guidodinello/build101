@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, assert_never
 
 from .schemas import CarouselBrief, CarouselCopy, Layout, SlideRole, SlideScene, TemplateFamily
 
@@ -169,8 +169,10 @@ def resolved_layout(
             return "card"
         case "scrapbook", "content" if layout == "taped":
             return "taped"
-        case _:
+        case "scrapbook", _:
             return "polaroid"
+        case _:
+            assert_never(family)
 
 
 def framing(family: TemplateFamily, layout: ResolvedLayout) -> str:
