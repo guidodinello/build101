@@ -149,9 +149,10 @@ class PostPublisher:
                 ai_generated=True,  # every Post.video is a Veo clip (ADR 0033): Instagram labels it
             )
         urls = [self._public_base_url + image.path for image in post.images]
+        alt_texts = _alt_texts(post)
         if post.format == "image":
-            return PublishMedia(format="image", url=urls[0])
-        return PublishMedia(format="carousel", urls=urls)
+            return PublishMedia(format="image", url=urls[0], alt_texts=alt_texts)
+        return PublishMedia(format="carousel", urls=urls, alt_texts=alt_texts)
 
     async def _attempt(self, post: Post, account_id: str) -> PublishResult:
         """Publish with the same idempotency key every time, so a retry can't post twice.
@@ -207,3 +208,15 @@ class PostPublisher:
         # The chat handler takes the sender's lock, so the Owner reads "lo subo" first and the
         # note lands after the turn that started this publish.
         await notify(post.sender, event, channel)
+
+
+def _alt_texts(post: Post) -> list[str]:
+    """A design's text lives in its pixels, so each Slide's headline is its alt text.
+
+    Photos as they are have no headlines: Instagram describes those itself.
+    """
+    if len(post.headlines) != len(post.images):
+        return []
+    if len(post.images) == 1:
+        return list(post.headlines)
+    return [f"Diapositiva {n}: {headline}" for n, headline in enumerate(post.headlines, start=1)]

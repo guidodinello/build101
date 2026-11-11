@@ -135,6 +135,34 @@ async def test_publish_image() -> None:
     }
 
 
+async def test_alt_texts_go_out_per_image_and_are_capped() -> None:
+    publisher, requests = publisher_with(
+        lambda request: httpx.Response(201, json=post_body("published"))
+    )
+    urls = [f"https://img.test/s{i}.jpg" for i in (1, 2, 3)]
+    media = PublishMedia(format="carousel", urls=urls, alt_texts=["uno", "  ", "x" * 1500])
+
+    await publisher.publish(ACCOUNT_ID, "x", media)
+
+    items = json.loads(requests[0].content)["mediaItems"]
+    assert items[0]["altText"] == "uno"
+    assert "altText" not in items[1]
+    assert len(items[2]["altText"]) == 1000
+
+
+async def test_a_single_image_carries_its_alt_text() -> None:
+    publisher, requests = publisher_with(
+        lambda request: httpx.Response(201, json=post_body("published"))
+    )
+
+    await publisher.publish(
+        ACCOUNT_ID, "x", IMAGE.model_copy(update={"alt_texts": ["Mesa de roble"]})
+    )
+
+    [item] = json.loads(requests[0].content)["mediaItems"]
+    assert item["altText"] == "Mesa de roble"
+
+
 async def test_publish_carousel_keeps_slide_order() -> None:
     urls = [f"https://img.test/s{i}.jpg" for i in (3, 1, 2)]
     publisher, requests = publisher_with(
