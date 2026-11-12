@@ -100,6 +100,9 @@ class Settings(BaseSettings):
     instagram: Literal["meta", "mock", "off"] = "mock"
     instagram_app_id: str | None = None
     instagram_app_secret: str | None = None
+    # Comma-separated Owner numbers allowed to connect with INSTAGRAM=meta: our Meta app reads
+    # only Instagram testers until App Review (#199). `*` allows everyone; mock allows everyone
+    instagram_connect_senders: str = ""
     instagram_graph_version: str = "v24.0"
     instagram_import_max_posts: int = 100
     instagram_import_max_images: int = 24

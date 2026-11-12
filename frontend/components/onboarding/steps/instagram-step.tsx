@@ -11,14 +11,29 @@ import { useWizard } from "@/components/onboarding/wizard-context";
 import { messageOf, onboardingApi } from "@/lib/api";
 import { atHandle, isInstagramConnected } from "@/lib/onboarding";
 
-const CONNECT_FAILED = "No pude conectar tu Instagram. Probá de nuevo.";
+const CONNECT_FAILED = "No pude conectar tu Instagram. Probá de nuevo, o seguí sin Instagram y subí tus fotos.";
+const PROFESSIONAL_HELP_URL = "https://help.instagram.com/502981923235522";
+
+// What the backend's callback says went wrong (`?connected=0&reason=...`).
+const RETURN_ERRORS: Record<string, string> = {
+  denied:
+    "Cancelaste el permiso en Instagram. Si querés, probá de nuevo, o seguí sin Instagram y subí tus fotos.",
+  unreadable:
+    "Instagram se conectó, pero no pude leer tu cuenta. Tiene que ser una cuenta profesional (de empresa o de creador) y tenés que haber aceptado la invitación de prueba que te mandamos. Revisalo y probá de nuevo, o seguí sin Instagram.",
+};
+
+function returnError(reason: string | null) {
+  return (reason && RETURN_ERRORS[reason]) ?? CONNECT_FAILED;
+}
 
 export function InstagramStep() {
   const { token, state, setState, goTo } = useWizard();
   const searchParams = useSearchParams();
   const returned = searchParams.get("connected");
   const [connecting, setConnecting] = useState(returned === "1");
-  const [error, setError] = useState<string | null>(returned === "0" ? CONNECT_FAILED : null);
+  const [error, setError] = useState<string | null>(
+    returned === "0" ? returnError(searchParams.get("reason")) : null,
+  );
   const refreshed = useRef(false);
 
   useEffect(() => {
@@ -98,17 +113,30 @@ export function InstagramStep() {
           </div>
         </div>
       ) : (
-        <ul className="flex flex-col gap-4">
-          <Reassurance icon={<MessageCircleCheckIcon className="size-5" aria-hidden />}>
-            Nunca publico nada sin que lo apruebes por WhatsApp.
-          </Reassurance>
-          <Reassurance icon={<LockIcon className="size-5" aria-hidden />}>
-            Entrás desde la página de Instagram. Nunca veo tu contraseña.
-          </Reassurance>
-          <Reassurance icon={<SparklesIcon className="size-5" aria-hidden />}>
-            Traigo tus fotos y tus textos para aprender tu estilo y lo que le gusta a tu gente.
-          </Reassurance>
-        </ul>
+        <div className="flex flex-col gap-5">
+          <p className="rounded-[18px] bg-primary-soft p-4 text-[15px] leading-snug">
+            Necesitás una cuenta profesional de Instagram (de empresa o de creador). Cambiar es gratis.{" "}
+            <a
+              href={PROFESSIONAL_HELP_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold underline underline-offset-3"
+            >
+              Cómo cambiarla
+            </a>
+          </p>
+          <ul className="flex flex-col gap-4">
+            <Reassurance icon={<MessageCircleCheckIcon className="size-5" aria-hidden />}>
+              Nunca publico nada sin que lo apruebes por WhatsApp.
+            </Reassurance>
+            <Reassurance icon={<LockIcon className="size-5" aria-hidden />}>
+              Entrás desde la página de Instagram. Nunca veo tu contraseña.
+            </Reassurance>
+            <Reassurance icon={<SparklesIcon className="size-5" aria-hidden />}>
+              Traigo tus fotos y tus textos para aprender tu estilo y lo que le gusta a tu gente.
+            </Reassurance>
+          </ul>
+        </div>
       )}
 
       {!connected && failed && !connecting && (

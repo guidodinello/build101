@@ -232,6 +232,17 @@ The Owner connects their Instagram in wizard step 2 ([ADR 0032](../decisions/003
 
 **Meta setup:** add the *Instagram API with Instagram Login* product to the app, add the Owner's account (Business or Creator) as an **Instagram Tester** and accept the invite from the account, and register `{PUBLIC_BACKEND_URL}/oauth/instagram/callback` as a valid OAuth redirect URI. Meta matches it exactly, so a deploy sets `PUBLIC_BACKEND_URL`. Without App Review this is Standard Access: it works only for accounts with a role on the app. Serving any other Business needs Advanced Access, App Review and Business Verification ([overview](https://developers.facebook.com/documentation/instagram-platform/overview.md), [App Review](https://developers.facebook.com/documentation/instagram-platform/app-review.md), read 2026-10-18).
 
+**Who may connect ([#199](https://github.com/guidodinello/build101/issues/199)).** With `INSTAGRAM=meta`, only the Owners whose numbers are in `INSTAGRAM_CONNECT_SENDERS` see the wizard's Instagram step (`instagram.available` in the onboarding state); for any other Business the wizard goes from the business step to products, and `/connect` and the `start` hop answer `403 instagram_not_allowed`. A callback for a Business taken off the list since its start hop connects nothing and returns to the wizard. `*` opens the connect to everyone, for once App Review passes. `INSTAGRAM=mock` lets everyone connect. A change is a Railway variable, not a code change.
+
+**Pilot checklist, before the wizard link is sent** (the Owner gets the link when they write their business name, so do this before giving them the number):
+
+1. **Professional account.** Check, with the Owner, that their Instagram is a Business or Creator account (Instagram app → Configuración y actividad → Tipo de cuenta y herramientas). If it is personal, they switch: it is free and can be undone ([Instagram help](https://help.instagram.com/502981923235522), read 2026-11-12). A private account becomes public when it switches.
+2. **Tester invite sent.** In the Meta app dashboard, add the account as an **Instagram Tester** on the app's Roles page.
+3. **Invite accepted.** The Owner accepts it from the account, on the web at `instagram.com/accounts/manage_access/` (Apps y sitios web → Invitaciones de prueba → Aceptar); an invite can take a few minutes to show up ([third-party guide](https://help.appmiral.com/instagram-integration), read 2026-11-12; not confirmed in Meta's own docs, so check the path the first time). Send them a short guide in Spanish with a screenshot of each screen, and confirm they accepted before going on.
+4. **Business marked as allowed.** Add the Owner's WhatsApp number to `INSTAGRAM_CONNECT_SENDERS` in Railway.
+
+An Owner left out still finishes the wizard by uploading 3 photos.
+
 **Calls** ([Business Login](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login), read 2026-10-18):
 
 ```python
