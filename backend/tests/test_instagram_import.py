@@ -170,7 +170,7 @@ async def test_a_refused_consent_returns_to_the_wizard_without_connecting(
         headers=binding_cookie(started),
     )
 
-    assert response.headers["location"].endswith("?step=instagram&connected=0")
+    assert response.headers["location"].endswith("?step=instagram&connected=0&reason=denied")
     async with sessions() as db:
         assert await db.scalar(select(SocialAccount)) is None
 
@@ -241,7 +241,7 @@ async def test_a_callback_without_the_cookie_is_refused(
     )
 
     assert response.status_code == 400
-    assert response.json()["error"]["code"] == "invalid_state"
+    assert "Se venció la conexión con Instagram" in response.text
     async with sessions() as db:
         assert await db.scalar(select(SocialAccount)) is None
 
@@ -262,7 +262,7 @@ async def test_a_callback_with_another_browsers_cookie_is_refused(
     )
 
     assert response.status_code == 400
-    assert response.json()["error"]["code"] == "invalid_state"
+    assert "Se venció la conexión con Instagram" in response.text
     assert_cookie_cleared(response)
     async with sessions() as db:
         assert await db.scalar(select(SocialAccount)) is None
@@ -321,7 +321,7 @@ async def test_a_forged_cookie_is_refused(client: httpx.AsyncClient) -> None:
     )
 
     assert response.status_code == 400
-    assert response.json()["error"]["code"] == "invalid_state"
+    assert "Se venció la conexión con Instagram" in response.text
 
 
 def no_adapter() -> MockInstagram:
@@ -779,3 +779,161 @@ async def test_a_callback_waiting_on_the_submit_imports_nothing_once_it_commits(
     async with sessions() as db:
         assert await db.scalar(select(SocialAccount)) is None
         assert (await db.scalars(select(Job.kind))).all() == []
+
+
+def meta_settings(**update: Any) -> Settings:
+    """Our Meta app, in development mode: only the Businesses in INSTAGRAM_CONNECT_SENDERS."""
+    return Settings(
+        enable_dev_endpoints=True,
+        dev_token="dev-secret",
+        frontend_url=FRONTEND,
+        public_backend_url="https://api.test",
+        whatsapp_bot_number="59800000000",
+        instagram="meta",
+        instagram_app_id="app",
+        instagram_app_secret="app-secret",
+        **update,
+    )
+
+
+def use_settings(settings: Settings) -> None:
+    app.dependency_overrides[get_settings] = lambda: settings
+
+
+async def test_a_business_not_allowed_never_gets_the_instagram_step_or_a_link(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    use_settings(meta_settings(instagram_connect_senders="59811111111"))
+    token = await new_link(client)
+    ticket = sign_ticket(token, "app-secret")
+
+    state = (await client.get(f"/api/o/{token}")).json()
+    connected = await client.post(f"/api/o/{token}/instagram/connect")
+    started = await client.get(f"/api/o/{token}/instagram/start", params={"ticket": ticket})
+
+    assert state["instagram"]["available"] is False
+    assert connected.status_code == 403
+    assert connected.json()["error"]["code"] == "instagram_not_allowed"
+    assert "auth_url" not in connected.text
+    assert started.status_code == 403
+    assert "set-cookie" not in started.headers
+    async with sessions() as db:
+        assert await db.scalar(select(SocialAccount)) is None
+
+
+@pytest.mark.parametrize("allowed", ["+598 99 123 456", "59811111111, 59899123456", "*"])
+async def test_configuration_alone_allows_one_business_or_everyone(
+    client: httpx.AsyncClient, allowed: str
+) -> None:
+    use_settings(meta_settings(instagram_connect_senders=allowed))
+    token = await new_link(client)
+
+    state = (await client.get(f"/api/o/{token}")).json()
+    connected = await client.post(f"/api/o/{token}/instagram/connect")
+
+    assert state["instagram"]["available"] is True
+    assert connected.status_code == 200
+    assert "auth_url" in connected.json()
+
+
+async def test_with_the_mock_every_business_can_connect(client: httpx.AsyncClient) -> None:
+    token = await new_link(client)
+
+    state = (await client.get(f"/api/o/{token}")).json()
+    connected = await connect(client, token)
+
+    assert state["instagram"]["available"] is True
+    assert connected.headers["location"].endswith("connected=1")
+
+
+async def test_a_callback_for_a_business_no_longer_allowed_connects_nothing(
+    client: httpx.AsyncClient, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    use_settings(meta_settings(instagram_connect_senders="59899123456"))
+    token = await new_link(client)
+    started = await start(client, token)
+    use_settings(meta_settings())
+
+    response = await client.get(
+        "/oauth/instagram/callback",
+        params=callback_params(started, code="c"),
+        headers=binding_cookie(started),
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"{FRONTEND}/o/{token}"
+    assert_cookie_cleared(response)
+    async with sessions() as db:
+        assert await db.scalar(select(SocialAccount)) is None
+        assert (await db.scalars(select(Job.kind))).all() == []
+
+
+class FailingExchange(MockInstagram):
+    async def exchange_code(self, code: str, redirect_uri: str) -> Any:
+        raise InstagramError("400 from Instagram", status=400)
+
+
+class FailingProfile(MockInstagram):
+    async def profile(self, access_token: str) -> InstagramProfile:
+        raise InstagramError("not a professional account", status=400)
+
+
+@pytest.mark.parametrize("adapter", [FailingExchange, FailingProfile])
+async def test_a_failed_exchange_or_profile_read_returns_saying_the_account_was_unreadable(
+    client: httpx.AsyncClient,
+    sessions: async_sessionmaker[AsyncSession],
+    adapter: type[MockInstagram],
+) -> None:
+    token = await new_link(client)
+    started = await start(client, token)
+    app.dependency_overrides[get_instagram] = adapter
+
+    response = await client.get(
+        "/oauth/instagram/callback",
+        params=callback_params(started, code="c"),
+        headers=binding_cookie(started),
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == (
+        f"{FRONTEND}/o/{token}?step=instagram&connected=0&reason=unreadable"
+    )
+    async with sessions() as db:
+        assert await db.scalar(select(SocialAccount)) is None
+
+
+def assert_readable_expired_page(response: httpx.Response) -> None:
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith("text/html")
+    assert '"error"' not in response.text
+    assert "Se venció la conexión con Instagram" in response.text
+    assert 'href="https://wa.me/59800000000"' in response.text
+    assert "Volver a WhatsApp" in response.text
+
+
+async def test_a_callback_from_another_browser_shows_a_readable_page_with_whatsapp(
+    client: httpx.AsyncClient,
+) -> None:
+    use_settings(meta_settings(instagram_connect_senders="*"))
+    token = await new_link(client)
+    started = await start(client, token)
+
+    response = await client.get(
+        "/oauth/instagram/callback", params=callback_params(started, code="c")
+    )
+
+    assert_readable_expired_page(response)
+    assert_cookie_cleared(response)
+
+
+async def test_a_start_hop_with_an_expired_ticket_shows_a_readable_page_with_whatsapp(
+    client: httpx.AsyncClient,
+) -> None:
+    use_settings(meta_settings(instagram_connect_senders="*"))
+    token = await new_link(client)
+    expired = sign_ticket(token, "app-secret", now=1)
+
+    response = await client.get(f"/api/o/{token}/instagram/start", params={"ticket": expired})
+
+    assert_readable_expired_page(response)
+    assert "set-cookie" not in response.headers

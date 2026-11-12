@@ -111,7 +111,8 @@ class Asset(BaseModel):
 class Instagram(BaseModel):
     status: Literal["not_connected", "pending", "connected", "error"]
     handle: str | None
-    # False with INSTAGRAM=off: the wizard leaves out its Instagram step
+    # False with INSTAGRAM=off, or when this Business may not connect yet (#199): the wizard
+    # leaves out its Instagram step
     available: bool
 
 

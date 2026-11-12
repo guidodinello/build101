@@ -24,6 +24,7 @@ from app.config import Settings, get_settings
 from app.conversation.events import BrandGenerating, Notify
 from app.db.models import AssetProduct, BrandAsset, Business, MagicLink, Product, SocialAccount
 from app.db.session import get_session
+from app.instagram.access import connect_allowed
 from app.jobs.queue import enqueue
 from app.onboarding import schemas
 from app.onboarding.links import hash_token
@@ -745,7 +746,7 @@ async def _instagram(
         .order_by(SocialAccount.updated_at.desc())
         .limit(1)
     )
-    available = settings.instagram != "off"
+    available = connect_allowed(settings, business.owner_phone)
     if account is None:
         return schemas.Instagram(
             status="not_connected", handle=business.instagram_handle, available=available
